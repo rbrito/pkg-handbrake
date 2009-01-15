@@ -1,0 +1,115 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+include /usr/share/quilt/quilt.make
+
+DEB_HOST_GNU_TYPE   ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
+DEB_BUILD_GNU_TYPE  ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+
+ifneq ($(DEB_HOST_GNU_TYPE),$(DEB_BUILD_GNU_TYPE))
+	CROSS= --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE)
+else
+	CROSS= --build $(DEB_BUILD_GNU_TYPE)
+endif
+
+configure: configure-stamp
+configure-stamp: debian/stamp-patched
+	dh_testdir
+
+	cd gtk && ./autogen.sh
+
+	./configure $(CROSS) --prefix=/usr CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
+	cd gtk && ./configure --prefix=/usr CFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
+
+
+# CCFLAGS="$(CFLAGS)" LDFLAGS="-Wl,-z,defs"
+
+	touch $@
+
+build: build-stamp
+build-stamp: configure-stamp
+	dh_testdir
+
+#	jam
+
+	$(MAKE)
+	$(MAKE) -C gtk
+
+	touch $@
+
+clean: unpatch
+	dh_testdir
+	dh_testroot
+	rm -f build-stamp configure-stamp
+
+	touch libhb/hbversion.h
+
+	[ ! -f Makefile ] || $(MAKE) clean
+	cd gtk && [ ! -f gtk/Makefile ] || $(MAKE) distclean
+
+	rm -rf contrib/a52dec*
+	rm -rf contrib/ffmpeg*
+	rm -rf contrib/libdca*
+	rm -rf contrib/libmp4v2*
+	rm -rf contrib/mpeg2dec*
+	rm -rf contrib/x264*
+
+	rm -rf contrib/lib
+	rm -rf contrib/include
+	rm -rf contrib/bin
+	rm -rf contrib/share
+	rm -rf contrib/man
+
+	rm -rf gtk/src/.deps
+
+	dh_clean libhb/.depend gtk/src/*.o gtk/src/create_resources \
+	gtk/src/preset_xlat gtk/src/HandBrakeCLI gtk/src/quotestring \
+	gtk/src/makewidgetdeps gtk/src/ghb config.jam contrib/config.jam \
+	gtk/src/Makefile gtk/po/Makefile gtk/config.guess gtk/config.sub \
+	gtk/configure gtk/ltmain.sh gtk/aclocal.m4 gtk/depcomp gtk/install-sh \
+	gtk/src/Makefile.in gtk/Makefile gtk/Makefile.in gtk/config.h \
+	gtk/config.h.in gtk/config.log gtk/libtool gtk/config.status \
+	gtk/libtool gtk/missing gtk/mkinstalldirs gtk/po/Makefile.in \
+	gtk/po/Makefile.in.in gtk/po/POTFILES gtk/stamp-h1
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs
+
+	$(MAKE) -C gtk install prefix=$(CURDIR)/debian/tmp/usr
+
+	rm -rf debian/tmp/usr/share/doc/ghb
+	-rm debian/tmp/usr/share/icons/hicolor/icon-theme.cache
+
+	dh_install --fail-missing
+
+# Build architecture-independent files here.
+binary-indep: install
+# We have nothing to do by default.
+
+# Build architecture-dependent files here.
+binary-arch: install
+	dh_testdir
+	dh_testroot
+	dh_installchangelogs 
+	dh_installdocs
+	dh_icons -phandbrake-gtk
+	dh_desktop -phandbrake-gtk
+	dh_link
+	dh_strip
+	dh_compress
+	dh_fixperms
+#	dh_makeshlibs
+	dh_installdeb
+	dh_shlibdeps
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install 

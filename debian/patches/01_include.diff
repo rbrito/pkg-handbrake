@@ -1,0 +1,16 @@
+Index: handbrake-0.9.3/libhb/Makefile
+===================================================================
+--- handbrake-0.9.3.orig/libhb/Makefile	2008-12-13 18:47:33.000000000 +0100
++++ handbrake-0.9.3/libhb/Makefile	2008-12-13 18:47:33.000000000 +0100
+@@ -45,9 +45,9 @@
+ 	CONTRIBS += ../contrib/lib/libz.a ../contrib/lib/libbz2.a
+ endif
+ 
+-CFLAGS += -I../contrib/include -D__LIBHB__ -DUSE_PTHREAD $(SYSDEF) -Wall -g -O3 -funroll-loops
++CFLAGS += -I/usr/include -I../contrib/include -D__LIBHB__ -DUSE_PTHREAD $(SYSDEF) -Wall -g -O3 -funroll-loops
+ 
+-CXXFLAGS += -I../contrib/include -D__LIBHB__ -DUSE_PTHREAD $(SYSDEF)
++CXXFLAGS += -I/usr/include -I../contrib/include -D__LIBHB__ -DUSE_PTHREAD $(SYSDEF)
+ 
+ ifeq ($(findstring CYGWIN_NT,$(SYSTEM)),CYGWIN_NT)
+ all: libhb.a libhb.dll

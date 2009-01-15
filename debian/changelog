@@ -1,0 +1,15 @@
+handbrake (0.9.3-0.1) unstable; urgency=low
+
+  * Don't Build-Depends on libgtk2.0-dev, libgtkhtml3.14-dev already depends
+    on that package.
+  * Add call for dh_icons and dh_desktop for handbrake-gtk package.
+  * Add a symlink handbrake-gtk -> ghb
+
+ -- Christian Marillat <marillat@debian.org>  Thu, 15 Jan 2009 16:01:39 +0100
+
+handbrake (0.9.3-0.0) unstable; urgency=low
+
+  * Initial release.
+  * Added copyright from Ubuntu.
+
+ -- Christian Marillat <marillat@debian.org>  Sat, 13 Dec 2008 18:00:44 +0100
