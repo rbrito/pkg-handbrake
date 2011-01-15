@@ -18,6 +18,26 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
+#if defined( __GNUC__ ) && !(defined( _WIN32 ) || defined( __MINGW32__ ))
+#   define HB_WPRINTF(s,v) __attribute__((format(printf,s,v)))
+#else
+#   define HB_WPRINTF(s,v)
+#endif
+
+#if defined( SYS_MINGW )
+#   define fseek fseeko64
+#   define ftell ftello64
+#   undef  fseeko
+#   define fseeko fseeko64
+#   undef  ftello
+#   define ftello ftello64
+#   define flockfile(...)
+#   define funlockfile(...)
+#   define getc_unlocked getc
+#   undef  off_t
+#   define off_t off64_t
+#endif
+
 #ifndef MIN
 #define MIN( a, b ) ( (a) > (b) ? (b) : (a) )
 #endif
@@ -27,7 +47,8 @@
 
 #define EVEN( a )        ( (a) + ( (a) & 1 ) )
 #define MULTIPLE_16( a ) ( 16 * ( ( (a) + 8 ) / 16 ) )
-#define MULTIPLE_MOD( a, b ) ( b * ( ( (a) + (b / 2) - 1) / b ) )
+#define MULTIPLE_MOD( a, b ) ((b==1)?a:( b * ( ( (a) + (b / 2) - 1) / b ) ))
+#define MULTIPLE_MOD_DOWN( a, b ) ((b==1)?a:( b * ( (a) / b ) ))
 
 #define HB_DVD_READ_BUFFER_SIZE 2048
 
@@ -41,6 +62,9 @@ typedef struct hb_chapter_s hb_chapter_t;
 typedef struct hb_audio_s hb_audio_t;
 typedef struct hb_audio_config_s hb_audio_config_t;
 typedef struct hb_subtitle_s hb_subtitle_t;
+typedef struct hb_subtitle_config_s hb_subtitle_config_t;
+typedef struct hb_attachment_s hb_attachment_t;
+typedef struct hb_metadata_s hb_metadata_t;
 typedef struct hb_state_s hb_state_t;
 typedef union  hb_esconfig_u     hb_esconfig_t;
 typedef struct hb_work_private_s hb_work_private_t;
@@ -79,6 +103,13 @@ void hb_audio_config_init(hb_audio_config_t * audiocfg);
 int hb_audio_add(const hb_job_t * job, const hb_audio_config_t * audiocfg);
 hb_audio_config_t * hb_list_audio_config_item(hb_list_t * list, int i);
 
+hb_subtitle_t *hb_subtitle_copy(const hb_subtitle_t *src);
+int hb_subtitle_add(const hb_job_t * job, const hb_subtitle_config_t * subtitlecfg, int track);
+int hb_srt_add(const hb_job_t * job, const hb_subtitle_config_t * subtitlecfg, 
+               const char *lang);
+
+hb_attachment_t *hb_attachment_copy(const hb_attachment_t *src);
+
 struct hb_rate_s
 {
     char * string;
@@ -93,6 +124,18 @@ struct hb_mixdown_s
     int    amixdown;
 };
 
+struct hb_subtitle_config_s
+{
+    enum subdest { RENDERSUB, PASSTHRUSUB } dest;
+    int  force;
+    int  default_track; 
+    
+    /* SRT subtitle tracks only */
+    char src_filename[256];
+    char src_codeset[40];
+    int64_t offset;
+};
+
 #define HB_VIDEO_RATE_BASE   27000000
 
 extern hb_rate_t    hb_video_rates[];
@@ -102,11 +145,16 @@ extern int          hb_audio_rates_count;
 extern int          hb_audio_rates_default;
 extern hb_rate_t    hb_audio_bitrates[];
 extern int          hb_audio_bitrates_count;
-extern int          hb_audio_bitrates_default;
 extern hb_mixdown_t hb_audio_mixdowns[];
 extern int          hb_audio_mixdowns_count;
 int hb_mixdown_get_mixdown_from_short_name( const char * short_name );
 const char * hb_mixdown_get_short_name_from_mixdown( int amixdown );
+int hb_get_best_mixdown( uint32_t codec, int layout, int mixdown );
+int hb_get_default_mixdown( uint32_t codec, int layout );
+int hb_find_closest_audio_bitrate(int bitrate);
+void hb_get_audio_bitrate_limits(uint32_t codec, int samplerate, int mixdown, int *low, int *high);
+int hb_get_best_audio_bitrate( uint32_t codec, int bitrate, int samplerate, int mixdown);
+int hb_get_default_audio_bitrate( uint32_t codec, int samplerate, int mixdown );
 
 /******************************************************************************
  * hb_job_t: settings to be filled by the UI
@@ -118,6 +166,7 @@ struct hb_job_s
 
     /* Pointer to the title to be ripped */
     hb_title_t    * title;
+    int             feature; // Detected DVD feature title
 
     /* Chapter selection */
     int             chapter_start;
@@ -129,14 +178,14 @@ struct hb_job_s
     /* Picture settings:
          crop:                must be multiples of 2 (top/bottom/left/right)
          deinterlace:         0 or 1
-         width:               must be a multiple of 16
-         height:              must be a multiple of 16
+         width:               must be a multiple of 2
+         height:              must be a multiple of 2
          keep_ratio:          used by UIs
          grayscale:           black and white encoding
          pixel_ratio:         store pixel aspect ratio in the video
          pixel_aspect_width:  numerator for pixel aspect ratio
          pixel_aspect_height: denominator for pixel aspect ratio
-         modulus:             set a number besides 16 for dimensions to be multiples of
+         modulus:             set a number for dimensions to be multiples of
          maxWidth:            keep width below this
          maxHeight:           keep height below this */
     int             crop[4];
@@ -146,9 +195,18 @@ struct hb_job_s
     int             height;
     int             keep_ratio;
     int             grayscale;
-    int             pixel_ratio;
-    int             pixel_aspect_width;
-    int             pixel_aspect_height;
+
+    struct
+    {
+        int             mode;
+        int             itu_par;
+        int             par_width;
+        int             par_height;
+        int             dar_width;  // 0 if normal
+        int             dar_height; // 0 if normal
+        int             keep_display_aspect;
+    } anamorphic;
+
     int             modulus;
     int             maxWidth;
     int             maxHeight;
@@ -160,19 +218,14 @@ struct hb_job_s
                             except with x264, to use its real QP/RF scale
          vbitrate:          output bitrate (kbps)
          vrate, vrate_base: output framerate is vrate / vrate_base
-         vfr:               boolean for variable frame rate detelecine
-         cfr:               boolean to use constant frame rates instead of
-                            passing through the source's frame durations.
+         cfr:               0 (vfr), 1 (cfr), 2 (pfr) [see render.c]
          pass:              0, 1 or 2 (or -1 for scan)
-         h264_level:        vestigial boolean to decide if we're encoding for iPod
-         crf:               boolean for whether to use constant rate factor with x264
          x264opts:          string of extra x264 options
          areBframes:        boolean to note if b-frames are included in x264opts */
 #define HB_VCODEC_MASK   0x0000FF
 #define HB_VCODEC_FFMPEG 0x000001
-#define HB_VCODEC_XVID   0x000002
-#define HB_VCODEC_X264   0x000004
-#define HB_VCODEC_THEORA 0x000008
+#define HB_VCODEC_X264   0x000002
+#define HB_VCODEC_THEORA 0x000004
 
     int             vcodec;
     float           vquality;
@@ -182,9 +235,6 @@ struct hb_job_s
     int             vfr;
     int             cfr;
     int             pass;
-    int             h264_13;
-    int             h264_level;
-    int             crf;
     char            *x264opts;
     int             areBframes;
     int             color_matrix;
@@ -192,21 +242,14 @@ struct hb_job_s
     /* List of audio settings. */
     hb_list_t     * list_audio;
 
-    /* Subtitle settings:
-         subtitle: index in hb_title_t's subtitles list, starting
-         from 0. -1 means no subtitle */
-    int             subtitle;
-    int             subtitleSmartAdjust;
+    /* Subtitles */
+    hb_list_t     * list_subtitle;
 
     /* Muxer settings
          mux:  output file format
          file: file path */
 #define HB_MUX_MASK 0xFF0000
 #define HB_MUX_MP4  0x010000
-#define HB_MUX_PSP  0x020000
-#define HB_MUX_AVI  0x040000
-#define HB_MUX_OGM  0x080000
-#define HB_MUX_IPOD 0x100000
 #define HB_MUX_MKV  0x200000
 
     int             mux;
@@ -217,15 +260,19 @@ struct hb_job_s
     int             mp4_optimize;
     int             ipod_atom;
 
-    int indepth_scan;
-    hb_subtitle_t ** select_subtitle;
-    int subtitle_force;
-    char * native_language;
+    int                     indepth_scan;
+    hb_subtitle_config_t    select_subtitle_config;
 
+    int             angle;              // dvd angle to encode
+    int             frame_to_start;     // declare eof when we hit this frame
+    int64_t         pts_to_start;       // drop frames until  we pass this pts 
+                                        //  in the time-linearized input stream
+    int             frame_to_stop;      // declare eof when we hit this frame
     int64_t         pts_to_stop;        // declare eof when we pass this pts in
                                         //  the time-linearized input stream
     int             start_at_preview;   // if non-zero, encoding will start
-                                        //  at the position of preview n (1-10)
+                                        //  at the position of preview n
+    int             seek_points;        //  out of N previews
     uint32_t        frames_to_skip;     // decode but discard this many frames
                                         //  initially (for frame accurate positioning
                                         //  to non-I frames).
@@ -237,6 +284,9 @@ struct hb_job_s
     volatile int  * die;
     volatile int    done;
 
+    uint64_t        st_pause_date;
+    uint64_t        st_paused;
+
     hb_fifo_t     * fifo_mpeg2;   /* MPEG-2 video ES */
     hb_fifo_t     * fifo_raw;     /* Raw pictures */
     hb_fifo_t     * fifo_sync;    /* Raw pictures, framerate corrected */
@@ -244,7 +294,6 @@ struct hb_job_s
     hb_fifo_t     * fifo_mpeg4;   /* MPEG-4 video ES */
 
     hb_thread_t   * reader;
-    hb_thread_t   * muxer;
 
     hb_list_t     * list_work;
 
@@ -256,15 +305,21 @@ struct hb_job_s
 
 /* Audio starts here */
 /* Audio Codecs */
-#define HB_ACODEC_MASK   0x00FF00
-#define HB_ACODEC_FAAC   0x000100
-#define HB_ACODEC_LAME   0x000200
-#define HB_ACODEC_VORBIS 0x000400
-#define HB_ACODEC_AC3    0x000800
-#define HB_ACODEC_MPGA   0x001000
-#define HB_ACODEC_LPCM   0x002000
-#define HB_ACODEC_DCA    0x004000
-#define HB_ACODEC_FFMPEG 0x008000
+#define HB_ACODEC_MASK      0x000FFF00
+#define HB_ACODEC_FAAC      0x00000100
+#define HB_ACODEC_LAME      0x00000200
+#define HB_ACODEC_VORBIS    0x00000400
+#define HB_ACODEC_AC3       0x00000800
+#define HB_ACODEC_MPGA      0x00001000
+#define HB_ACODEC_LPCM      0x00002000
+#define HB_ACODEC_DCA       0x00004000
+#define HB_ACODEC_FFMPEG    0x00008000
+#define HB_ACODEC_CA_AAC    0x00010000
+#define HB_ACODEC_PASS_FLAG 0x40000000
+#define HB_ACODEC_PASS_MASK (HB_ACODEC_AC3 | HB_ACODEC_DCA)
+#define HB_ACODEC_AC3_PASS  (HB_ACODEC_AC3 | HB_ACODEC_PASS_FLAG)
+#define HB_ACODEC_DCA_PASS  (HB_ACODEC_DCA | HB_ACODEC_PASS_FLAG)
+#define HB_ACODEC_ANY       (HB_ACODEC_MASK | HB_ACODEC_PASS_FLAG)
 
 /* Audio Mixdown */
 /* define some masks, used to extract the various information from the HB_AMIXDOWN_XXXX values */
@@ -315,6 +370,7 @@ struct hb_job_s
 #define HB_INPUT_CH_LAYOUT_2F2R    0x0722022
 #define HB_INPUT_CH_LAYOUT_3F2R    0x0832032
 #define HB_INPUT_CH_LAYOUT_4F2R    0x0942042
+#define HB_INPUT_CH_LAYOUT_3F4R    0x0a34034
 #define HB_INPUT_CH_LAYOUT_HAS_LFE 0x0000100
 /* define some macros to extract the various information from the HB_AMIXDOWN_XXXX values */
 #define HB_INPUT_CH_LAYOUT_GET_DISCRETE_FRONT_COUNT( a ) ( ( a & HB_INPUT_CH_LAYOUT_DISCRETE_FRONT_MASK ) >> 16 )
@@ -346,6 +402,7 @@ struct hb_audio_config_s
     {
         int track;                /* Input track number */
         PRIVATE uint32_t codec;   /* Input audio codec */
+        PRIVATE uint32_t stream_type; /* stream type from source stream */
         PRIVATE uint32_t codec_param; /* per-codec config info */
         PRIVATE uint32_t version; /* Bitsream version */
         PRIVATE uint32_t mode;    /* Bitstream mode, codec dependent encoding */
@@ -389,6 +446,7 @@ struct hb_audio_s
 
         hb_esconfig_t config;
         hb_mux_data_t * mux_data;
+        hb_fifo_t     * scan_cache;
     } priv;
 };
 #endif
@@ -396,11 +454,13 @@ struct hb_audio_s
 struct hb_chapter_s
 {
     int      index;
+    int      pgcn;
+    int      pgn;
     int      cell_start;
     int      cell_end;
-    int      block_start;
-    int      block_end;
-    int      block_count;
+    uint64_t block_start;
+    uint64_t block_end;
+    uint64_t block_count;
 
     /* Visual-friendly duration */
     int      hours;
@@ -414,12 +474,56 @@ struct hb_chapter_s
     char     title[1024];
 };
 
+/*
+ * A subtitle track.
+ * 
+ * Required fields when a demuxer creates a subtitle track are:
+ * > id
+ *     - ID of this track
+ *     - must be unique for all tracks within a single job,
+ *       since it is used to look up the appropriate in-FIFO with GetFifoForId()
+ * > format
+ *     - format of the packets the subtitle decoder work-object sends to sub->fifo_raw
+ *     - for passthru subtitles, is also the format of the final packets sent to sub->fifo_out
+ *     - PICTURESUB for banded 8-bit YAUV pixels; see decvobsub.c documentation for more info
+ *     - TEXTSUB for UTF-8 text marked up with <b>, <i>, or <u>
+ *     - read by the muxers, and by the subtitle burn-in logic in the hb_sync_video work-object
+ * > source
+ *     - used to create the appropriate subtitle decoder work-object in do_job()
+ * > config.dest
+ *     - whether to render the subtitle on the video track (RENDERSUB) or 
+ *       to pass it through its own subtitle track in the output container (PASSTHRUSUB)
+ *     - all newly created non-VOBSUB tracks should default to PASSTHRUSUB
+ *     - all newly created VOBSUB tracks should default to RENDERSUB, for legacy compatibility
+ * > lang
+ *     - user-readable description of the subtitle track
+ *     - may correspond to the language of the track (see the 'iso639_2' field)
+ *     - may correspond to the type of track (see the 'type' field; ex: "Closed Captions")
+ * > iso639_2
+ *     - language code for the subtitle, or "und" if unknown
+ */
 struct hb_subtitle_s
 {
     int  id;
+    int  track;
+
+    hb_subtitle_config_t config;
+
+    enum subtype { PICTURESUB, TEXTSUB } format;
+    enum subsource { VOBSUB, SRTSUB, CC608SUB, /*unused*/CC708SUB, UTF8SUB, TX3GSUB, SSASUB } source;
     char lang[1024];
     char iso639_2[4];
     uint8_t type; /* Closed Caption, Childrens, Directors etc */
+    
+    // Color lookup table for VOB subtitle tracks. Each entry is in YCbCr format.
+    // Must be filled out by the demuxer for VOB subtitle tracks.
+    uint32_t    palette[16];
+    int         width;
+    int         height;
+    
+    // Codec private data for subtitles originating from FFMPEG sources
+    uint8_t *   extradata;
+    int         extradata_size;
 
     int hits;     /* How many hits/occurrences of this subtitle */
     int forced_hits; /* How many forced hits in this subtitle */
@@ -427,22 +531,54 @@ struct hb_subtitle_s
 #ifdef __LIBHB__
     /* Internal data */
     hb_fifo_t * fifo_in;  /* SPU ES */
-    hb_fifo_t * fifo_raw; /* Decodec SPU */
+    hb_fifo_t * fifo_raw; /* Decoded SPU */
+    hb_fifo_t * fifo_sync;/* Synced */
+    hb_fifo_t * fifo_out; /* Correct Timestamps, ready to be muxed */
+    hb_mux_data_t * mux_data;
 #endif
+};
+
+/*
+ * An attachment.
+ * 
+ * These are usually used for attaching embedded fonts to movies containing SSA subtitles.
+ */
+struct hb_attachment_s
+{
+    enum attachtype { FONT_TTF_ATTACH } type;
+    char *  name;
+    char *  data;
+    int     size;
+};
+
+struct hb_metadata_s 
+{
+    char  name[255];
+    char  artist[255];
+    char  composer[255];
+    char  release_date[255];
+    char  comment[1024];
+    char  album[255];
+    char  genre[255];
+    uint32_t coverart_size;
+    uint8_t *coverart;
 };
 
 struct hb_title_s
 {
-    char        dvd[1024];
+    enum { HB_DVD_TYPE, HB_BD_TYPE, HB_STREAM_TYPE } type;
+    uint32_t    reg_desc;
+    char        path[1024];
     char        name[1024];
     int         index;
     int         vts;
     int         ttn;
     int         cell_start;
     int         cell_end;
-    int         block_start;
-    int         block_end;
-    int         block_count;
+    uint64_t    block_start;
+    uint64_t    block_end;
+    uint64_t    block_count;
+    int         angle_count;
 
     /* Visual-friendly duration */
     int         hours;
@@ -461,26 +597,31 @@ struct hb_title_s
     int         rate;
     int         rate_base;
     int         crop[4];
-    enum { HB_MPEG2_DEMUXER = 0, HB_NULL_DEMUXER } demuxer;
+    enum { HB_MPEG2_PS_DEMUXER = 0, HB_MPEG2_TS_DEMUXER, HB_NULL_DEMUXER } demuxer;
     int         detected_interlacing;
+    int         pcr_pid;                /* PCR PID for TS streams */
     int         video_id;               /* demuxer stream id for video */
     int         video_codec;            /* worker object id of video codec */
+    uint32_t    video_stream_type;      /* stream type from source stream */
     int         video_codec_param;      /* codec specific config */
-    int         flaky_clock;            /* can lose reference clock */
-                                        /* (for over-the-air transport streams) */
     const char  *video_codec_name;
     int         video_bitrate;
     const char  *container_name;
     int         data_rate;
 
-    uint32_t    palette[16];
+    hb_metadata_t *metadata;
 
     hb_list_t * list_chapter;
     hb_list_t * list_audio;
     hb_list_t * list_subtitle;
+    hb_list_t * list_attachment;
 
     /* Job template for this title */
     hb_job_t  * job;
+
+    uint32_t    flags;
+                // set if video stream doesn't have IDR frames
+#define         HBTF_NO_IDR (1 << 0)
 };
 
 
@@ -493,6 +634,7 @@ struct hb_state_s
 #define HB_STATE_PAUSED   16
 #define HB_STATE_WORKDONE 32
 #define HB_STATE_MUXING   64
+#define HB_STATE_SEARCHING 128
     int state;
 
     union
@@ -588,7 +730,10 @@ struct hb_work_object_s
     hb_esconfig_t     * config;
 
     /* Pointer hb_audio_t so we have access to the info in the audio worker threads. */
-    hb_audio_t *audio;
+    hb_audio_t        * audio;
+
+    /* Pointer hb_subtitle_t so we have access to the info in the subtitle worker threads. */
+    hb_subtitle_t     * subtitle;
 
     hb_work_private_t * private_data;
 
@@ -596,18 +741,25 @@ struct hb_work_object_s
     volatile int      * done;
     int                 status;
     int                 codec_param;
+    hb_title_t        * title;
 
     hb_work_object_t  * next;
-	int				  thread_sleep_interval;
+    int                 thread_sleep_interval;
 #endif
 };
 
-extern hb_work_object_t hb_sync;
+extern hb_work_object_t hb_sync_video;
+extern hb_work_object_t hb_sync_audio;
 extern hb_work_object_t hb_decmpeg2;
-extern hb_work_object_t hb_decsub;
+extern hb_work_object_t hb_decvobsub;
+extern hb_work_object_t hb_encvobsub;
+extern hb_work_object_t hb_deccc608;
+extern hb_work_object_t hb_decsrtsub;
+extern hb_work_object_t hb_decutf8sub;
+extern hb_work_object_t hb_dectx3gsub;
+extern hb_work_object_t hb_decssasub;
 extern hb_work_object_t hb_render;
 extern hb_work_object_t hb_encavcodec;
-extern hb_work_object_t hb_encxvid;
 extern hb_work_object_t hb_encx264;
 extern hb_work_object_t hb_enctheora;
 extern hb_work_object_t hb_deca52;
@@ -620,6 +772,9 @@ extern hb_work_object_t hb_declpcm;
 extern hb_work_object_t hb_encfaac;
 extern hb_work_object_t hb_enclame;
 extern hb_work_object_t hb_encvorbis;
+extern hb_work_object_t hb_muxer;
+extern hb_work_object_t hb_encca_aac;
+extern hb_work_object_t hb_encac3;
 
 #define FILTER_OK      0
 #define FILTER_DELAY   1
@@ -645,14 +800,29 @@ struct hb_filter_object_s
 #endif
 };
 
+#define HB_FILTER_DETELECINE    1
+#define HB_FILTER_DEINTERLACE   2
+#define HB_FILTER_DEBLOCK       3
+#define HB_FILTER_DENOISE       4
+#define HB_FILTER_DECOMB        5
+#define HB_FILTER_ROTATE        6
+
 extern hb_filter_object_t hb_filter_detelecine;
 extern hb_filter_object_t hb_filter_deinterlace;
 extern hb_filter_object_t hb_filter_deblock;
 extern hb_filter_object_t hb_filter_denoise;
 extern hb_filter_object_t hb_filter_decomb;
+extern hb_filter_object_t hb_filter_rotate;
 
 typedef void hb_error_handler_t( const char *errmsg );
 
 extern void hb_register_error_handler( hb_error_handler_t * handler );
+
+char * hb_strdup_printf( char * fmt, ... );
+
+int hb_yuv2rgb(int yuv);
+int hb_rgb2yuv(int rgb);
+
+const char * hb_subsource_name( int source );
 
 #endif

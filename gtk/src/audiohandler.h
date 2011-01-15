@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * audiohandler.h
- * Copyright (C) John Stebbins 2008 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
  * 
  * audiohandler.h is free software.
  * 
@@ -31,5 +31,8 @@ void ghb_adjust_audio_rate_combos(signal_user_data_t *ud);
 void ghb_set_pref_audio(gint titleindex, signal_user_data_t *ud);
 void ghb_clear_audio_list(signal_user_data_t *ud);
 void ghb_set_audio(signal_user_data_t *ud, GValue *settings);
+gchar* ghb_get_user_audio_lang(
+	signal_user_data_t *ud, gint titleindex, gint track);
+void ghb_audio_list_refresh_selected(signal_user_data_t *ud);
 
 #endif // _AUDIOHANDLER_H_

@@ -1,187 +1,190 @@
-/*  Common.cs $
- 	
- 	   This file is part of the HandBrake source code.
- 	   Homepage: <http://handbrake.fr>.
- 	   It may be used under the terms of the GNU General Public License. */
-
-using System;
-using System.Collections;
-using System.Text;
-using System.Windows.Forms;
-using System.Globalization;
-using System.IO;
-using System.Drawing;
-using System.Diagnostics;
-using System.Text.RegularExpressions;
+/*  Main.cs $
+    This file is part of the HandBrake source code.
+    Homepage: <http://handbrake.fr>.
+    It may be used under the terms of the GNU General Public License. */
 
 namespace Handbrake.Functions
 {
-    class Main
+    using System;
+    using System.Collections.Generic;
+    using System.Diagnostics;
+    using System.IO;
+    using System.Linq;
+    using System.Text;
+    using System.Text.RegularExpressions;
+    using System.Windows.Forms;
+    using System.Xml.Serialization;
+
+    using HandBrake.Framework.Services;
+    using HandBrake.Framework.Services.Interfaces;
+    using HandBrake.ApplicationServices.Model;
+    using HandBrake.ApplicationServices.Parsing;
+    using HandBrake.ApplicationServices.Services.Interfaces;
+    using Model;
+
+    /// <summary>
+    /// Useful functions which various screens can use.
+    /// </summary>
+    public static class Main
     {
+        /// <summary>
+        /// The Error Service
+        /// </summary>
+        private static readonly IErrorService errorService = new ErrorService();
+
+        /// <summary>
+        /// The XML Serializer
+        /// </summary>
+        private static readonly XmlSerializer Ser = new XmlSerializer(typeof(List<Job>));
+
         /// <summary>
         /// Calculate the duration of the selected title and chapters
         /// </summary>
-        public TimeSpan calculateDuration(string chapter_start, string chapter_end, Parsing.Title selectedTitle)
+        /// <param name="chapterStart">
+        /// The chapter Start.
+        /// </param>
+        /// <param name="chapterEnd">
+        /// The chapter End.
+        /// </param>
+        /// <param name="selectedTitle">
+        /// The selected Title.
+        /// </param>
+        /// <returns>
+        /// The calculated duration.
+        /// </returns>
+        public static TimeSpan CalculateDuration(int chapterStart, int chapterEnd, Title selectedTitle)
         {
-            TimeSpan Duration = TimeSpan.FromSeconds(0.0);
-
-            // Get the durations between the 2 chapter points and add them together.
-            if (chapter_start != "Auto" && chapter_end != "Auto")
+            TimeSpan duration = TimeSpan.FromSeconds(0.0);
+            chapterStart++;
+            chapterEnd++;
+            if (chapterStart != 0 && chapterEnd != 0 && chapterEnd <= selectedTitle.Chapters.Count)
             {
-                int start_chapter, end_chapter = 0;
-                int.TryParse(chapter_start, out start_chapter);
-                int.TryParse(chapter_end, out end_chapter);
-
-                int position = start_chapter - 1;
-
-                if (start_chapter <= end_chapter)
-                {
-                    if (end_chapter > selectedTitle.Chapters.Count)
-                        end_chapter = selectedTitle.Chapters.Count;
-
-                    while (position != end_chapter)
-                    {
-                        TimeSpan dur = selectedTitle.Chapters[position].Duration;
-                        Duration = Duration + dur;
-                        position++;
-                    }
-                }
-            }
-            return Duration;
-        }
-
-        /// <summary>
-        /// Calculate the non-anamorphic resoltuion of the source
-        /// </summary>
-        /// <param name="width"></param>
-        /// <returns></returns>
-        public int cacluateNonAnamorphicHeight(int width, decimal top, decimal bottom, decimal left, decimal right, Parsing.Title selectedTitle)
-        {
-            float aspect = selectedTitle.AspectRatio;
-            int aw;
-            int ah;
-            if (aspect.ToString() == "1.78")
-            {
-                aw = 16;
-                ah = 9;
-            }
-            else
-            {
-                aw = 4;
-                ah = 3;
+                for (int i = chapterStart; i <= chapterEnd; i++)
+                    duration += selectedTitle.Chapters[i - 1].Duration;
             }
 
-            double a = width * selectedTitle.Resolution.Width * ah * (selectedTitle.Resolution.Height - (double)top - (double)bottom);
-            double b = selectedTitle.Resolution.Height * aw * (selectedTitle.Resolution.Width - (double)left - (double)right);
-
-            double y = a / b;
-
-            // If it's not Mod 16, make it mod 16
-            if ((y % 16) != 0)
-            {
-                double mod16 = y % 16;
-                if (mod16 >= 8)
-                {
-                    mod16 = 16 - mod16;
-                    y = y + mod16;
-                }
-                else
-                {
-                    y = y - mod16;
-                }
-            }
-
-            //16 * (421 / 16)
-            //double z = ( 16 * (( y + 8 ) / 16 ) );
-            int x = int.Parse(y.ToString());
-            return x;
-        }
-
-        /// <summary>
-        /// Select the longest title in the DVD title dropdown menu on frmMain
-        /// </summary>
-        public Handbrake.Parsing.Title selectLongestTitle(ComboBox drp_dvdtitle)
-        {
-            int current_largest = 0;
-            Handbrake.Parsing.Title title2Select;
-
-            // Check if there are titles in the DVD title dropdown menu and make sure, it's not just "Automatic"
-            if (drp_dvdtitle.Items[0].ToString() != "Automatic")
-                title2Select = (Handbrake.Parsing.Title)drp_dvdtitle.Items[0];
-            else
-                title2Select = null;
-
-            // So, If there are titles in the DVD Title dropdown menu, lets select the longest.
-            if (title2Select != null)
-            {
-                foreach (Handbrake.Parsing.Title x in drp_dvdtitle.Items)
-                {
-                    string title = x.ToString();
-                    if (title != "Automatic")
-                    {
-                        string[] y = title.Split(' ');
-                        string time = y[1].Replace("(", "").Replace(")", "");
-                        string[] z = time.Split(':');
-
-                        int hours = int.Parse(z[0]) * 60 * 60;
-                        int minutes = int.Parse(z[1]) * 60;
-                        int seconds = int.Parse(z[2]);
-                        int total_sec = hours + minutes + seconds;
-
-                        if (current_largest == 0)
-                        {
-                            current_largest = hours + minutes + seconds;
-                            title2Select = x;
-                        }
-                        else
-                        {
-                            if (total_sec > current_largest)
-                            {
-                                current_largest = total_sec;
-                                title2Select = x;
-                            }
-                        }
-                    }
-                }
-            }
-            return title2Select;
+            return duration;
         }
 
         /// <summary>
         /// Set's up the DataGridView on the Chapters tab (frmMain)
         /// </summary>
-        /// <param name="mainWindow"></param>
-        public DataGridView chapterNaming(DataGridView data_chpt, string chapter_start, string chapter_end)
+        /// <param name="title">
+        /// The currently selected title object.
+        /// This will be used to get chapter names if they exist.
+        /// </param>
+        /// <param name="dataChpt">
+        /// The DataGridView Control
+        /// </param>
+        /// <param name="chapterEnd">
+        /// The chapter End.
+        /// </param>
+        /// <returns>
+        /// The chapter naming.
+        /// </returns>
+        public static DataGridView ChapterNaming(Title title, DataGridView dataChpt, string chapterEnd)
+        {
+            int i = 0, finish = 0;
+
+            if (chapterEnd != "Auto")
+                int.TryParse(chapterEnd, out finish);
+
+            while (i < finish)
+            {
+                string chapterName = string.Empty;
+                if (title != null)
+                {
+                    if (title.Chapters.Count <= i && title.Chapters[i] != null)
+                    {
+                        chapterName = title.Chapters[i].ChapterName;
+                    }
+                }
+
+                int n = dataChpt.Rows.Add();
+                dataChpt.Rows[n].Cells[0].Value = i + 1;
+                dataChpt.Rows[n].Cells[1].Value = string.IsNullOrEmpty(chapterName) ? "Chapter " + (i + 1) : chapterName;
+                dataChpt.Rows[n].Cells[0].ValueType = typeof(int);
+                dataChpt.Rows[n].Cells[1].ValueType = typeof(string);
+                i++;
+            }
+
+            return dataChpt;
+        }
+
+        /// <summary>
+        /// Import a CSV file which contains Chapter Names
+        /// </summary>
+        /// <param name="dataChpt">
+        /// The DataGridView Control
+        /// </param>
+        /// <param name="filename">
+        /// The filepath and name
+        /// </param>
+        /// <returns>A Populated DataGridView</returns>
+        public static DataGridView ImportChapterNames(DataGridView dataChpt, string filename)
+        {
+            IDictionary<int, string> chapterMap = new Dictionary<int, string>();
+            try
+            {
+                StreamReader sr = new StreamReader(filename);
+                string csv = sr.ReadLine();
+                while (csv != null)
+                {
+                    if (csv.Trim() != string.Empty)
+                    {
+                        csv = csv.Replace("\\,", "<!comma!>");
+                        string[] contents = csv.Split(',');
+                        int chapter;
+                        int.TryParse(contents[0], out chapter);
+                        chapterMap.Add(chapter, contents[1].Replace("<!comma!>", ","));
+                    }
+                    csv = sr.ReadLine();
+                }
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+
+            foreach (DataGridViewRow item in dataChpt.Rows)
+            {
+                string name;
+                chapterMap.TryGetValue((int)item.Cells[0].Value, out name);
+                item.Cells[1].Value = name ?? "Chapter " + item.Cells[0].Value;
+            }
+
+            return dataChpt;
+        }
+
+        /// <summary>
+        /// Create a CSV file with the data from the Main Window Chapters tab
+        /// </summary>
+        /// <param name="mainWindow">Main Window</param>
+        /// <param name="filePathName">Path to save the csv file</param>
+        /// <returns>True if successful </returns>
+        public static bool SaveChapterMarkersToCsv(frmMain mainWindow, string filePathName)
         {
             try
             {
-                int i = 0;
-                int rowCount = 0;
-                int start = 0;
-                int finish = 0;
-                if (chapter_end != "Auto")
-                    finish = int.Parse(chapter_end);
+                string csv = string.Empty;
 
-                if (chapter_start != "Auto")
-                    start = int.Parse(chapter_start);
-
-                rowCount = finish - (start - 1);
-
-                while (i < rowCount)
+                foreach (DataGridViewRow row in mainWindow.data_chpt.Rows)
                 {
-                    DataGridViewRow row = new DataGridViewRow();
-
-                    data_chpt.Rows.Insert(i, row);
-                    data_chpt.Rows[i].Cells[0].Value = (i + 1);
-                    data_chpt.Rows[i].Cells[1].Value = "Chapter " + (i + 1);
-                    i++;
+                    csv += row.Cells[0].Value.ToString();
+                    csv += ",";
+                    csv += row.Cells[1].Value.ToString().Replace(",", "\\,");
+                    csv += Environment.NewLine;
                 }
-                return data_chpt;
+                StreamWriter file = new StreamWriter(filePathName);
+                file.Write(csv);
+                file.Close();
+                file.Dispose();
+                return true;
             }
             catch (Exception exc)
             {
-                MessageBox.Show("chapterNaming() Error has occured: \n" + exc.ToString());
-                return null;
+                ShowExceptiowWindow("Unable to save Chapter Makrers file! \nChapter marker names will NOT be saved in your encode", exc.ToString());
+                return false;
             }
         }
 
@@ -189,167 +192,173 @@ namespace Handbrake.Functions
         /// Function which generates the filename and path automatically based on 
         /// the Source Name, DVD title and DVD Chapters
         /// </summary>
-        /// <param name="mainWindow"></param>
-        public string autoName(ComboBox drp_dvdtitle, string chapter_start, string chatper_end, string source, string dest, int format)
+        /// <param name="mainWindow">
+        /// The main Window.
+        /// </param>
+        /// <returns>
+        /// The Generated FileName
+        /// </returns>
+        public static string AutoName(frmMain mainWindow)
         {
-
-            string AutoNamePath = string.Empty;
-
-            if (drp_dvdtitle.Text != "Automatic")
+            string autoNamePath = string.Empty;
+            if (mainWindow.drp_dvdtitle.Text != "Automatic")
             {
-                // Todo: This code is a tad messy. Clean it up at some point.
-                // Get the Source Name
-                string[] sourceName = source.Split('\\');
-                source = sourceName[sourceName.Length - 1].Replace(".iso", "").Replace(".mpg", "").Replace(".ts", "").Replace(".ps", "");
+                // Get the Source Name and remove any invalid characters
+
+                string sourceName = Path.GetInvalidFileNameChars().Aggregate(Path.GetFileNameWithoutExtension(mainWindow.SourceName), (current, character) => current.Replace(character.ToString(), string.Empty));
+
+                if (Properties.Settings.Default.AutoNameRemoveUnderscore)
+                    sourceName = sourceName.Replace("_", " ");
+
+                if (Properties.Settings.Default.AutoNameTitleCase)
+                    sourceName = TitleCase(sourceName);
 
                 // Get the Selected Title Number
-                string title = drp_dvdtitle.Text;
-                string[] titlesplit = title.Split(' ');
-                title = titlesplit[0];
+                string[] titlesplit = mainWindow.drp_dvdtitle.Text.Split(' ');
+                string dvdTitle = titlesplit[0].Replace("Automatic", string.Empty);
 
                 // Get the Chapter Start and Chapter End Numbers
-                string cs = chapter_start;
-                string cf = chatper_end;
-
-                // Just incase the above are set to their default Automatic values, set the varible to ""
-                if (title == "Automatic")
-                    title = "";
-                if (cs == "Auto")
-                    cs = "";
-                if (cf == "Auto")
-                    cf = "";
-
-                // If both CS and CF are populated, set the dash varible
-                string dash = "";
-                if (cf != "Auto")
-                    dash = "-";
+                string chapterStart = mainWindow.drop_chapterStart.Text.Replace("Auto", string.Empty);
+                string chapterFinish = mainWindow.drop_chapterFinish.Text.Replace("Auto", string.Empty);
+                string combinedChapterTag = chapterStart;
+                if (chapterFinish != chapterStart && chapterFinish != string.Empty)
+                    combinedChapterTag = chapterStart + "-" + chapterFinish;
 
                 // Get the destination filename.
-                string destination_filename = "";
-                if (Properties.Settings.Default.autoNameFormat != "")
+                string destinationFilename;
+                if (Properties.Settings.Default.autoNameFormat != string.Empty)
                 {
-                    destination_filename = Properties.Settings.Default.autoNameFormat;
-                    destination_filename = destination_filename.Replace("{source}", source).Replace("{title}", title).Replace("{chapters}", cs + dash + cf);
+                    destinationFilename = Properties.Settings.Default.autoNameFormat;
+                    destinationFilename = destinationFilename.Replace("{source}", sourceName)
+                                                             .Replace("{title}", dvdTitle)
+                                                             .Replace("{chapters}", combinedChapterTag);
                 }
                 else
-                    destination_filename = source + "_T" + title + "_C" + cs + dash + cf;
+                    destinationFilename = sourceName + "_T" + dvdTitle + "_C" + combinedChapterTag;
 
-                // If the text box is blank
-                if (!dest.Contains("\\"))
+                // Add the appropriate file extension
+                if (mainWindow.drop_format.SelectedIndex == 0)
                 {
-                    string filePath = "";
-                    if (Properties.Settings.Default.autoNamePath.Trim() != "")
+                    destinationFilename += Properties.Settings.Default.useM4v || mainWindow.Check_ChapterMarkers.Checked ||
+                                           mainWindow.AudioSettings.RequiresM4V() || mainWindow.Subtitles.RequiresM4V()
+                                               ? ".m4v"
+                                               : ".mp4";
+                }
+                else if (mainWindow.drop_format.SelectedIndex == 1)
+                    destinationFilename += ".mkv";
+
+                // Now work out the path where the file will be stored.
+                // First case: If the destination box doesn't already contain a path, make one.
+                if (!mainWindow.text_destination.Text.Contains(Path.DirectorySeparatorChar.ToString()))
+                {
+                    // If there is an auto name path, use it...
+                    if (Properties.Settings.Default.autoNamePath.Trim() == "{source_path}" && !string.IsNullOrEmpty(mainWindow.sourcePath))
                     {
-                        if (Properties.Settings.Default.autoNamePath.Trim() != "Click 'Browse' to set the default location")
-                            filePath = Properties.Settings.Default.autoNamePath + "\\";
+                        autoNamePath = Path.Combine(Path.GetDirectoryName(mainWindow.sourcePath), destinationFilename);
+                        if (autoNamePath == mainWindow.sourcePath)
+                        {
+                            // Append out_ to files that already exist or is the source file
+                            autoNamePath = Path.Combine(Path.GetDirectoryName(mainWindow.sourcePath), "output_" + destinationFilename);
+                        }
                     }
-
-                    if (format == 0)
-                        AutoNamePath = filePath + destination_filename + ".mp4";
-                    else if (format == 1)
-                        AutoNamePath = filePath + destination_filename + ".m4v";
-                    else if (format == 2)
-                        AutoNamePath = filePath + destination_filename + ".mkv";
-                    else if (format == 3)
-                        AutoNamePath = filePath + destination_filename + ".avi";
-                    else if (format == 4)
-                        AutoNamePath = filePath + destination_filename + ".ogm";
-                }
-                else // If the text box already has a path and file
-                {
-                    string destination = AutoNamePath;
-                    string[] destName = dest.Split('\\');
-                    string[] extension = dest.Split('.');
-                    string ext = extension[extension.Length - 1];
-
-                    destName[destName.Length - 1] = destination_filename + "." + ext;
-
-                    string fullDest = "";
-                    foreach (string part in destName)
+                    else if (Properties.Settings.Default.autoNamePath.Trim() != string.Empty && Properties.Settings.Default.autoNamePath.Trim() != "Click 'Browse' to set the default location")
                     {
-                        if (fullDest != "")
-                            fullDest = fullDest + "\\" + part;
-                        else
-                            fullDest = fullDest + part;
+                        autoNamePath = Path.Combine(Properties.Settings.Default.autoNamePath, destinationFilename);
                     }
-                    return fullDest;
+                    else // ...otherwise, output to the source directory
+                        autoNamePath = null;
                 }
-            }
-            return AutoNamePath;
-        }
-
-        /// <summary>
-        /// Checks for updates and returns true if an update is available.
-        /// </summary>
-        /// <param name="debug">Turns on debug mode. Don't use on program startup</param>
-        /// <returns>Boolean True = Update available</returns>
-        public Boolean updateCheck(Boolean debug)
-        {
-            try
-            {
-                Functions.AppcastReader rssRead = new Functions.AppcastReader();
-                rssRead.getInfo(); // Initializes the class.
-                string build = rssRead.build();
-
-                int latest = int.Parse(build);
-                int current = Properties.Settings.Default.hb_build;
-                int skip = Properties.Settings.Default.skipversion;
-
-                if (latest == skip)
-                    return false;
-                else
+                else // Otherwise, use the path that is already there.
                 {
-                    Boolean update = (latest > current);
-                    return update;
+                    // Use the path and change the file extension to match the previous destination
+                    autoNamePath = Path.Combine(Path.GetDirectoryName(mainWindow.text_destination.Text), destinationFilename);
+
+                    if (Path.HasExtension(mainWindow.text_destination.Text))
+                        autoNamePath = Path.ChangeExtension(autoNamePath,
+                                                            Path.GetExtension(mainWindow.text_destination.Text));
                 }
             }
-            catch (Exception exc)
-            {
-                if (debug == true)
-                    MessageBox.Show("Unable to check for updates, Please try again later. \n" + exc.ToString(), "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return false;
-            }
+
+            return autoNamePath;
         }
 
         /// <summary>
         /// Get's HandBrakes version data from the CLI.
         /// </summary>
-        /// <returns>Arraylist of Version Data. 0 = hb_version 1 = hb_build</returns>
-        public ArrayList getCliVersionData()
+        public static void SetCliVersionData()
         {
-            ArrayList cliVersionData = new ArrayList();
+            string line;
+
             // 0 = SVN Build / Version
             // 1 = Build Date
+            DateTime lastModified = File.GetLastWriteTime("HandBrakeCLI.exe");
+
+            if (Properties.Settings.Default.hb_build != 0 && Properties.Settings.Default.cliLastModified == lastModified)
+            {
+                return;
+            }
+
+            Properties.Settings.Default.cliLastModified = lastModified;
 
             Process cliProcess = new Process();
-            ProcessStartInfo handBrakeCLI = new ProcessStartInfo("HandBrakeCLI.exe", " -u");
-            handBrakeCLI.UseShellExecute = false;
-            handBrakeCLI.RedirectStandardError = true;
-            handBrakeCLI.RedirectStandardOutput = true;
-            handBrakeCLI.CreateNoWindow = true;
-            cliProcess.StartInfo = handBrakeCLI;
-            cliProcess.Start();
+            ProcessStartInfo handBrakeCli = new ProcessStartInfo("HandBrakeCLI.exe", " -u -v0")
+                                                {
+                                                    UseShellExecute = false,
+                                                    RedirectStandardError = true,
+                                                    RedirectStandardOutput = true,
+                                                    CreateNoWindow = true
+                                                };
+            cliProcess.StartInfo = handBrakeCli;
 
-            // Retrieve standard output and report back to parent thread until the process is complete
-            String line;
-            TextReader stdOutput = cliProcess.StandardError;
-
-            while (!cliProcess.HasExited)
+            try
             {
-                line = stdOutput.ReadLine();
-                if (line == null) line = "";
-                Match m = Regex.Match(line, @"HandBrake ([0-9\.]*)*(svn[0-9]*[M]*)* \([0-9]*\)");
+                cliProcess.Start();
 
-                if (m.Success != false)
+                // Retrieve standard output and report back to parent thread until the process is complete
+                TextReader stdOutput = cliProcess.StandardError;
+
+                while (!cliProcess.HasExited)
                 {
-                    string data = line.Replace("(", "").Replace(")", "").Replace("HandBrake ", "");
-                    string[] arr = data.Split(' ');
-                    cliVersionData.Add(arr[0]);
-                    cliVersionData.Add(arr[1]);
-                    return cliVersionData;
+                    line = stdOutput.ReadLine() ?? string.Empty;
+                    Match m = Regex.Match(line, @"HandBrake ([svnM0-9.]*) \(([0-9]*)\)");
+                    Match platform = Regex.Match(line, @"- ([A-Za-z0-9\s ]*) -");
+
+                    if (m.Success)
+                    {
+                        string version = m.Groups[1].Success ? m.Groups[1].Value : string.Empty;
+                        string build = m.Groups[2].Success ? m.Groups[2].Value : string.Empty;
+
+                        int buildValue;
+                        int.TryParse(build, out buildValue);
+
+                        Properties.Settings.Default.hb_build = buildValue;
+                        Properties.Settings.Default.hb_version = version;
+                    }
+
+                    if (platform.Success)
+                    {
+                        Properties.Settings.Default.hb_platform = platform.Value.Replace("-", string.Empty).Trim();
+                    }
+
+                    if (cliProcess.TotalProcessorTime.Seconds > 10) // Don't wait longer than 10 seconds.
+                    {
+                        Process cli = Process.GetProcessById(cliProcess.Id);
+                        if (!cli.HasExited)
+                        {
+                            cli.Kill();
+                        }
+                    }
                 }
+
+                Properties.Settings.Default.Save();
             }
-            return null;
+            catch (Exception e)
+            {
+                Properties.Settings.Default.hb_build = 0;
+                Properties.Settings.Default.Save();
+
+                ShowExceptiowWindow("Unable to retrieve version information from the CLI.", e.ToString());
+            }
         }
 
         /// <summary>
@@ -357,34 +366,441 @@ namespace Handbrake.Functions
         /// If it does, it means the last queue did not complete before HandBrake closed.
         /// So, return a boolean if true. 
         /// </summary>
-        public Boolean check_queue_recovery()
+        /// <returns>
+        /// True if there is a queue to recover.
+        /// </returns>
+        public static List<string> CheckQueueRecovery()
         {
             try
             {
-                string tempPath = Path.Combine(Path.GetTempPath(), "hb_queue_recovery.dat");
-                using (StreamReader reader = new StreamReader(tempPath))
+                string tempPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"HandBrake\");
+                List<string> queueFiles = new List<string>();
+
+                DirectoryInfo info = new DirectoryInfo(tempPath);
+                FileInfo[] logFiles = info.GetFiles("*.xml");
+                foreach (FileInfo file in logFiles)
                 {
-                    string queue_item = reader.ReadLine();
-                    if (queue_item == null)
+                    if (!file.Name.Contains("hb_queue_recovery"))
+                        continue;
+
+                    using (FileStream strm = new FileStream(Path.Combine(file.DirectoryName, file.Name), FileMode.Open, FileAccess.Read))
                     {
-                        reader.Close();
-                        reader.Dispose();
-                        return false;
-                    }
-                    else // There exists an item in the recovery queue file, so try and recovr it.
-                    {
-                        reader.Close();
-                        reader.Dispose();
-                        return true;
+                        List<Job> list = Ser.Deserialize(strm) as List<Job>;
+                        if (list != null)
+                        {
+                            if (list.Count != 0)
+                            {
+                                queueFiles.Add(file.Name);
+                            }
+                        }
                     }
                 }
+
+                return queueFiles;
             }
             catch (Exception)
             {
-                // Keep quiet about the error.
-                return false;
+                return new List<string>(); // Keep quiet about the error.
             }
         }
 
+        /// <summary>
+        /// Recover a queue from file.
+        /// </summary>
+        /// <param name="encodeQueue">
+        /// The encode Queue.
+        /// </param>
+        public static void RecoverQueue(IQueue encodeQueue)
+        {
+            DialogResult result = DialogResult.None;
+            List<string> queueFiles = CheckQueueRecovery();
+            if (queueFiles.Count == 1)
+            {
+                result = MessageBox.Show(
+                        "HandBrake has detected unfinished items on the queue from the last time the application was launched. Would you like to recover these?",
+                        "Queue Recovery Possible", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            }
+            else if (queueFiles.Count > 1)
+            {
+                result = MessageBox.Show(
+                        "HandBrake has detected multiple unfinished queue files. These will be from multiple instances of HandBrake running. Would you like to recover all unfinished jobs?",
+                        "Queue Recovery Possible", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            }
+
+            if (result == DialogResult.Yes)
+            {
+                foreach (string file in queueFiles)
+                {
+                    encodeQueue.LoadQueueFromFile(file); // Start Recovery
+                }
+            }
+            else
+            {
+                if (IsMultiInstance) return; // Don't tamper with the files if we are multi instance
+
+                string tempPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"HandBrake\");
+                foreach (string file in queueFiles)
+                {
+                    if (File.Exists(Path.Combine(tempPath, file)))
+                        File.Delete(Path.Combine(tempPath, file));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether HandBrake is running in multi instance mode
+        /// </summary>
+        /// <returns>True if the UI has another instance running</returns>
+        public static bool IsMultiInstance
+        {
+            get
+            {
+                return Process.GetProcessesByName("HandBrake").Length > 0 ? true : false;
+            }
+        }
+
+        /// <summary>
+        ///  Clear all the encode log files.
+        /// </summary>
+        public static void ClearLogs()
+        {
+            string logDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\HandBrake\\logs";
+            if (Directory.Exists(logDir))
+            {
+                DirectoryInfo info = new DirectoryInfo(logDir);
+                FileInfo[] logFiles = info.GetFiles("*.txt");
+                foreach (FileInfo file in logFiles)
+                {
+                    if (!file.Name.Contains("last_scan_log") && !file.Name.Contains("last_encode_log"))
+                        File.Delete(file.FullName);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Clear old log files x days in the past
+        /// </summary>
+        public static void ClearOldLogs()
+        {
+            string logDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\HandBrake\\logs";
+            if (Directory.Exists(logDir))
+            {
+                DirectoryInfo info = new DirectoryInfo(logDir);
+                FileInfo[] logFiles = info.GetFiles("*.txt");
+
+                foreach (FileInfo file in logFiles)
+                {
+                    if (file.LastWriteTime < DateTime.Now.AddDays(-30))
+                    {
+                        if (!file.Name.Contains("last_scan_log.txt") && !file.Name.Contains("last_encode_log.txt"))
+                            File.Delete(file.FullName);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Map languages and their iso639_2 value into a IDictionary
+        /// </summary>
+        /// <returns>A Dictionary containing the language and iso code</returns>
+        public static IDictionary<string, string> MapLanguages()
+        {
+            IDictionary<string, string> languageMap = new Dictionary<string, string>
+                                                          {
+                                                              {"Any", "und"}, 
+                                                              {"Afar", "aar"}, 
+                                                              {"Abkhazian", "abk"}, 
+                                                              {"Afrikaans", "afr"}, 
+                                                              {"Akan", "aka"}, 
+                                                              {"Albanian", "sqi"}, 
+                                                              {"Amharic", "amh"}, 
+                                                              {"Arabic", "ara"}, 
+                                                              {"Aragonese", "arg"}, 
+                                                              {"Armenian", "hye"}, 
+                                                              {"Assamese", "asm"}, 
+                                                              {"Avaric", "ava"}, 
+                                                              {"Avestan", "ave"}, 
+                                                              {"Aymara", "aym"}, 
+                                                              {"Azerbaijani", "aze"}, 
+                                                              {"Bashkir", "bak"}, 
+                                                              {"Bambara", "bam"}, 
+                                                              {"Basque", "eus"}, 
+                                                              {"Belarusian", "bel"}, 
+                                                              {"Bengali", "ben"}, 
+                                                              {"Bihari", "bih"}, 
+                                                              {"Bislama", "bis"}, 
+                                                              {"Bosnian", "bos"}, 
+                                                              {"Breton", "bre"}, 
+                                                              {"Bulgarian", "bul"}, 
+                                                              {"Burmese", "mya"}, 
+                                                              {"Catalan", "cat"}, 
+                                                              {"Chamorro", "cha"}, 
+                                                              {"Chechen", "che"}, 
+                                                              {"Chinese", "zho"}, 
+                                                              {"Church Slavic", "chu"}, 
+                                                              {"Chuvash", "chv"}, 
+                                                              {"Cornish", "cor"}, 
+                                                              {"Corsican", "cos"}, 
+                                                              {"Cree", "cre"}, 
+                                                              {"Czech", "ces"}, 
+                                                              {"Dansk", "dan"}, 
+                                                              {"Divehi", "div"}, 
+                                                              {"Nederlands", "nld"}, 
+                                                              {"Dzongkha", "dzo"}, 
+                                                              {"English", "eng"}, 
+                                                              {"Esperanto", "epo"}, 
+                                                              {"Estonian", "est"}, 
+                                                              {"Ewe", "ewe"}, 
+                                                              {"Faroese", "fao"}, 
+                                                              {"Fijian", "fij"}, 
+                                                              {"Suomi", "fin"}, 
+                                                              {"Francais", "fra"}, 
+                                                              {"Western Frisian", "fry"}, 
+                                                              {"Fulah", "ful"}, 
+                                                              {"Georgian", "kat"}, 
+                                                              {"Deutsch", "deu"}, 
+                                                              {"Gaelic (Scots)", "gla"}, 
+                                                              {"Irish", "gle"}, 
+                                                              {"Galician", "glg"}, 
+                                                              {"Manx", "glv"}, 
+                                                              {"Greek Modern", "ell"}, 
+                                                              {"Guarani", "grn"}, 
+                                                              {"Gujarati", "guj"}, 
+                                                              {"Haitian", "hat"}, 
+                                                              {"Hausa", "hau"}, 
+                                                              {"Hebrew", "heb"}, 
+                                                              {"Herero", "her"}, 
+                                                              {"Hindi", "hin"}, 
+                                                              {"Hiri Motu", "hmo"}, 
+                                                              {"Magyar", "hun"}, 
+                                                              {"Igbo", "ibo"}, 
+                                                              {"Islenska", "isl"}, 
+                                                              {"Ido", "ido"}, 
+                                                              {"Sichuan Yi", "iii"}, 
+                                                              {"Inuktitut", "iku"}, 
+                                                              {"Interlingue", "ile"}, 
+                                                              {"Interlingua", "ina"}, 
+                                                              {"Indonesian", "ind"}, 
+                                                              {"Inupiaq", "ipk"}, 
+                                                              {"Italiano", "ita"}, 
+                                                              {"Javanese", "jav"}, 
+                                                              {"Japanese", "jpn"}, 
+                                                              {"Kalaallisut", "kal"}, 
+                                                              {"Kannada", "kan"}, 
+                                                              {"Kashmiri", "kas"}, 
+                                                              {"Kanuri", "kau"}, 
+                                                              {"Kazakh", "kaz"}, 
+                                                              {"Central Khmer", "khm"}, 
+                                                              {"Kikuyu", "kik"}, 
+                                                              {"Kinyarwanda", "kin"}, 
+                                                              {"Kirghiz", "kir"}, 
+                                                              {"Komi", "kom"}, 
+                                                              {"Kongo", "kon"}, 
+                                                              {"Korean", "kor"}, 
+                                                              {"Kuanyama", "kua"}, 
+                                                              {"Kurdish", "kur"}, 
+                                                              {"Lao", "lao"}, 
+                                                              {"Latin", "lat"}, 
+                                                              {"Latvian", "lav"}, 
+                                                              {"Limburgan", "lim"}, 
+                                                              {"Lingala", "lin"}, 
+                                                              {"Lithuanian", "lit"}, 
+                                                              {"Luxembourgish", "ltz"}, 
+                                                              {"Luba-Katanga", "lub"}, 
+                                                              {"Ganda", "lug"}, 
+                                                              {"Macedonian", "mkd"}, 
+                                                              {"Marshallese", "mah"}, 
+                                                              {"Malayalam", "mal"}, 
+                                                              {"Maori", "mri"}, 
+                                                              {"Marathi", "mar"}, 
+                                                              {"Malay", "msa"}, 
+                                                              {"Malagasy", "mlg"}, 
+                                                              {"Maltese", "mlt"}, 
+                                                              {"Moldavian", "mol"}, 
+                                                              {"Mongolian", "mon"}, 
+                                                              {"Nauru", "nau"}, 
+                                                              {"Navajo", "nav"}, 
+                                                              {"Ndebele, South", "nbl"}, 
+                                                              {"Ndebele, North", "nde"}, 
+                                                              {"Ndonga", "ndo"}, 
+                                                              {"Nepali", "nep"}, 
+                                                              {"Norwegian Nynorsk", "nno"}, 
+                                                              {"Norwegian Bokmål", "nob"}, 
+                                                              {"Norsk", "nor"}, 
+                                                              {"Chichewa; Nyanja", "nya"}, 
+                                                              {"Occitan", "oci"}, 
+                                                              {"Ojibwa", "oji"}, 
+                                                              {"Oriya", "ori"}, 
+                                                              {"Oromo", "orm"}, 
+                                                              {"Ossetian", "oss"}, 
+                                                              {"Panjabi", "pan"}, 
+                                                              {"Persian", "fas"}, 
+                                                              {"Pali", "pli"}, 
+                                                              {"Polish", "pol"}, 
+                                                              {"Portugues", "por"}, 
+                                                              {"Pushto", "pus"}, 
+                                                              {"Quechua", "que"}, 
+                                                              {"Romansh", "roh"}, 
+                                                              {"Romanian", "ron"}, 
+                                                              {"Rundi", "run"}, 
+                                                              {"Russian", "rus"}, 
+                                                              {"Sango", "sag"}, 
+                                                              {"Sanskrit", "san"}, 
+                                                              {"Serbian", "srp"}, 
+                                                              {"Hrvatski", "hrv"}, 
+                                                              {"Sinhala", "sin"}, 
+                                                              {"Slovak", "slk"}, 
+                                                              {"Slovenian", "slv"}, 
+                                                              {"Northern Sami", "sme"}, 
+                                                              {"Samoan", "smo"}, 
+                                                              {"Shona", "sna"}, 
+                                                              {"Sindhi", "snd"}, 
+                                                              {"Somali", "som"}, 
+                                                              {"Sotho Southern", "sot"}, 
+                                                              {"Espanol", "spa"}, 
+                                                              {"Sardinian", "srd"}, 
+                                                              {"Swati", "ssw"}, 
+                                                              {"Sundanese", "sun"}, 
+                                                              {"Swahili", "swa"}, 
+                                                              {"Svenska", "swe"}, 
+                                                              {"Tahitian", "tah"}, 
+                                                              {"Tamil", "tam"}, 
+                                                              {"Tatar", "tat"}, 
+                                                              {"Telugu", "tel"}, 
+                                                              {"Tajik", "tgk"}, 
+                                                              {"Tagalog", "tgl"}, 
+                                                              {"Thai", "tha"}, 
+                                                              {"Tibetan", "bod"}, 
+                                                              {"Tigrinya", "tir"}, 
+                                                              {"Tonga", "ton"}, 
+                                                              {"Tswana", "tsn"}, 
+                                                              {"Tsonga", "tso"}, 
+                                                              {"Turkmen", "tuk"}, 
+                                                              {"Turkish", "tur"}, 
+                                                              {"Twi", "twi"}, 
+                                                              {"Uighur", "uig"}, 
+                                                              {"Ukrainian", "ukr"}, 
+                                                              {"Urdu", "urd"}, 
+                                                              {"Uzbek", "uzb"}, 
+                                                              {"Venda", "ven"}, 
+                                                              {"Vietnamese", "vie"}, 
+                                                              {"Volapük", "vol"}, 
+                                                              {"Welsh", "cym"}, 
+                                                              {"Walloon", "wln"}, 
+                                                              {"Wolof", "wol"}, 
+                                                              {"Xhosa", "xho"}, 
+                                                              {"Yiddish", "yid"}, 
+                                                              {"Yoruba", "yor"}, 
+                                                              {"Zhuang", "zha"}, 
+                                                              {"Zulu", "zul"}
+                                                          };
+            return languageMap;
+        }
+
+        /// <summary>
+        /// Get a list of available DVD drives which are ready and contain DVD content.
+        /// </summary>
+        /// <returns>A List of Drives with their details</returns>
+        public static List<DriveInformation> GetDrives()
+        {
+            List<DriveInformation> drives = new List<DriveInformation>();
+            DriveInfo[] theCollectionOfDrives = DriveInfo.GetDrives();
+            int id = 0;
+            foreach (DriveInfo curDrive in theCollectionOfDrives)
+            {
+                if (curDrive.DriveType == DriveType.CDRom && curDrive.IsReady &&
+                    File.Exists(curDrive.RootDirectory + "VIDEO_TS\\VIDEO_TS.IFO"))
+                {
+                    drives.Add(new DriveInformation
+                                   {
+                                       Id = id,
+                                       VolumeLabel = curDrive.VolumeLabel,
+                                       RootDirectory = curDrive.RootDirectory + "VIDEO_TS"
+                                   });
+                    id++;
+                }
+            }
+            return drives;
+        }
+
+        /// <summary>
+        /// Change a string to Title Case/
+        /// </summary>
+        /// <param name="input">
+        /// The input.
+        /// </param>
+        /// <returns>
+        /// A string in title case.
+        /// </returns>
+        public static string TitleCase(string input)
+        {
+            string[] tokens = input.Split(' ');
+            StringBuilder sb = new StringBuilder(input.Length);
+            foreach (string s in tokens)
+            {
+                if (!string.IsNullOrEmpty(s))
+                {
+                    sb.Append(s[0].ToString().ToUpper());
+                    sb.Append(s.Substring(1).ToLower());
+                    sb.Append(" ");
+                }
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        /// <summary>
+        /// Show the Exception Window
+        /// </summary>
+        /// <param name="shortError">
+        /// The short error.
+        /// </param>
+        /// <param name="longError">
+        /// The long error.
+        /// </param>
+        public static void ShowExceptiowWindow(string shortError, string longError)
+        {
+            errorService.ShowError(shortError, longError);
+        }
+
+        /// <summary>
+        /// Get The Source from the CLI Query
+        /// </summary>
+        /// <param name="query">Full CLI Query</param>
+        /// <returns>The Source Path</returns>
+        public static string GetSourceFromQuery(string query)
+        {
+            int startIndex = query.IndexOf("-i \"");
+            if (startIndex != -1)
+            {
+                string input = query.Substring(startIndex).Replace("-i \"", string.Empty).Trim();
+
+                int closeIndex = input.IndexOf('"');
+
+                return closeIndex == -1 ? "Unknown" : input.Substring(0, closeIndex);
+            }
+
+            return "Unknown";
+        }
+
+        /// <summary>
+        /// Get the Destination from the CLI Query
+        /// </summary>
+        /// <param name="query">Full CLI Query</param>
+        /// <returns>The Destination path</returns>
+        public static string GetDestinationFromQuery(string query)
+        {
+            int startIndex = query.IndexOf("-o \"");
+            if (startIndex != -1)
+            {
+                string output = query.Substring(startIndex).Replace("-o \"", string.Empty).Trim();
+
+                int closeIndex = output.IndexOf('"');
+
+                return closeIndex == -1 ? "Unknown" : output.Substring(0, closeIndex);
+            }
+
+            return "Unknown";
+        }
     }
 }

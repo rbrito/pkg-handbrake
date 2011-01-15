@@ -10,11 +10,18 @@
 #include <malloc.h>
 #endif
 
+#define FIFO_TIMEOUT 200
+
 /* Fifo */
 struct hb_fifo_s
 {
     hb_lock_t    * lock;
+    hb_cond_t    * cond_full;
+    int            wait_full;
+    hb_cond_t    * cond_empty;
+    int            wait_empty;
     uint32_t       capacity;
+    uint32_t       thresh;
     uint32_t       size;
     uint32_t       buffer_size;
     hb_buffer_t  * first;
@@ -51,7 +58,7 @@ void hb_buffer_pool_init( void )
     int i;
     for ( i = 10; i < 26; ++i )
     {
-        buffers.pool[i] = hb_fifo_init(BUFFER_POOL_MAX_ELEMENTS);
+        buffers.pool[i] = hb_fifo_init(BUFFER_POOL_MAX_ELEMENTS, 1);
         buffers.pool[i]->buffer_size = 1 << i;
     }
     /* requests smaller than 2^10 are satisfied from the 2^10 pool. */
@@ -90,8 +97,8 @@ void hb_buffer_pool_free( void )
         }
     }
 
-    hb_deep_log( 2, "Allocated %lld bytes of buffers on this pass and Freed %lld bytes, "
-           "%lld bytes leaked", buffers.allocated, freed, buffers.allocated - freed);
+    hb_deep_log( 2, "Allocated %"PRId64" bytes of buffers on this pass and Freed %"PRId64" bytes, "
+           "%"PRId64" bytes leaked", buffers.allocated, freed, buffers.allocated - freed);
     buffers.allocated = 0;
     hb_unlock(buffers.lock);
 }
@@ -147,7 +154,7 @@ hb_buffer_t * hb_buffer_init( int size )
 
     if (size)
     {
-#if defined( SYS_DARWIN ) || defined( SYS_FREEBSD )
+#if defined( SYS_DARWIN ) || defined( SYS_FREEBSD ) || defined( SYS_MINGW )
         b->data  = malloc( b->alloc );
 #elif defined( SYS_CYGWIN )
         /* FIXME */
@@ -191,17 +198,23 @@ void hb_buffer_close( hb_buffer_t ** _b )
     if( buffer_pool && b->data && !hb_fifo_is_full( buffer_pool ) )
     {
         hb_fifo_push_head( buffer_pool, b );
+        *_b = NULL;
         return;
     }
     /* either the pool is full or this size doesn't use a pool - free the buf */
-    if( b->data )
+    while( b )
     {
-        free( b->data );
-        hb_lock(buffers.lock);
-        buffers.allocated -= b->alloc;
-        hb_unlock(buffers.lock);
+        hb_buffer_t * next = b->next;
+        if( b->data )
+        {
+            free( b->data );
+            hb_lock(buffers.lock);
+            buffers.allocated -= b->alloc;
+            hb_unlock(buffers.lock);
+        }
+        free( b );
+        b = next;
     }
-    free( b );
     *_b = NULL;
 }
 
@@ -214,14 +227,34 @@ void hb_buffer_copy_settings( hb_buffer_t * dst, const hb_buffer_t * src )
     dst->flags     = src->flags;
 }
 
-hb_fifo_t * hb_fifo_init( int capacity )
+hb_fifo_t * hb_fifo_init( int capacity, int thresh )
 {
     hb_fifo_t * f;
-    f           = calloc( sizeof( hb_fifo_t ), 1 );
-    f->lock     = hb_lock_init();
-    f->capacity = capacity;
+    f             = calloc( sizeof( hb_fifo_t ), 1 );
+    f->lock       = hb_lock_init();
+    f->cond_full  = hb_cond_init();
+    f->cond_empty = hb_cond_init();
+    f->capacity   = capacity;
+    f->thresh     = thresh;
     f->buffer_size = 0;
     return f;
+}
+
+int hb_fifo_size_bytes( hb_fifo_t * f )
+{
+    int ret = 0;
+    hb_buffer_t * link;
+
+    hb_lock( f->lock );
+    link = f->first;
+    while ( link )
+    {
+        ret += link->size;
+        link = link->next;
+    }
+    hb_unlock( f->lock );
+
+    return ret;
 }
 
 int hb_fifo_size( hb_fifo_t * f )
@@ -257,6 +290,35 @@ float hb_fifo_percent_full( hb_fifo_t * f )
     return ret;
 }
 
+hb_buffer_t * hb_fifo_get_wait( hb_fifo_t * f )
+{
+    hb_buffer_t * b;
+
+    hb_lock( f->lock );
+    if( f->size < 1 )
+    {
+        f->wait_empty = 1;
+        hb_cond_timedwait( f->cond_empty, f->lock, FIFO_TIMEOUT );
+        if( f->size < 1 )
+        {
+            hb_unlock( f->lock );
+            return NULL;
+        }
+    }
+    b         = f->first;
+    f->first  = b->next;
+    b->next   = NULL;
+    f->size  -= 1;
+    if( f->wait_full && f->size == f->capacity - f->thresh )
+    {
+        f->wait_full = 0;
+        hb_cond_signal( f->cond_full );
+    }
+    hb_unlock( f->lock );
+
+    return b;
+}
+
 hb_buffer_t * hb_fifo_get( hb_fifo_t * f )
 {
     hb_buffer_t * b;
@@ -271,6 +333,32 @@ hb_buffer_t * hb_fifo_get( hb_fifo_t * f )
     f->first  = b->next;
     b->next   = NULL;
     f->size  -= 1;
+    if( f->wait_full && f->size == f->capacity - f->thresh )
+    {
+        f->wait_full = 0;
+        hb_cond_signal( f->cond_full );
+    }
+    hb_unlock( f->lock );
+
+    return b;
+}
+
+hb_buffer_t * hb_fifo_see_wait( hb_fifo_t * f )
+{
+    hb_buffer_t * b;
+
+    hb_lock( f->lock );
+    if( f->size < 1 )
+    {
+        f->wait_empty = 1;
+        hb_cond_timedwait( f->cond_empty, f->lock, FIFO_TIMEOUT );
+        if( f->size < 1 )
+        {
+            hb_unlock( f->lock );
+            return NULL;
+        }
+    }
+    b = f->first;
     hb_unlock( f->lock );
 
     return b;
@@ -308,6 +396,57 @@ hb_buffer_t * hb_fifo_see2( hb_fifo_t * f )
     return b;
 }
 
+int hb_fifo_full_wait( hb_fifo_t * f )
+{
+    int result;
+
+    hb_lock( f->lock );
+    if( f->size >= f->capacity )
+    {
+        f->wait_full = 1;
+        hb_cond_timedwait( f->cond_full, f->lock, FIFO_TIMEOUT );
+    }
+    result = ( f->size < f->capacity );
+    hb_unlock( f->lock );
+    return result;
+}
+
+void hb_fifo_push_wait( hb_fifo_t * f, hb_buffer_t * b )
+{
+    if( !b )
+    {
+        return;
+    }
+
+    hb_lock( f->lock );
+    if( f->size >= f->capacity )
+    {
+        f->wait_full = 1;
+        hb_cond_timedwait( f->cond_full, f->lock, FIFO_TIMEOUT );
+    }
+    if( f->size > 0 )
+    {
+        f->last->next = b;
+    }
+    else
+    {
+        f->first = b;
+    }
+    f->last  = b;
+    f->size += 1;
+    while( f->last->next )
+    {
+        f->size += 1;
+        f->last  = f->last->next;
+    }
+    if( f->wait_empty && f->size >= f->thresh )
+    {
+        f->wait_empty = 0;
+        hb_cond_signal( f->cond_empty );
+    }
+    hb_unlock( f->lock );
+}
+
 void hb_fifo_push( hb_fifo_t * f, hb_buffer_t * b )
 {
     if( !b )
@@ -330,6 +469,11 @@ void hb_fifo_push( hb_fifo_t * f, hb_buffer_t * b )
     {
         f->size += 1;
         f->last  = f->last->next;
+    }
+    if( f->wait_empty && f->size >= f->thresh )
+    {
+        f->wait_empty = 0;
+        hb_cond_signal( f->cond_empty );
     }
     hb_unlock( f->lock );
 }
@@ -383,7 +527,25 @@ void hb_fifo_close( hb_fifo_t ** _f )
     }
 
     hb_lock_close( &f->lock );
+    hb_cond_close( &f->cond_empty );
+    hb_cond_close( &f->cond_full );
     free( f );
 
     *_f = NULL;
 }
+
+void hb_fifo_flush( hb_fifo_t * f )
+{
+    hb_buffer_t * b;
+
+    while( ( b = hb_fifo_get( f ) ) )
+    {
+        hb_buffer_close( &b );
+    }
+    hb_lock( f->lock );
+    hb_cond_signal( f->cond_empty );
+    hb_cond_signal( f->cond_full );
+    hb_unlock( f->lock );
+
+}
+

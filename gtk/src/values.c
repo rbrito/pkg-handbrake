@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * presets.c
- * Copyright (C) John Stebbins 2008 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
  * 
  * presets.c is free software.
  * 
@@ -15,6 +15,7 @@
 #include <glib.h>
 #include <glib-object.h>
 #include <string.h>
+#include <inttypes.h>
 #include "values.h"
 
 static void dict_delete_key(gpointer data);
@@ -77,7 +78,43 @@ debug_show_type(GType tp)
 	{
 		str ="dict";
 	}
-	g_debug("%s", str);
+	g_debug("Type %s", str);
+}
+
+void
+debug_show_value(GValue *gval)
+{
+	GType tp;
+
+	tp = G_VALUE_TYPE(gval);
+	if (tp == G_TYPE_STRING)
+	{
+		g_message("Type %s value %s", "string", g_value_get_string(gval));
+	}
+	else if (tp == G_TYPE_INT)
+	{
+		g_message("Type %s value %d", "int", g_value_get_int(gval));
+	}
+	else if (tp == G_TYPE_INT64)
+	{
+		g_message("Type %s value %" PRId64, "int64", g_value_get_int64(gval));
+	}
+	else if (tp == G_TYPE_DOUBLE)
+	{
+		g_message("Type %s value %f", "double", g_value_get_double(gval));
+	}
+	else if (tp == G_TYPE_BOOLEAN)
+	{
+		g_message("Type %s value %d", "boolean", g_value_get_boolean(gval));
+	}
+	else if (tp == ghb_array_get_type())
+	{
+		g_message("Type %s", "boolean");
+	}
+	else if (tp == ghb_dict_get_type())
+	{
+		g_message("Type %s", "dict");
+	}
 }
 
 gint
@@ -216,6 +253,10 @@ ghb_value_cmp(const GValue *vala, const GValue *valb)
 	GType typa;
 	GType typb;
 
+	if ((vala == NULL && valb != NULL) || (vala != NULL && valb == NULL))
+	{
+		return 1;
+	}
 	typa = G_VALUE_TYPE(vala);
 	typb = G_VALUE_TYPE(valb);
 	if (typa != typb)
@@ -533,7 +574,7 @@ ghb_dict_iter_init(GHashTableIter *iter, GValue *gval)
 }
 
 GValue*
-ghb_dict_lookup(GValue *gval, const gchar *key)
+ghb_dict_lookup(const GValue *gval, const gchar *key)
 {
 	GHashTable *dict = g_value_get_boxed(gval);
 	return g_hash_table_lookup(dict, key);
@@ -712,6 +753,15 @@ xform_string_double(const GValue *sval, GValue *dval)
 }
 
 static void
+xform_double_string(const GValue *dval, GValue *sval)
+{
+	gchar *str;
+	double val = g_value_get_double(dval);
+	str = g_strdup_printf("%g", val);
+	g_value_take_string(sval, str);
+}
+
+static void
 xform_boolean_double(const GValue *bval, GValue *dval)
 {
 	gboolean b = g_value_get_boolean(bval);
@@ -730,4 +780,6 @@ ghb_register_transforms()
 								xform_string_double);
 	g_value_register_transform_func(G_TYPE_BOOLEAN, G_TYPE_DOUBLE, 
 								xform_boolean_double);
+	g_value_register_transform_func(G_TYPE_DOUBLE, G_TYPE_STRING, 
+								xform_double_string);
 }

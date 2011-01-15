@@ -1,0 +1,67 @@
+Index: handbrake-0.9.5/libhb/ports.h
+===================================================================
+--- handbrake-0.9.5.orig/libhb/ports.h	2011-01-15 10:37:13.000000000 +0100
++++ handbrake-0.9.5/libhb/ports.h	2011-01-15 10:37:40.000000000 +0100
+@@ -51,7 +51,7 @@
+ #elif defined( SYS_DARWIN )
+ #  define HB_LOW_PRIORITY    0
+ #  define HB_NORMAL_PRIORITY 31
+-#elif defined( SYS_LINUX ) || defined( SYS_FREEBSD ) || defined ( SYS_SunOS )
++#elif defined( SYS_LINUX ) || defined( SYS_FREEBSD ) || defined ( SYS_SunOS ) || defined ( __FreeBSD_kernel__ )
+ #  define HB_LOW_PRIORITY    0
+ #  define HB_NORMAL_PRIORITY 0
+ #elif defined( SYS_CYGWIN )
+Index: handbrake-0.9.5/gtk/configure.ac
+===================================================================
+--- handbrake-0.9.5.orig/gtk/configure.ac	2011-01-15 10:37:13.000000000 +0100
++++ handbrake-0.9.5/gtk/configure.ac	2011-01-15 10:37:40.000000000 +0100
+@@ -93,6 +93,9 @@
+ 	fi
+ 	mingw_flag=yes
+     ;;
++  *kfreebsd*)
++	GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify webkit-1.0"
++   ;;
+   *)
+ 	GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify gudev-1.0"
+ 	mingw_flag=no
+Index: handbrake-0.9.5/gtk/src/callbacks.c
+===================================================================
+--- handbrake-0.9.5.orig/gtk/src/callbacks.c	2011-01-15 10:37:13.000000000 +0100
++++ handbrake-0.9.5/gtk/src/callbacks.c	2011-01-15 10:37:40.000000000 +0100
+@@ -23,7 +23,9 @@
+ #if !defined(_WIN32)
+ #include <poll.h>
+ #define G_UDEV_API_IS_SUBJECT_TO_CHANGE 1
++#if !defined( __FreeBSD_kernel__ )
+ #include <gudev/gudev.h>
++#endif
+ #include <dbus/dbus-glib.h>
+ #include <dbus/dbus-glib-lowlevel.h>
+ 
+@@ -3784,14 +3786,14 @@
+ 	return dvd_devices;
+ }
+ 
+-#if !defined(_WIN32)
++#if !defined(_WIN32) && !defined( __FreeBSD_kernel__ )
+ static GUdevClient *udev_ctx = NULL;
+ #endif
+ 
+ gboolean
+ ghb_is_cd(GDrive *gd)
+ {
+-#if !defined(_WIN32)
++#if !defined(_WIN32) && !defined( __FreeBSD_kernel__ )
+ 	gchar *device;
+ 	GUdevDevice *udd;
+ 
+@@ -3825,7 +3827,7 @@
+ void
+ ghb_udev_init()
+ {
+-#if !defined(_WIN32)
++#if !defined(_WIN32) && !defined( __FreeBSD_kernel__ )
+ 	udev_ctx = g_udev_client_new(NULL);
+ #endif
+ }

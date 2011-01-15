@@ -1,34 +1,18 @@
 ## Process this file with automake to produce Makefile.in
 
-## Created by Anjuta
-
-#HB_LIBS=$(HB_DIR)/libhb/libhb.a -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdread -lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate -lx264 -lxvidcore -lmp4v2 -lswscale -ltheora -lfaad -lz -lbz2 -lpthread
-
-HB_LIBS=\
-	$(HB_DIR)/libhb/libhb.a \
-	$(HB_DIR)/contrib/lib/liba52.a \
-	$(HB_DIR)/contrib/lib/libmkv.a \
-	$(HB_DIR)/contrib/lib/libavformat.a \
-	$(HB_DIR)/contrib/lib/libavcodec.a \
-	$(HB_DIR)/contrib/lib/libavutil.a \
-	$(HB_DIR)/contrib/lib/libdca.a \
-	$(HB_DIR)/contrib/lib/libdvdread.a \
-	$(HB_DIR)/contrib/lib/libfaac.a \
-	$(HB_DIR)/contrib/lib/libmp3lame.a \
-	$(HB_DIR)/contrib/lib/libmpeg2.a \
-	$(HB_DIR)/contrib/lib/libvorbis.a \
-	$(HB_DIR)/contrib/lib/libvorbisenc.a \
-	$(HB_DIR)/contrib/lib/libogg.a \
-	$(HB_DIR)/contrib/lib/libsamplerate.a \
-	$(HB_DIR)/contrib/lib/libx264.a \
-	$(HB_DIR)/contrib/lib/libxvidcore.a \
-	$(HB_DIR)/contrib/lib/libmp4v2.a \
-	$(HB_DIR)/contrib/lib/libswscale.a \
-	$(HB_DIR)/contrib/lib/libtheora.a \
-	$(HB_DIR)/contrib/lib/libfaad.a \
-	-lz \
-	-lbz2 \
-	-lpthread
+if MINGW
+HB_LIBS= \
+	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -lavcore -ldca -ldvdnav -ldvdread \
+	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
+	-lx264 -lmp4v2 -lswscale -ltheora -lfaad -lz \
+	-lbz2 -liberty -lpthreadGC2 -lbluray -lass -lfontconfig -lfreetype
+else
+HB_LIBS= \
+	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -lavcore -ldca -ldvdnav -ldvdread \
+	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
+	-lx264 -lmp4v2 -lswscale -ltheora -lfaad -lz \
+	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
+endif
 
 icons =	\
 	hb-icon.128.png 
@@ -39,6 +23,8 @@ icons_dep =	\
 	hb-canceled.16.png \
 	hb-complete.16.png \
 	hb-drawer.32.png \
+	hb-status.32.png \
+	hb-status-empty.32.png \
 	hb-icon.128.png \
 	hb-icon.64.png \
 	hb-pause.32.png \
@@ -68,17 +54,9 @@ AM_CPPFLAGS = \
 	-DPACKAGE_DATA_DIR=\""$(datadir)"\" \
 	$(GHB_CFLAGS)
 
-AM_CFLAGS =\
-	 -Wall\
-	 -g
+AM_CFLAGS = -Wall -g
 
 bin_PROGRAMS = ghb 
-noinst_PROGRAMS = makewidgetdeps quotestring create_resources preset_xlat
-
-BUILT_SOURCES = HandBrakeCLI
-
-HandBrakeCLI: $(HB_DIR)/HandBrakeCLI
-	/bin/cp $< $@
 
 # Dummy file, not built.  Forces g++ linking
 nodist_EXTRA_ghb_SOURCES = dummy.cpp
@@ -90,6 +68,8 @@ ghb_SOURCES = \
 	queuehandler.h \
 	audiohandler.c \
 	audiohandler.h \
+	subtitlehandler.c \
+	subtitlehandler.h \
 	x264handler.c \
 	x264handler.h \
 	main.c \
@@ -99,6 +79,7 @@ ghb_SOURCES = \
 	resources.h \
 	presets.c \
 	presets.h \
+	preview.c \
 	icons.c \
 	icons.h \
 	icon_tools.c \
@@ -115,71 +96,57 @@ ghb_SOURCES = \
 	renderer_button.c \
 	ghbcellrenderertext.c \
 	ghbcellrenderertext.h \
+    ghbcompositor.c \
+    ghbcompositor.h \
 	ghb-dvd.c \
 	ghb-dvd.h \
 	marshalers.c \
 	marshalers.h
 
+if MINGW
 ghb_LDFLAGS = \
-	-Wl,--export-dynamic
+	-mwindows -Wl,--export-dynamic -Wl,--exclude-libs,ALL
+else
+ghb_LDFLAGS = \
+	-Wl,--export-dynamic -Wl,--exclude-libs,ALL
+endif
 
-ghb_LDADD = $(GHB_LIBS) $(HB_LIBS)
+ghb_LDADD = $(HB_LIBS) $(GHB_LIBS)
 
 ghb_DEPENDENCIES = $(HB_DIR)/libhb/libhb.a
 
-makewidgetdeps_SOURCES = \
-	plist.c \
-	plist.h \
-	values.c \
-	values.h \
-	makedeps.c 
+resources.o: resource_data.h
 
-makewidgetdeps_LDADD = $(GHBTOOLS_LIBS)
+resource_data.h: resources.plist
+	python $(srcdir)/quotestring.py resources.plist resource_data.h
 
-create_resources_SOURCES = \
+widget_reverse.deps: makedeps.py
+widget.deps: makedeps.py
+	python $(srcdir)/makedeps.py
+
+resources.plist: create_resources resources.list $(icons_dep) internal_defaults.xml standard_presets.xml ghb.ui widget.deps widget_reverse.deps
+	./create_resources -I$(srcdir) $(srcdir)/resources.list resources.plist
+
+CREATE_RES.c = \
 	create_resources.c \
 	plist.c \
-	plist.h \
-	values.c \
-	values.h \
-	icon_tools.c \
-	icon_tools.h
+	values.c 
 
-create_resources_LDADD = $(GHBTOOLS_LIBS)
+CREATE_RES.c.o = $(patsubst %.c,%-native.o,$(CREATE_RES.c))
 
-preset_xlat_SOURCES = \
-	preset_xlat.c \
-	plist.c \
-	plist.h \
-	values.c \
-	values.h
+create_resources: $(CREATE_RES.c.o)
+	$(CC_FOR_BUILD) -o $@ $^ $(GHB_TOOLS_LIBS)
+ 
+$(CREATE_RES.c.o): %-native.o: %.c
+	$(CC_FOR_BUILD) $(GHB_TOOLS_CFLAGS) -c -o $@ $<
 
-preset_xlat_LDADD = $(GHBTOOLS_LIBS)
+ghbcellrenderertext.$(OBJEXT): marshalers.h
 
-quotestring_SOURCES = quotestring.c
+$(srcdir)/marshalers.h: marshalers.list
+	glib-genmarshal --prefix=ghb_marshal $(srcdir)/marshalers.list --header > $(srcdir)/marshalers.h
 
-dumbell: preset_xlat
-
-resources.c: resource_data.h
-
-resource_data.h: quotestring resources.plist
-	./quotestring resources.plist resource_data.h
-
-widget_deps: makewidgetdeps
-	./makewidgetdeps
-
-resources.plist: create_resources resources.list $(icons_dep) internal_defaults.xml standard_presets.xml ghb.ui widget_deps widget_reverse_deps
-	./create_resources resources.list resources.plist
-
-ghbcellrenderertext.c: marshalers.h
-
-marshalers.h: marshalers.list
-	glib-genmarshal --prefix=ghb_marshal marshalers.list --header > marshalers.h
-
-marshalers.c: marshalers.list
-	glib-genmarshal --prefix=ghb_marshal marshalers.list --body > marshalers.c
-
-EXTRA_DIST = HandBrakeCLI
+$(srcdir)/marshalers.c: marshalers.list
+	glib-genmarshal --prefix=ghb_marshal $(srcdir)/marshalers.list --body > $(srcdir)/marshalers.c
 
 gtk_update_icon_cache = gtk-update-icon-cache -f -t $(DESTDIR)/$(datadir)/icons/hicolor
 
@@ -195,7 +162,7 @@ uninstall-local:
 		fi; \
 		rm -f $(DESTDIR)/$(datadir)/icons/hicolor/$$SIZE/apps/$$FILE; \
 	done
-	@-if test -n "$(DESTDIR)/$(datadir)"; then \
+	@-if test -z "$(DESTDIR)"; then \
 		echo "Updating Gtk icon cache."; \
 		$(gtk_update_icon_cache); \
 	else \
@@ -203,9 +170,6 @@ uninstall-local:
 		echo "***   $(gtk_update_icon_cache)"; \
 	fi
 	rm -f $(DESTDIR)/$(datadir)/applications/$(hb_menu)
-
-install-exec-local:
-	$(INSTALL_PROGRAM) $(srcdir)/HandBrakeCLI $(DESTDIR)/$(bindir)/HandBrakeCLI
 
 install-data-local:
 	for icon in $(icons); do \
@@ -220,7 +184,7 @@ install-data-local:
 		mkdir -p $(DESTDIR)/$(datadir)/icons/hicolor/$$SIZE/apps/; \
 		$(INSTALL_DATA) $(srcdir)/$$icon $(DESTDIR)/$(datadir)/icons/hicolor/$$SIZE/apps/$$FILE; \
 	done
-	@-if test -n "$(DESTDIR)/$(datadir)"; then \
+	@-if test -z "$(DESTDIR)"; then \
 		echo "Updating Gtk icon cache."; \
 		$(gtk_update_icon_cache); \
 	else \

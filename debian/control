@@ -4,16 +4,19 @@ Priority: extra
 Maintainer: Christian Marillat <marillat@debian.org>
 Bugs: mailto:marillat@debian.org
 Homepage: http://www.handbrake.fr/
-Standards-Version: 3.8.0
-Build-Depends: debhelper (>= 7), jam, libhal-storage-dev, wget, libgtkhtml3.14-dev,
- quilt, libfaac-dev, libfaad-dev, libxvidcore4-dev, libtheora-dev, libmp3lame-dev,
- libmkv-dev, subversion, automake, intltool, libtool, yasm [amd64 i386], libbz2-dev,
- libsamplerate0-dev, libdvdread-dev, libvorbis-dev
+Standards-Version: 3.9.1
+Build-Depends: debhelper (>= 7), libhal-storage-dev, wget, quilt, libfaac-dev,
+ libfaad-dev (>= 2.7), libxvidcore4-dev, libtheora-dev, libmp3lame-dev, python,
+ automake, intltool, libtool, yasm [amd64 i386], libbz2-dev, ccache,
+ libmkv-dev (>= 0.6.4), libsamplerate0-dev, libvorbis-dev, libnotify-dev,
+ libwebkit-dev, libx264-dev (>= 1:0.svn20110115), libgstreamer0.10-dev,
+ libgstreamer-plugins-base0.10-dev, libass-dev,
+ libgudev-1.0-dev [!hurd-i386 !kfreebsd-i386 !kfreebsd-amd64]
 
 Package: handbrake-cli
-Architecture: any
+Architecture: amd64 i386 kfreebsd-i386 powerpc
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: versatile DVD ripper and video transcoder - command line
+Description: versatile DVD ripper and video transcoder (command line)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media.  It's particularly useful
  for making videos that are compatible with portable video devices such as
@@ -21,9 +24,10 @@ Description: versatile DVD ripper and video transcoder - command line
  variant, HandBrakeCLI
 
 Package: handbrake-gtk
-Architecture: any
+Architecture: amd64 i386 kfreebsd-i386 powerpc
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: versatile DVD ripper and video transcoder - GTK GUI
+Recommends: gstreamer0.10-ffmpeg, gstreamer0.10-x
+Description: versatile DVD ripper and video transcoder (GTK GUI)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media. It's particularly useful
  for making videos that are compatible with portable video devices such as

@@ -4,13 +4,6 @@
 SUBDIRS = src po
 
 ghbdocdir = ${prefix}/share/doc/ghb
-ghbdoc_DATA = \
-	README\
-	COPYING\
-	AUTHORS\
-	ChangeLog\
-	INSTALL\
-	NEWS
 
 EXTRA_DIST = $(ghbdoc_DATA)
 

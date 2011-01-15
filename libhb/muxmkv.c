@@ -30,6 +30,8 @@ struct hb_mux_data_s
     uint64_t  prev_chapter_tc;
     uint16_t  current_chapter;
     int       codec;
+    int       subtitle;
+    int       sub_format;
 };
 
 /**********************************************************************
@@ -46,7 +48,7 @@ static int MKVInit( hb_mux_object_t * m )
 
     uint8_t         *avcC = NULL;
     uint8_t         default_track_flag = 1;
-    int             avcC_len, i;
+    int             avcC_len, i, j;
     ogg_packet      *ogg_headers[3];
     mk_TrackConfig *track;
 
@@ -101,7 +103,6 @@ static int MKVInit( hb_mux_object_t * m )
             if (job->areBframes)
                 track->minCache = 1;
             break;
-        case HB_VCODEC_XVID:
         case HB_VCODEC_FFMPEG:
             track->codecID = MK_VCODEC_MP4ASP;
             track->codecPrivate = job->config.mpeg4.bytes;
@@ -138,9 +139,9 @@ static int MKVInit( hb_mux_object_t * m )
     track->extra.video.pixelWidth = job->width;
     track->extra.video.pixelHeight = job->height;
     track->extra.video.displayHeight = job->height;
-    if(job->pixel_ratio)
+    if( job->anamorphic.mode )
     {
-        track->extra.video.displayWidth = job->width * ((double)job->pixel_aspect_width / (double)job->pixel_aspect_height);
+        track->extra.video.displayWidth = job->width * ((double)job->anamorphic.par_width / (double)job->anamorphic.par_height);
     }
     else
     {
@@ -158,14 +159,21 @@ static int MKVInit( hb_mux_object_t * m )
     for( i = 0; i < hb_list_count( title->list_audio ); i++ )
     {
         audio = hb_list_item( title->list_audio, i );
-        mux_data = malloc( sizeof( hb_mux_data_t ) );
+        mux_data = calloc(1, sizeof( hb_mux_data_t ) );
         audio->priv.mux_data = mux_data;
 
         mux_data->codec = audio->config.out.codec;
 
         switch (audio->config.out.codec)
         {
+            case HB_ACODEC_DCA:
+            case HB_ACODEC_DCA_PASS:
+                track->codecPrivate = NULL;
+                track->codecPrivateSize = 0;
+                track->codecID = MK_ACODEC_DTS;
+                break;
             case HB_ACODEC_AC3:
+            case HB_ACODEC_AC3_PASS:
                 track->codecPrivate = NULL;
                 track->codecPrivateSize = 0;
                 track->codecID = MK_ACODEC_AC3;
@@ -198,6 +206,7 @@ static int MKVInit( hb_mux_object_t * m )
                 }
                 break;
             case HB_ACODEC_FAAC:
+            case HB_ACODEC_CA_AAC:
                 track->codecPrivate = audio->priv.config.aac.bytes;
                 track->codecPrivateSize = audio->priv.config.aac.length;
                 track->codecID = MK_ACODEC_AAC;
@@ -213,18 +222,96 @@ static int MKVInit( hb_mux_object_t * m )
             track->flagDefault = 1;
             default_track_flag = 0;
         }
+        else
+        {
+            track->flagDefault = 0;
+        }
         track->flagEnabled = 1;
         track->trackType = MK_TRACK_AUDIO;
         track->language = audio->config.lang.iso639_2;
         track->extra.audio.samplingFreq = (float)audio->config.out.samplerate;
-        track->extra.audio.channels = (audio->config.out.codec == HB_ACODEC_AC3 ) ? HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT(audio->config.in.channel_layout) : HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
+        if (audio->config.out.codec == HB_ACODEC_AC3_PASS ||
+            audio->config.out.codec == HB_ACODEC_DCA_PASS)
+        {
+            track->extra.audio.channels = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT(audio->config.in.channel_layout);
+        }
+        else
+        {
+            track->extra.audio.channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
+        }
 //        track->defaultDuration = job->arate * 1000;
         mux_data->track = mk_createTrack(m->file, track);
         if (audio->config.out.codec == HB_ACODEC_VORBIS && track->codecPrivate != NULL)
           free(track->codecPrivate);
     }
 
-    if( mk_writeHeader( m->file, "HandBrake " HB_VERSION) < 0 )
+    char * subidx_fmt =
+        "size: %dx%d\n"
+        "org: %d, %d\n"
+        "scale: 100%%, 100%%\n"
+        "alpha: 100%%\n"
+        "smooth: OFF\n"
+        "fadein/out: 50, 50\n"
+        "align: OFF at LEFT TOP\n"
+        "time offset: 0\n"
+        "forced subs: %s\n"
+        "palette: %06x, %06x, %06x, %06x, %06x, %06x, "
+        "%06x, %06x, %06x, %06x, %06x, %06x, %06x, %06x, %06x, %06x\n"
+        "custom colors: OFF, tridx: 0000, "
+        "colors: 000000, 000000, 000000, 000000\n";
+
+    for( i = 0; i < hb_list_count( title->list_subtitle ); i++ )
+    {
+        hb_subtitle_t * subtitle;
+        uint32_t        rgb[16];
+        char            subidx[2048];
+        int             len;
+
+        subtitle = hb_list_item( title->list_subtitle, i );
+        if (subtitle->config.dest != PASSTHRUSUB)
+            continue;
+
+        memset(track, 0, sizeof(mk_TrackConfig));
+        switch (subtitle->format)
+        {
+            case PICTURESUB:
+                track->codecID = MK_SUBTITLE_VOBSUB;
+                for (j = 0; j < 16; j++)
+                    rgb[j] = hb_yuv2rgb(subtitle->palette[j]);
+                len = snprintf(subidx, 2048, subidx_fmt, 
+                        subtitle->width, subtitle->height,
+                        0, 0, "OFF",
+                        rgb[0], rgb[1], rgb[2], rgb[3],
+                        rgb[4], rgb[5], rgb[6], rgb[7],
+                        rgb[8], rgb[9], rgb[10], rgb[11],
+                        rgb[12], rgb[13], rgb[14], rgb[15]);
+                track->codecPrivate = subidx;
+                track->codecPrivateSize = len + 1;
+                break;
+            case TEXTSUB:
+                track->codecID = MK_SUBTITLE_UTF8;
+                break;
+            default:
+                continue;
+        }
+        if ( subtitle->config.default_track )
+        {
+            track->flagDefault = 1;
+        }
+
+        mux_data = calloc(1, sizeof( hb_mux_data_t ) );
+        subtitle->mux_data = mux_data;
+        mux_data->subtitle = 1;
+        mux_data->sub_format = subtitle->format;
+        
+        track->flagEnabled = 1;
+        track->trackType = MK_TRACK_SUBTITLE;
+        track->language = subtitle->iso639_2;
+
+        mux_data->track = mk_createTrack(m->file, track);
+    }
+
+    if( mk_writeHeader( m->file, "HandBrake " HB_PROJECT_VERSION) < 0 )
     {
         hb_error( "Failed to write to output file, disk full?");
         *job->die = 1;
@@ -292,9 +379,35 @@ static int MKVMux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
                 *job->die = 1;
             }
             mk_addFrameData(m->file, mux_data->track, op->packet, op->bytes);
-            mk_setFrameFlags(m->file, mux_data->track, timecode, 1);
+            mk_setFrameFlags(m->file, mux_data->track, timecode, 1, 0);
+            hb_buffer_close( &buf );
             return 0;
         }
+    }
+    else if ( mux_data->subtitle )
+    {
+        uint64_t   duration;
+        timecode = buf->start * TIMECODE_SCALE;
+        if( mk_startFrame(m->file, mux_data->track) < 0)
+        {
+            hb_error( "Failed to write frame to output file, Disk Full?" );
+            *job->die = 1;
+        }
+
+        duration = buf->stop * TIMECODE_SCALE - timecode;
+        if( mux_data->sub_format == TEXTSUB )
+        {
+            mk_addFrameData(m->file, mux_data->track, buf->data, buf->size);
+            mk_setFrameFlags(m->file, mux_data->track, timecode, 1, duration);
+        }
+        else
+        {
+            mk_addFrameData(m->file, mux_data->track, buf->data, buf->size);
+            mk_setFrameFlags(m->file, mux_data->track, timecode, 1, duration);
+        }
+        mk_flushFrame(m->file, mux_data->track);
+        hb_buffer_close( &buf );
+        return 0;
     }
     else
     {
@@ -311,7 +424,8 @@ static int MKVMux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
                 *job->die = 1;
             }
             mk_addFrameData(m->file, mux_data->track, op->packet, op->bytes);
-            mk_setFrameFlags(m->file, mux_data->track, timecode, 1);
+            mk_setFrameFlags(m->file, mux_data->track, timecode, 1, 0);
+            hb_buffer_close( &buf );
             return 0;
         }
     }
@@ -323,7 +437,11 @@ static int MKVMux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
     }
     mk_addFrameData(m->file, mux_data->track, buf->data, buf->size);
     mk_setFrameFlags(m->file, mux_data->track, timecode,
-                     ((job->vcodec == HB_VCODEC_X264 && mux_data == job->mux_data) ? (buf->frametype == HB_FRAME_IDR) : ((buf->frametype & HB_FRAME_KEY) != 0)) );
+                     ((job->vcodec == HB_VCODEC_X264 && 
+                       mux_data == job->mux_data) ? 
+                            (buf->frametype == HB_FRAME_IDR) : 
+                            ((buf->frametype & HB_FRAME_KEY) != 0)), 0 );
+    hb_buffer_close( &buf );
     return 0;
 }
 
@@ -361,6 +479,20 @@ static int MKVEnd( hb_mux_object_t * m )
             string = tmp_buffer;
         }
         mk_createChapterSimple(m->file, mux_data->prev_chapter_tc, mux_data->prev_chapter_tc, string);
+    }
+
+    if( title->metadata )
+    {
+        hb_metadata_t *md = title->metadata;
+
+        hb_deep_log( 2, "Writing Metadata to output file...");
+        mk_createTagSimple( m->file, MK_TAG_TITLE, md->name );
+        mk_createTagSimple( m->file, "ARTIST", md->artist );
+        mk_createTagSimple( m->file, "COMPOSER", md->composer );
+        mk_createTagSimple( m->file, MK_TAG_SYNOPSIS, md->comment );
+        mk_createTagSimple( m->file, "DATE_RELEASED", md->release_date );
+        // mk_createTagSimple( m->file, "", md->album );
+        mk_createTagSimple( m->file, MK_TAG_GENRE, md->genre );
     }
 
     if( mk_close(m->file) < 0 )

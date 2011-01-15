@@ -117,37 +117,26 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <metadata name="Label38.GenerateMember" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+  <metadata name="notifyIconMenu.GenerateMember" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>False</value>
   </metadata>
   <metadata name="notifyIconMenu.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>977, 15</value>
-  </metadata>
-  <metadata name="notifyIconMenu.GenerateMember" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>False</value>
+    <value>1106, 15</value>
   </metadata>
   <metadata name="DVD_Save.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>556, 15</value>
   </metadata>
-  <metadata name="File_Save.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>664, 15</value>
-  </metadata>
   <metadata name="ToolTip.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>18, 15</value>
   </metadata>
-  <data name="drp_subtitle.ToolTip" xml:space="preserve">
-    <value>Select the subtitle language you require from this dropdown.
- - or -
-Autoselect: Scan for subtitles in an extra 1st pass, and choose
-the one that's only used 10 percent of the time or less. 
-This should locate subtitles for short foreign language segments. 
-Best used in conjunction with forced subtitles.</value>
-  </data>
   <metadata name="number.UserAddedColumn" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>True</value>
   </metadata>
   <metadata name="name.UserAddedColumn" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>True</value>
+  </metadata>
+  <metadata name="ChaptersMenu.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>578, 54</value>
   </metadata>
   <data name="data_chpt.ToolTip" xml:space="preserve">
     <value>Here you can name each chapter that the encoded video will contain.
@@ -155,93 +144,38 @@ Make sure you have selected a "Title" from the "Source" box above otherwise
 the list will not be populated with the correct amount of chapters.
 Note: Do not change any of the chapter numbers!</value>
   </data>
-  <data name="check_Cabac.ToolTip" xml:space="preserve">
-    <value>CABAC, or context adaptive binary arithmetic coding, is used by x264 to reduce the bitrate needed for a given quality by 15%. 
-This makes it very cool and very useful, and it should be left on whenever possible. However, it is incompatible with the iPod 5.5G, and makes the AppleTV struggle. 
-So turn it off for those. CABAC is a kind of entropy coding, which means that it compresses data by making shorthand symbols to represent long streams of data. 
-The "entropy" part means that the symbols it uses the most often are the smallest. 
-When you disable CABAC, another entropy coding scheme gets enabled, called CAVLC (context adaptive variable-length coding). 
-CAVLC is a lot less efficient, which is why it needs 15% more bitrate to achieve the same quality as CABAC.</value>
+  <data name="btn_importChapters.ToolTip" xml:space="preserve">
+    <value>Import a comma separated file containing the chapter information.
+The CSV should be formatted as follows:
+
+1,Chapter 1 Name
+2,Chapter 2 Name
+3,Chapter 3 Name
+
+Note: Currently, if you wish to use a , in your chapter name, you must escape it with a \
+Note2: HandBrake can NOT create chapters, only add a name to any chapters your source currently has.</value>
   </data>
-  <data name="drop_deblockBeta.ToolTip" xml:space="preserve">
-    <value>x264 includes an in-loop deblocking filter. 
-What this means is that blocky compression artifacts are smoothed away when you play back the video. 
-It has two settings: strength and threshold, just like a simple filter in Photoshop. 
-Strength controls the amount of deblocking applied to the whole frame. 
-If you drop down below 0, you reduce the amount of blurring.
-Go too negative, and you'll get an effect somewhat like oversharpening an image. 
-Go into positive values, and the image may become too soft. 
-Threshold controls how sensitive the filter is to whether something in a block is detail that needs to be preserved: lower numbers blur details less. 
-The default deblocking values are 0 and 0. This does not mean zero deblocking. 
-It means x264 will apply the regular deblocking strength and thresholds the codec authors have selected as working the best in most cases. 
-While many, many people stick with the default deblocking values of 0,0, other people disagree. 
-Some prefer a slightly less blurred image for live action material, and use values like -2,-1 or -2,-2. Others will raise it to 1,1 or even 3,3 for animation. 
-While the values for each setting extend from -6 to 6, the consensus is that going below -3 or above 3 is worthless.
-</value>
+  <data name="btn_export.ToolTip" xml:space="preserve">
+    <value>Export to a comma separated file containing the chapter information.
+The CSV is formatted as follows:
+
+1,Chapter 1 Name
+2,Chapter 2 Name
+3,Chapter 3 Name
+
+Note: Commas in names are escaped by a \</value>
   </data>
-  <data name="drop_deblockAlpha.ToolTip" xml:space="preserve">
-    <value>x264 includes an in-loop deblocking filter. 
-What this means is that blocky compression artifacts are smoothed away when you play back the video. 
-It has two settings: strength and threshold, just like a simple filter in Photoshop. 
-Strength controls the amount of deblocking applied to the whole frame. 
-If you drop down below 0, you reduce the amount of blurring.
-Go too negative, and you'll get an effect somewhat like oversharpening an image. 
-Go into positive values, and the image may become too soft. 
-Threshold controls how sensitive the filter is to whether something in a block is detail that needs to be preserved: lower numbers blur details less. 
-The default deblocking values are 0 and 0. This does not mean zero deblocking. 
-It means x264 will apply the regular deblocking strength and thresholds the codec authors have selected as working the best in most cases. 
-While many, many people stick with the default deblocking values of 0,0, other people disagree. 
-Some prefer a slightly less blurred image for live action material, and use values like -2,-1 or -2,-2. Others will raise it to 1,1 or even 3,3 for animation. 
-While the values for each setting extend from -6 to 6, the consensus is that going below -3 or above 3 is worthless.</value>
+  <data name="drop_mode.ToolTip" xml:space="preserve">
+    <value>There are several ranges which can be encoded:
+- Encode a range of Chapters.
+
+The Following options are not 100% accurate:
+- Encode video between a start and end time, measured in seconds
+- Encode video between a start and end frame.</value>
   </data>
-  <data name="check_8x8DCT.ToolTip" xml:space="preserve">
-    <value>When Analysis is set to "all," checking this box lets x264 break key frames down into 8x8 blocks of pixels for analysis. 
-This is a high profile feature of H.264, which makes it less compatible. It should slightly decrease bitrate or improve quality.</value>
-  </data>
-  <data name="drop_analysis.ToolTip" xml:space="preserve">
-    <value>Analysis controls how finely x264 divides up a frame to capture detail. 
-Full macroblocks are 16x16 pixels, but x264 can go down all the way to 4x4 blocks if it judges it necessary. 
-By default it only breaks up key frames that much. 
-To give x264 the freedom to make the best decisions for all frames, use "all" analysis. 
-If you want to create a high profile H.264 video (which is less compatible with the world at large than main profile), 
-also check the "8x8 DCT blocks" box to add yet another block size for analysis.</value>
-  </data>
-  <data name="drop_subpixelMotionEstimation.ToolTip" xml:space="preserve">
-    <value>This setting is finer-grained than the motion estimation settings above. 
-Instead of dealing with whole pixels, it deals with fractional pixels. 4, HandBrake's default, means looking at quarter pixels (qpel). 
-Higher levels increase quality by dividing the pixel more, but take longer to encode. 
-Using 6 or 7 turns unlocks the ability to turn on more advanced features like B-Frame rate distortion.</value>
-  </data>
-  <data name="drop_MotionEstimationRange.ToolTip" xml:space="preserve">
-    <value>This range is the radius, in pixels, x264 should use for motion estimation searches. 
-It only has an effect when you use Uneven Multi-Hexagonal or Exhaustive searching. 
-24, 32, and 64 are good values.</value>
-  </data>
-  <data name="drop_MotionEstimationMethod.ToolTip" xml:space="preserve">
-    <value>This sets the shape of the area x264 searches when estimating motion. 
-Your choices are a diamond, a hexagon, a more complex hexagonal shape, or searching the entire frame. 
-You are best off using Uneven Multi-Hexagonal searching.</value>
-  </data>
-  <data name="check_pyrmidalBFrames.ToolTip" xml:space="preserve">
-    <value>B-frame pyramids are a High Profile feature. 
-This means that if you enable it, YOUR VIDEO WILL NOT PLAY IN QUICKTIME. 
-Pyramidal B-frames mean that B-frames don't just reference surrounding reference frames — 
- instead, it also treats a previous B-frame as a reference, improving quality/lowering bitrate at the expense of complexity. 
-Logically, to reference an earlier B-frame, you must tell x264 to use at least 2 B-frames.</value>
-  </data>
-  <data name="check_weightedBFrames.ToolTip" xml:space="preserve">
-    <value>With weighted B-frame prediction enabled, x264 will consider how far away the previous and next P-frames are, 
-before deciding to make a frame a B-frame. 
-The effect is that x264 will use fewer B-frames when they'd look bad — when it can't accurately predict motion. 
-Obviously, this only works when you tell x264 to use more than 1 B-frame.  </value>
-  </data>
-  <data name="drop_directPrediction.ToolTip" xml:space="preserve">
-    <value>Direct prediction tells x264 what method to use when guessing motion for certain parts of a B-frame. 
-It can either look at other parts of the current frame (spatial) or compare against the preceding frame (temporal). 
-You're best off setting this to automatic, so x264 decides which method is best on its own. 
-Don't select none assuming it will be faster; instead it will take longer and look worse. 
-If you're going to choose between spatial and temporal, spatial is usually better. </value>
-  </data>
+  <metadata name="presets_menu.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>1354, 15</value>
+  </metadata>
   <metadata name="DVD_Open.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>232, 15</value>
   </metadata>
@@ -254,33 +188,22 @@ If you're going to choose between spatial and temporal, spatial is usually bette
   <metadata name="frmMainMenu.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>106, 15</value>
   </metadata>
-  <metadata name="presets_menu.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>1224, 15</value>
+  <metadata name="AudioMenuRowHeightHack.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>17, 54</value>
   </metadata>
+  <data name="label34.Text" xml:space="preserve">
+    <value>Here you can alter the query generated by this program. This feature is for one job overriding of the automatic query generation.
+Don't forget to re-generate this query if you change any GUI options.
+Note that this will also override the "Add to Queue" query as well.
+Clear the text box below to return to the internal query generation.</value>
+  </data>
   <metadata name="toolStrip1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>767, 15</value>
   </metadata>
-  <assembly alias="System.Drawing" name="System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
-  <data name="btn_dvd_source.Image" type="System.Drawing.Bitmap, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
-    <value>
-        iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8
-        YQUAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAlpJREFUOE+tk21I
-        k1EYhif0oyA0sqIQCix/+GcQFFH9CCmiUBTLLEjShJofVBgL2fxoU9Pp5ubUlS5rU9f8rCyjsA+pUCRC
-        TR1ppmVFUSlmhq78unrnQF1KGHTg/nEOz30993PO+7qJFrmUeiv2n+Mij+XLRLLYULdF2pxlEVIDcw0p
-        AsyxD5fmI/rQ94pqi26eOlsfuZj+7BgSm01QdA4ih7m73Yx9qGpavwatjPebqCzOprPt8YKQgzFagqL0
-        BEjyEFWVaBkdLHMxT34uYNwWR9nVTEoL0zHlp2DMSeaSRk6eKt4VWm5WM/rVPNN5SjDTLQebZEHNA1wr
-        UvHjk3E6tsNcV62e1r3KLGqtKm6WplNpSsVqVFJsOM8VfSKFWjkGtcyZptSYzvC7XByx3zQoqCnTMvlG
-        CX1prnornPUmQJcUXsbSVhGK5bIOkcmQyveeTHiv4VZ5Nk33Nc6iuSO8CIfmECYa/bE/8ON1iRipJNh5
-        F0V6Bd86lfQ1JlFj1TDVq4COKCegLVIwHmGiKRB7/V6G7+5koHozymgfYRy5E1CgTWKgXcZ1i5qWp0KS
-        rjgBcAJawph6FszYk/2M1O1isGYLX8p9ab6wgqP+3rMvYciS01GfzA1LFvQkQ6sQ9/khxhoCGHnox1Dt
-        NvorxXw0b8Km8UQh2cip6GOzgNyMeKqKM7HdjqFZJ5pRk2YJ9aql3EnxoCJxNaZ4Ly6e3UDY3O6OEXRp
-        59ApTpIhiyDh9GHORAZyPHQPB/ZtZ/cOMVvFPvh6e7F+3SrWrHRnraf7Xz/xf/rJ/kvxb84I3U1y+9/W
-        AAAAAElFTkSuQmCC
-</value>
-  </data>
   <metadata name="notifyIcon.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>871, 15</value>
   </metadata>
+  <assembly alias="System.Drawing" name="System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
   <data name="notifyIcon.Icon" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
     <value>
         AAABAAYAMDAAAAEACACoDgAAZgAAACAgAAABAAgAqAgAAA4PAAAQEAAAAQAIAGgFAAC2FwAAMDAAAAEA
@@ -661,10 +584,13 @@ If you're going to choose between spatial and temporal, spatial is usually bette
 </value>
   </data>
   <metadata name="StatusStrip.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>1113, 15</value>
+    <value>1244, 15</value>
+  </metadata>
+  <metadata name="hbproc.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>220, 54</value>
   </metadata>
   <metadata name="$this.TrayHeight" type="System.Int32, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>56</value>
+    <value>98</value>
   </metadata>
   <data name="$this.Icon" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
     <value>
@@ -1045,4 +971,13 @@ If you're going to choose between spatial and temporal, spatial is usually bette
         AAD6AQAA4AEAAMABAACAAQAAgAEAAMBBAADAYQAAjGEAAIRhAADc+wAA3/8AAA==
 </value>
   </data>
+  <metadata name="File_Save.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>664, 15</value>
+  </metadata>
+  <metadata name="openPreset.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>310, 54</value>
+  </metadata>
+  <metadata name="File_ChapterImport.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>423, 54</value>
+  </metadata>
 </root>

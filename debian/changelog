@@ -1,3 +1,170 @@
+handbrake (0.9.5-0.1) unstable; urgency=low
+
+  * Added libass-dev in Build-Depends.
+
+ -- Christian Marillat <marillat@debian.org>  Sat, 15 Jan 2011 11:17:36 +0100
+
+handbrake (0.9.5-0.0) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Christian Marillat <marillat@debian.org>  Sat, 15 Jan 2011 01:18:41 +0100
+
+handbrake (0.9.4+svn20100902-0.1) unstable; urgency=low
+
+  * New upstream  release.
+  * Arch should be only amd64, i386, kfreebsd-i386 and powerpc.
+
+ -- Christian Marillat <marillat@debian.org>  Fri, 14 Jan 2011 19:44:22 +0100
+
+handbrake (0.9.4+svn20100902-0.0) unstable; urgency=low
+
+  * New svn release (3506).
+  * Remove 02_no-mm_flags patch (Fix crash with high profile and DVD).
+  * Build against latest x264 who add options for trellis and psy-trellis
+    for cavlc.
+
+ -- Christian Marillat <marillat@debian.org>  Fri, 03 Sep 2010 10:09:57 +0200
+
+handbrake (0.9.4+svn20100726-0.0) unstable; urgency=low
+
+  * New svn release (3460).
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 26 Jul 2010 12:07:07 +0200
+
+handbrake (0.9.4+svn20100705-0.0) unstable; urgency=low
+
+  * New svn release (3428).
+  * Added gstreamer0.10-ffmpeg and gstreamer0.10-x in Recommends. These
+    packages are necessary to display video preview.
+  * As the build is fixed upstream, remove Build-Conflicts for libva-dev.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 05 Jul 2010 19:06:54 +0200
+
+handbrake (0.9.4+svn20100624-0.0) unstable; urgency=low
+
+  * New svn release (3402).
+  * This version add a preset for iPad.
+
+ -- Christian Marillat <marillat@debian.org>  Thu, 24 Jun 2010 09:30:56 +0200
+
+handbrake (0.9.4+svn20100613-0.0) unstable; urgency=low
+
+  * New svn release (3380).
+  * Update 04_kfreebsd patch as kfreebsd doesn't have udev.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 13 Jun 2010 12:00:03 +0200
+
+handbrake (0.9.4+svn20100607-0.0) unstable; urgency=low
+
+  * New svn release (3365).
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 07 Jun 2010 11:25:39 +0200
+
+handbrake (0.9.4+svn20100419-0.0) unstable; urgency=low
+
+  * New svn release (3242).
+  * Added support for kfreebsd-i386.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 19 Apr 2010 15:18:58 +0200
+
+handbrake (0.9.4+svn20100314-0.0) unstable; urgency=low
+
+  * New svn release (3167).
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 14 Mar 2010 12:54:53 +0100
+
+handbrake (0.9.4+svn20100208-0.2) unstable; urgency=low
+
+  * Fix handbrake version number.
+
+ -- Christian Marillat <marillat@debian.org>  Sat, 13 Mar 2010 16:10:48 +0100
+
+handbrake (0.9.4+svn20100208-0.1) unstable; urgency=low
+
+  * Fix the build for powerpc.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 21 Feb 2010 14:59:30 +0100
+
+handbrake (0.9.4+svn20100208-0.0) unstable; urgency=low
+
+  * New svn release (3104).
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 08 Feb 2010 19:07:33 +0100
+
+handbrake (0.9.4-0.1) unstable; urgency=low
+
+  * Build included ffmpeg with ccache.
+
+ -- Christian Marillat <marillat@debian.org>  Thu, 26 Nov 2009 00:14:46 +0100
+
+handbrake (0.9.4-0.0) unstable; urgency=low
+
+  * New usptream release.
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 25 Nov 2009 23:37:58 +0100
+
+handbrake (0.9.3+svn20091021-0.0) unstable; urgency=low
+
+  * New svn release (2893).
+  * rebuild against libx264-78.
+
+ -- Christian Marillat <marillat@debian.org>  Wed, 21 Oct 2009 20:12:46 +0200
+
+handbrake (0.9.3+svn20091012-0.0) unstable; urgency=low
+
+  * New svn release (2877).
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 12 Oct 2009 11:40:28 +0200
+
+handbrake (0.9.3+svn2773-0.2) unstable; urgency=low
+
+  * Rebuild against libx264-76.
+
+ -- Christian Marillat <marillat@debian.org>  Tue, 06 Oct 2009 11:21:37 +0200
+
+handbrake (0.9.3+svn2773-0.1) unstable; urgency=low
+
+  * Rebuild against latest libfaad-dev package.
+
+ -- Christian Marillat <marillat@debian.org>  Sat, 19 Sep 2009 15:11:05 +0200
+
+handbrake (0.9.3+svn2773-0.0) unstable; urgency=low
+
+  * Svn release, the unstable package doesn't work with the latest
+    libgtk2.0-0 package (2.16.6-1).
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 13 Sep 2009 17:14:08 +0200
+
+handbrake (0.9.3-0.5) unstable; urgency=low
+
+  * debian/rules remove call to dh_desktop.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 11 May 2009 20:50:08 +0200
+
+handbrake (0.9.3-0.4) unstable; urgency=low
+
+  * Remove a call to svn and remove subversion from Build-Depends.
+  * Fix build for mipsel and sparc.
+
+ -- Christian Marillat <marillat@debian.org>  Mon, 11 May 2009 19:56:52 +0200
+
+handbrake (0.9.3-0.3) unstable; urgency=low
+
+  * Added support for ccache.
+  * make the build more verbose.
+  * In some arch (armel) the mm_flags function doesn't exist, so do a patch
+    to not use this function when we build for armel.
+
+ -- Christian Marillat <marillat@debian.org>  Sun, 10 May 2009 22:05:57 +0200
+
+handbrake (0.9.3-0.2) unstable; urgency=low
+
+  * Build against the latest libdvdread-dev.
+  * New patch 03_libdvdread4 to fix build with libdvdread4.
+
+ -- Christian Marillat <marillat@debian.org>  Sat, 07 Mar 2009 12:38:03 +0100
+
 handbrake (0.9.3-0.1) unstable; urgency=low
 
   * Don't Build-Depends on libgtk2.0-dev, libgtkhtml3.14-dev already depends

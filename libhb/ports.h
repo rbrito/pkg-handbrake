@@ -7,21 +7,35 @@
 #ifndef HB_PORTS_H
 #define HB_PORTS_H
 
+#if defined(_WIN32)
+#define DIR_SEP_STR "\\"
+#else
+#define DIR_SEP_STR "/"
+#endif
+
 /************************************************************************
  * Utils
  ***********************************************************************/
 uint64_t hb_get_date();
 void     hb_snooze( int delay );
 int      hb_get_cpu_count();
+#ifdef SYS_MINGW
+char *strtok_r(char *s, const char *delim, char **save_ptr);
+#endif
 
 #ifdef __LIBHB__
 
 /* Everything from now is only used internally and hidden to the UI */
 
 /************************************************************************
- * Files utils
+ * DVD utils
  ***********************************************************************/
-void hb_get_tempory_directory( hb_handle_t * h, char path[512] );
+int hb_dvd_region(char *device, int *region_mask);
+
+/************************************************************************
+ * File utils
+ ***********************************************************************/
+void hb_get_temporary_directory( char path[512] );
 void hb_get_tempory_filename( hb_handle_t *, char name[1024],
                               char * fmt, ... );
 void hb_mkdir( char * name );
@@ -43,6 +57,9 @@ typedef struct hb_thread_s hb_thread_t;
 #elif defined( SYS_CYGWIN )
 #  define HB_LOW_PRIORITY    0
 #  define HB_NORMAL_PRIORITY 1
+#elif defined( SYS_MINGW )
+#  define HB_LOW_PRIORITY    0
+#  define HB_NORMAL_PRIORITY 0
 #endif
 
 hb_thread_t * hb_thread_init( char * name, void (* function)(void *),
@@ -66,7 +83,9 @@ typedef struct hb_cond_s hb_cond_t;
 
 hb_cond_t * hb_cond_init();
 void        hb_cond_wait( hb_cond_t *, hb_lock_t * );
+void        hb_cond_timedwait( hb_cond_t * c, hb_lock_t * lock, int msec );
 void        hb_cond_signal( hb_cond_t * );
+void        hb_cond_broadcast( hb_cond_t * c );
 void        hb_cond_close( hb_cond_t ** );
 
 /************************************************************************

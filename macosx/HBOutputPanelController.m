@@ -12,14 +12,14 @@
 // Original value used by cleaner
 //#define TextStorageUpperSizeLimit 20000
 // lets use this higher value for now for better gui debugging
-#define TextStorageUpperSizeLimit 40000
+#define TextStorageUpperSizeLimit 125000
 
 /// When old output is removed, this is the amount of characters that will be
 /// left in outputTextStorage.
 // Original value used by cleaner
 //#define TextStorageLowerSizeLimit 15000
 // lets use this higher value for now for better gui debugging
-#define TextStorageLowerSizeLimit 35000
+#define TextStorageLowerSizeLimit 120000
 
 @implementation HBOutputPanelController
 
@@ -91,10 +91,17 @@
  */
 - (IBAction)showOutputPanel:(id)sender
 {
+    if ([[self window] isVisible])
+    {
+        [[self window] close];
+    }
+    else
+    {
     [textView scrollRangeToVisible:NSMakeRange([outputTextStorage length], 0)];
     [self showWindow:sender];
 
     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"OutputPanelIsOpen"];
+    }
 }
 
 - (void) startEncodeLog:(NSString *) logPath
@@ -113,10 +120,10 @@
     /* We need to get the current time in YY-MM-DD HH-MM-SS format to put at the beginning of the name of the log file */
     time_t _now = time( NULL );
     struct tm * now  = localtime( &_now );
-    NSString *dateForLogTitle = [NSString stringWithFormat:@"%02d-%02d-%02d %02d-%02d-%02d",now->tm_year + 1900, now->tm_mon, now->tm_mday,now->tm_hour, now->tm_min, now->tm_sec]; 
+    NSString *dateForLogTitle = [NSString stringWithFormat:@"%02d-%02d-%02d %02d-%02d-%02d",now->tm_year + 1900, now->tm_mon + 1, now->tm_mday,now->tm_hour, now->tm_min, now->tm_sec]; 
     
     /* Assemble the new log file name as YY-MM-DD HH-MM-SS mymoviename.txt */
-    NSString *outputDateFileName = [NSString stringWithFormat:@"%@ %@.txt",dateForLogTitle,[[outputFileForEncode lastPathComponent] stringByDeletingPathExtension]];
+    NSString *outputDateFileName = [NSString stringWithFormat:@"%@ %@.txt",[[outputFileForEncode lastPathComponent] stringByDeletingPathExtension],dateForLogTitle];
     if ([[NSUserDefaults standardUserDefaults] boolForKey:@"EncodeLogLocation"]) // if we are putting it in the same directory with the movie
     {
         
@@ -131,14 +138,16 @@
         if( ![[NSFileManager defaultManager] fileExistsAtPath:encodeLogDirectory] )
         {
             [[NSFileManager defaultManager] createDirectoryAtPath:encodeLogDirectory
-                                                       attributes:nil];
+                                            withIntermediateDirectories:NO
+                                            attributes:nil
+                                            error:nil];
         }
         outputLogFileForEncode = [[NSString stringWithFormat:@"%@/%@",encodeLogDirectory,outputDateFileName] retain];   
     }
     [fileManager createFileAtPath:outputLogFileForEncode contents:nil attributes:nil];
     
     /* Similar to the regular activity log, we print a header containing the date and time of the encode as well as what directory it was encoded to */
-    NSString *versionStringFull = [[NSString stringWithFormat: @"Handbrake Version: %@", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleGetInfoString"]] stringByAppendingString: [NSString stringWithFormat: @" (%@)\n\n", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"]]];
+    NSString *versionStringFull = [[NSString stringWithFormat: @"Handbrake Version: %@", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"]] stringByAppendingString: [NSString stringWithFormat: @" (%@)\n\n", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"]]];
     NSString *startOutputLogString = [NSString stringWithFormat: @"HandBrake Activity Log for %@: %@\n%@",outputFileForEncode, [[NSDate  date] descriptionWithCalendarFormat:nil timeZone:nil locale:nil],versionStringFull];
     [startOutputLogString writeToFile:outputLogFileForEncode atomically:YES encoding:NSUTF8StringEncoding error:NULL];
 
@@ -208,11 +217,11 @@
 {
 	[outputTextStorage deleteCharactersInRange:NSMakeRange(0, [outputTextStorage length])];
     /* We want to rewrite the app version info to the top of the activity window so it is always present */
-    NSString *versionStringFull = [[NSString stringWithFormat: @"Handbrake Version: %@", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleGetInfoString"]] stringByAppendingString: [NSString stringWithFormat: @" (%@)", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"]]];
+    NSString *versionStringFull = [[NSString stringWithFormat: @"Handbrake Version: %@", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"]] stringByAppendingString: [NSString stringWithFormat: @" (%@)\n\n", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"]]];
     time_t _now = time( NULL );
     struct tm * now  = localtime( &_now );
     fprintf(stderr, "[%02d:%02d:%02d] macgui: %s\n", now->tm_hour, now->tm_min, now->tm_sec, [versionStringFull UTF8String]);
-    
+
 }
 
 /**
@@ -250,7 +259,9 @@
     if( ![[NSFileManager defaultManager] fileExistsAtPath:encodeLogDirectory] )
     {
         [[NSFileManager defaultManager] createDirectoryAtPath:encodeLogDirectory
-                                                   attributes:nil];
+                                            withIntermediateDirectories:NO
+                                            attributes:nil
+                                            error:nil];
     }
     
     NSAppleScript *myScript = [[NSAppleScript alloc] initWithSource: [NSString stringWithFormat: @"%@%@%@", @"tell application \"Finder\" to open (POSIX file \"", encodeLogDirectory, @"\")"]];
@@ -266,7 +277,7 @@
         [startOutputLogString writeToFile:outputLogFile atomically:NO encoding:NSUTF8StringEncoding error:NULL];
         
         /* We want to rewrite the app version info to the top of the activity window so it is always present */
-        NSString *versionStringFull = [[NSString stringWithFormat: @"macgui: Handbrake Version: %@", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleGetInfoString"]] stringByAppendingString: [NSString stringWithFormat: @" (%@)", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"]]];
+        NSString *versionStringFull = [[NSString stringWithFormat: @"macgui: Handbrake Version: %@", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"]] stringByAppendingString: [NSString stringWithFormat: @" (%@)\n\n", [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"]]];
         [versionStringFull writeToFile:outputLogFile atomically:NO encoding:NSUTF8StringEncoding error:NULL];
         
 }

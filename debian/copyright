@@ -47,12 +47,12 @@ License:
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
     02110-1301 USA.
 
-The full text of this license is at `/usr/share/common-licenses/GPL'.
+The full text of this license is at `/usr/share/common-licenses/GPL-2'.
 
 ---
 
 The Debian packaging is copyright 2008, Christian Marillat <marillat@debian.org> and
-is licensed under the GPL, see `/usr/share/common-licenses/GPL'.
+is licensed under the GPL, see `/usr/share/common-licenses/GPL-2'.
 
 ==== Contrib Libraries ====
 
@@ -87,7 +87,7 @@ License:
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 
 On Debian systems, the complete text of the GNU General Public License
-can be found in /usr/share/common-licenses/GPL file.
+can be found in /usr/share/common-licenses/GPL-2 file.
 
 --- ffmpeg ---
 
@@ -186,7 +186,7 @@ The debian/libfaad directory contains header from the libfaad-dev package.
  | 
  | License Declaration:
  | 
- | The GPL may be found in the file /usr/share/common-licenses/GPL.
+ | The GPL may be found in the file /usr/share/common-licenses/GPL-2.
  | 
  | The upstream source has the follwing license declaration:
  | ---
@@ -242,8 +242,8 @@ The rest of the code is licensed under the GNU LGPL:
  | Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
 On Debian GNU/Linux systems, the complete text of the GNU General Public
-License can be found in `/usr/share/common-licenses/GPL' and the text of the
-GNU Lesser General Public License is in `/usr/share/common-licenses/LGPL'.
+License can be found in `/usr/share/common-licenses/GPL-2' and the text of the
+GNU Lesser General Public License is in `/usr/share/common-licenses/LGPL-2.1'.
 
 --- libdca ---
 
@@ -287,7 +287,7 @@ Copyright:
 License:
 
     You should have received a copy of the GNU General Public License with the
-    Debian GNU/Linux distribution in file /usr/share/common-licenses/GPL; if
+    Debian GNU/Linux distribution in file /usr/share/common-licenses/GPL-2; if
     not, write to the Free Software Foundation, Inc., 51 Franklin St, Fifth
     Floor, Boston, MA 02110-1301, USA.
 
@@ -524,4 +524,4 @@ mpeg2dec is Copyright (C) 1999-2000 Aaron Holtzman <aholtzma@ess.engr.uvic.ca>
     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
 On Debian systems, the complete text of the GNU General Public License can
-be found in `/usr/share/common-licenses/GPL'.
+be found in `/usr/share/common-licenses/GPL-2'.

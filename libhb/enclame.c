@@ -28,6 +28,7 @@ struct hb_work_private_s
     /* LAME handle */
     lame_global_flags * lame;
 
+    int             out_discrete_channels;
     unsigned long   input_samples;
     unsigned long   output_bytes;
     uint8_t       * buf;
@@ -40,6 +41,7 @@ int enclameInit( hb_work_object_t * w, hb_job_t * job )
 {
     hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
     hb_audio_t * audio = w->audio;
+
     w->private_data = pv;
 
     pv->job   = job;
@@ -47,12 +49,30 @@ int enclameInit( hb_work_object_t * w, hb_job_t * job )
     hb_log( "enclame: opening libmp3lame" );
 
     pv->lame = lame_init();
-    lame_set_brate( pv->lame, audio->config.out.bitrate );
+    // use ABR
+    lame_set_VBR( pv->lame, vbr_abr );
+    lame_set_VBR_mean_bitrate_kbps( pv->lame, audio->config.out.bitrate );
     lame_set_in_samplerate( pv->lame, audio->config.out.samplerate );
     lame_set_out_samplerate( pv->lame, audio->config.out.samplerate );
+
+    pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
+    // Lame's default encoding mode is JOINT_STEREO.  This subtracts signal
+    // that is "common" to left and right (within some threshold) and encodes
+    // it separately.  This improves quality at low bitrates, but hurts 
+    // imaging (channel separation) at higher bitrates.  So if the bitrate
+    // is suffeciently high, use regular STEREO mode.
+    if ( pv->out_discrete_channels == 1 )
+    {
+        lame_set_mode( pv->lame, MONO );
+        lame_set_num_channels( pv->lame, 1 );
+    }
+    else if ( audio->config.out.bitrate >= 128 )
+    {
+        lame_set_mode( pv->lame, STEREO );
+    }
     lame_init_params( pv->lame );
 
-    pv->input_samples = 1152 * 2;
+    pv->input_samples = 1152 * pv->out_discrete_channels;
     pv->output_bytes = LAME_MAXMP3BUFFER;
     pv->buf  = malloc( pv->input_samples * sizeof( float ) );
 
@@ -88,9 +108,9 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
     hb_work_private_t * pv = w->private_data;
     hb_audio_t * audio = w->audio;
     hb_buffer_t * buf;
-    int16_t samples_s16[1152 * 2];
+    float samples[2][1152];
     uint64_t pts, pos;
-	int      i;
+    int      i, j;
 
     if( hb_list_bytes( pv->list ) < pv->input_samples * sizeof( float ) )
     {
@@ -100,16 +120,23 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
     hb_list_getbytes( pv->list, pv->buf, pv->input_samples * sizeof( float ),
                       &pts, &pos);
 
-    for( i = 0; i < 1152 * 2; i++ )
+    memset(samples, 0, 2*1152*sizeof(float));
+    for( i = 0; i < 1152; i++ )
     {
-        samples_s16[i] = ((float*) pv->buf)[i];
+        for( j = 0; j < pv->out_discrete_channels; j++ )
+        {
+            samples[j][i] = ((float *) pv->buf)[(pv->out_discrete_channels * i + j)];
+        }
     }
 
     buf        = hb_buffer_init( pv->output_bytes );
-    buf->start = pts + 90000 * pos / 2 / sizeof( float ) / audio->config.out.samplerate;
+    buf->start = pts + 90000 * pos / pv->out_discrete_channels / sizeof( float ) / audio->config.out.samplerate;
     buf->stop  = buf->start + 90000 * 1152 / audio->config.out.samplerate;
-    buf->size  = lame_encode_buffer_interleaved( pv->lame, samples_s16,
+    pv->pts = buf->stop;
+    buf->size  = lame_encode_buffer_float( 
+            pv->lame, samples[0], samples[1],
             1152, buf->data, LAME_MAXMP3BUFFER );
+
     buf->frametype   = HB_FRAME_AUDIO;
 
     if( !buf->size )
@@ -125,7 +152,6 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
         hb_buffer_close( &buf );
         return NULL;
     }
-
     return buf;
 }
 
@@ -138,14 +164,39 @@ int enclameWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
                  hb_buffer_t ** buf_out )
 {
     hb_work_private_t * pv = w->private_data;
+    hb_audio_t * audio = w->audio;
+    hb_buffer_t * in = *buf_in;
     hb_buffer_t * buf;
 
     if ( (*buf_in)->size <= 0 )
     {
         /* EOF on input - send it downstream & say we're done */
-        *buf_out = *buf_in;
+
+        buf = hb_buffer_init( pv->output_bytes );
+        buf->size = lame_encode_flush( pv->lame, buf->data, LAME_MAXMP3BUFFER );
+        buf->start = pv->pts;
+        buf->stop  = buf->start + 90000 * 1152 / audio->config.out.samplerate;
+        buf->frametype   = HB_FRAME_AUDIO;
+        if( buf->size <= 0 )
+        {
+            hb_buffer_close( &buf );
+        }
+
+        // Add the flushed data
+        *buf_out = buf;
+
+        // Add the eof
+        if ( buf )
+        {
+            buf->next = in;
+        }
+        else
+        {
+            *buf_out = in;
+        }
+
         *buf_in = NULL;
-       return HB_WORK_DONE;
+        return HB_WORK_DONE;
     }
 
     hb_list_add( pv->list, *buf_in );

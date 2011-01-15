@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * queuehandler.h
- * Copyright (C) John Stebbins 2008 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
  * 
  * queuehandler.h is free software.
  * 
@@ -28,6 +28,7 @@
 #include <gtk/gtk.h>
 #include "settings.h"
 
-void ghb_queue_buttons_grey(signal_user_data_t *ud, gboolean working);
+void ghb_queue_buttons_grey(signal_user_data_t *ud);
+gboolean ghb_reload_queue(signal_user_data_t *ud);
 
 #endif // _QUEUEHANDLER_H_

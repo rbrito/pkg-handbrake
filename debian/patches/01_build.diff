@@ -1,0 +1,103 @@
+Index: handbrake-0.9.5/make/include/main.defs
+===================================================================
+--- handbrake-0.9.5.orig/make/include/main.defs	2011-01-15 11:08:43.000000000 +0100
++++ handbrake-0.9.5/make/include/main.defs	2011-01-15 11:10:19.000000000 +0100
+@@ -16,23 +16,11 @@
+ endif
+ endif
+ 
+-MODULES += contrib/faac
+-MODULES += contrib/faad2
+ MODULES += contrib/ffmpeg
+-MODULES += contrib/fontconfig
+-MODULES += contrib/freetype
+-MODULES += contrib/lame
+-MODULES += contrib/libass
+ MODULES += contrib/libdca
+ MODULES += contrib/libdvdread
+ MODULES += contrib/libdvdnav
+ MODULES += contrib/libbluray
+-MODULES += contrib/libmkv
+-MODULES += contrib/libogg
+-MODULES += contrib/libsamplerate
+-MODULES += contrib/libtheora
+-MODULES += contrib/libvorbis
+-MODULES += contrib/libxml2
+ MODULES += contrib/mp4v2
+ MODULES += contrib/mpeg2dec
+ 
+@@ -42,8 +30,6 @@
+ endif
+ endif
+ 
+-MODULES += contrib/x264
+-
+ ifneq (,$(filter $(BUILD.system),cygwin mingw))
+ ifneq ($(HAS.iconv),1)
+     MODULES += contrib/libiconv
+@@ -78,6 +64,11 @@
+     ## build gtk when gtk+linux
+     MODULES += gtk
+ endif
++
++ifeq (1-kfreebsd,$(FEATURE.gtk)-$(BUILD.system))
++    ## build gtk when gtk+linux
++    MODULES += gtk
++endif
+ 
+ ###############################################################################
+ 
+Index: handbrake-0.9.5/contrib/ffmpeg/module.defs
+===================================================================
+--- handbrake-0.9.5.orig/contrib/ffmpeg/module.defs	2011-01-15 11:08:43.000000000 +0100
++++ handbrake-0.9.5/contrib/ffmpeg/module.defs	2011-01-15 11:10:02.000000000 +0100
+@@ -24,7 +24,7 @@
+     --enable-gpl \
+     --enable-muxer=ipod \
+     --enable-zlib \
+-    --cc="$(FFMPEG.GCC.gcc)" \
++    --cc="ccache gcc" \
+     --extra-cflags="$(call fn.ARGS,FFMPEG.GCC,*archs *sysroot *minver ?extra) -I$(call fn.ABSOLUTE,$(CONTRIB.build/)include)" \
+     --extra-ldflags="$(call fn.ARGS,FFMPEG.GCC,*archs *sysroot *minver ?extra) -L$(call fn.ABSOLUTE,$(CONTRIB.build/)lib)"
+ 
+Index: handbrake-0.9.5/test/module.defs
+===================================================================
+--- handbrake-0.9.5.orig/test/module.defs	2011-01-15 11:08:43.000000000 +0100
++++ handbrake-0.9.5/test/module.defs	2011-01-15 11:10:02.000000000 +0100
+@@ -10,10 +10,12 @@
+ TEST.exe = $(BUILD/)$(call TARGET.exe,$(HB.name)CLI)
+ 
+ TEST.libs = $(LIBHB.a) $(foreach n, \
+-        a52 ass avcore avcodec avformat avutil dca dvdnav dvdread faac faad fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
+-        ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
++        a52 avcore avcodec avformat avutil dca dvdnav dvdread mpeg2 mp4v2 \
++        swscale bluray, \
+         $(CONTRIB.build/)lib/lib$(n).a )
+ 
++TEST.libs += -lass -lfaac -lfaad -lmp3lame -logg -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread
++
+ TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
+ 
+ ifeq (1,$(PTHREADW32.enabled))
+Index: handbrake-0.9.5/gtk/src/Makefile.am
+===================================================================
+--- handbrake-0.9.5.orig/gtk/src/Makefile.am	2011-01-15 11:08:43.000000000 +0100
++++ handbrake-0.9.5/gtk/src/Makefile.am	2011-01-15 11:10:02.000000000 +0100
+@@ -10,7 +10,7 @@
+ HB_LIBS= \
+ 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -lavcore -ldca -ldvdnav -ldvdread \
+ 	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
+-	-lx264 -lmp4v2 -lswscale -ltheora -lfaad -lz \
++	-lx264 -lmp4v2 -lswscale -ltheoraenc -ltheoradec -lfaad -lz \
+ 	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
+ endif
+ 
+@@ -108,7 +108,7 @@
+ 	-mwindows -Wl,--export-dynamic -Wl,--exclude-libs,ALL
+ else
+ ghb_LDFLAGS = \
+-	-Wl,--export-dynamic -Wl,--exclude-libs,ALL
++	-Wl,--export-dynamic -Wl,--exclude-libs,ALL -Wl,-z,defs -Wl,--as-needed
+ endif
+ 
+ ghb_LDADD = $(HB_LIBS) $(GHB_LIBS)
