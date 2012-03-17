@@ -38,10 +38,20 @@
     return [fDisplayX264Options stringValue];
 }
 
+- (NSString *) optionsStringLavc
+{
+    return [fDisplayLavcOptions stringValue];
+}
+
 - (void) setOptions: (NSString *)string
 {
     [fDisplayX264Options setStringValue:string];
     [self X264AdvancedOptionsSet:nil];
+}
+
+- (void) setLavcOptions: (NSString *)string
+{
+    [fDisplayLavcOptions setStringValue:string];
 }
 
 - (void) setHidden: (BOOL) hide
@@ -49,12 +59,27 @@
     if(hide)
     {
         [fOptionsBox setContentView:fEmptyView];
-        [fX264optViewTitleLabel setStringValue: @"Only Used With The x264 (H.264) Codec"];
     }
     else
     {
         [fOptionsBox setContentView:fX264optView];
-        [fX264optViewTitleLabel setStringValue: @""];
+    }
+    return;
+}
+
+- (void) setLavcOptsEnabled: (BOOL) lavc
+{
+    if(lavc)
+    {
+        [fDisplayLavcOptions setHidden:NO];
+        [fDisplayLavcOptionsLabel setHidden:NO];
+        [fDisplayTheoraOptionsLabel setHidden:YES];
+    }
+    else
+    {
+        [fDisplayLavcOptions setHidden:YES];
+        [fDisplayLavcOptionsLabel setHidden:YES];
+        [fDisplayTheoraOptionsLabel setHidden:NO];
     }
     return;
 }
@@ -159,8 +184,9 @@
     [fX264optSubmePopUp addItemWithTitle:[NSString stringWithFormat:@"8: RD refine in I/P-frames"]];
     [fX264optSubmePopUp addItemWithTitle:[NSString stringWithFormat:@"9: RD refine in all frames"]];
     [fX264optSubmePopUp addItemWithTitle:[NSString stringWithFormat:@"10: QPRD in all frames"]];
+    [fX264optSubmePopUp addItemWithTitle:[NSString stringWithFormat:@"11: No early terminations in analysis"]];
     toolTip =
-        @"This setting controls both subpixel-precision motion estimation and mode decision methods.\n\nSubpixel motion estimation is used for refining motion estimates beyond mere pixel accuracy, improving compression.\n\nMode decision is the method used to choose how to encode each block of the frame: a very important decision.\n\nSAD is the fastest method, followed by SATD, RD, RD refinement, and the slowest, QPRD.\n\n6 or higher is strongly recommended: Psy-RD, a very powerful psy optimization that helps retain detail, requires RD.\n\n10, the most powerful and slowest option, requires trellis=2.";
+        @"This setting controls both subpixel-precision motion estimation and mode decision methods.\n\nSubpixel motion estimation is used for refining motion estimates beyond mere pixel accuracy, improving compression.\n\nMode decision is the method used to choose how to encode each block of the frame: a very important decision.\n\nSAD is the fastest method, followed by SATD, RD, RD refinement, and the slowest, QPRD.\n\n6 or higher is strongly recommended: Psy-RD, a very powerful psy optimization that helps retain detail, requires RD.\n\n11 disables all early terminations in analysis.\n\n10 and 11, the most powerful and slowest options, require adaptive quantization (aq-mode > 0) and trellis 2 (always).";
     [fX264optSubmePopUp setToolTip: toolTip];
     [fX264optSubmeLabel setToolTip: toolTip];
     
@@ -598,22 +624,16 @@
             {
                 [[fX264optPsyRDSlider animator] setHidden:YES];
                 [[fX264optPsyRDLabel animator] setHidden:YES];
-                if ( [fX264optPsyRDSlider floatValue] < 1.0 )
-                {
-                    [fX264optPsyRDSlider setFloatValue:1.0];
-                    [[fX264optPsyRDSlider cell] performClick:self];            
-                }
+                [fX264optPsyRDSlider setFloatValue:1.0];
+                [[fX264optPsyRDSlider cell] performClick:self];
             }
 
             if( [fX264optPsyTrellisSlider isHidden] == false)
             {
                 [[fX264optPsyTrellisSlider animator] setHidden:YES];
                 [[fX264optPsyTrellisLabel animator] setHidden:YES];
-                if ( [fX264optPsyTrellisSlider floatValue] > 0.0 )
-                {
-                    [fX264optPsyTrellisSlider setFloatValue:0.0];
-                    [[fX264optPsyTrellisSlider cell] performClick:self];
-                }
+                [fX264optPsyTrellisSlider setFloatValue:0.0];
+                [[fX264optPsyTrellisSlider cell] performClick:self];
             }
         }
         else

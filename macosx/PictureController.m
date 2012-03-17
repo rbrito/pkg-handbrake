@@ -72,7 +72,6 @@
 - (IBAction) resizeInspectorForTab: (id)sender
 {
     NSRect frame = [[self window] frame];
-    NSPoint windowOrigin = [[self window] frame].origin;
     NSSize screenSize = [[[self window] screen] frame].size;
     NSPoint screenOrigin = [[[self window] screen] frame].origin;
     
@@ -1137,6 +1136,7 @@ are maintained across different sources */
     [fDecombPopUp addItemWithTitle: @"Off"];
     [fDecombPopUp addItemWithTitle: @"Custom"];
     [fDecombPopUp addItemWithTitle: @"Default"];
+    [fDecombPopUp addItemWithTitle: @"Fast"];
     
     [fDecombPopUp selectItemAtIndex: fPictureFilterSettings.decomb];
     

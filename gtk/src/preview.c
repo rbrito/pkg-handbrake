@@ -15,7 +15,7 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <glib-object.h>
-#include <gtk/gtk.h>
+#include "ghbcompat.h"
 
 #if !defined(_WIN32)
 #include <gdk/gdkx.h>
@@ -58,7 +58,7 @@ struct preview_s
 	gint frame;
 	gint state;
 	gboolean pause;
-	gboolean encoded[10];
+	gboolean encoded[30];
 	gint encode_frame;
 	gint live_id;
 	gchar *current;
@@ -165,7 +165,7 @@ ghb_preview_init(signal_user_data_t *ud)
 	GstElement *xover;
 
 #if GTK_CHECK_VERSION(2,18,0)
-	if (!gdk_window_ensure_native(ud->preview->view->window))
+	if (!gdk_window_ensure_native(gtk_widget_get_window(ud->preview->view)))
 	{
 		g_message("Couldn't create native window for GstXOverlay. Disabling live preview.");
 		GtkWidget *widget = GHB_WIDGET(ud->builder, "live_preview_box");
@@ -177,9 +177,9 @@ ghb_preview_init(signal_user_data_t *ud)
 #endif
 
 #if !defined(_WIN32)
-	ud->preview->xid = GDK_DRAWABLE_XID(ud->preview->view->window);
+	ud->preview->xid = GDK_WINDOW_XID(gtk_widget_get_window(ud->preview->view));
 #else
-	ud->preview->xid = GDK_WINDOW_HWND(ud->preview->view->window);
+	ud->preview->xid = GDK_WINDOW_HWND(gtk_widget_get_window(ud->preview->view));
 #endif
 	ud->preview->play = gst_element_factory_make("playbin", "play");
 	xover = gst_element_factory_make("gconfvideosink", "xover");
@@ -707,6 +707,16 @@ live_preview_seek_cb(GtkWidget *widget, signal_user_data_t *ud)
 #endif
 }
 
+static void _draw_pixbuf(GdkWindow *window, GdkPixbuf *pixbuf)
+{
+    cairo_t *cr;
+
+    cr = gdk_cairo_create(window);
+    gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+    cairo_paint(cr);
+	cairo_destroy(cr);
+}
+
 void
 ghb_set_preview_image(signal_user_data_t *ud)
 {
@@ -756,9 +766,7 @@ ghb_set_preview_image(signal_user_data_t *ud)
 		ud->preview->width = preview_width;
 		ud->preview->height = preview_height;
 	}
-	gdk_draw_pixbuf(
-		widget->window, NULL, ud->preview->pix, 0, 0, 0, 0,
-		-1, -1, GDK_RGB_DITHER_NONE, 0, 0);
+    _draw_pixbuf(gtk_widget_get_window(widget), ud->preview->pix);
 
 	gchar *text = g_strdup_printf("%d x %d", width, height);
 	widget = GHB_WIDGET (ud->builder, "preview_dims");
@@ -848,9 +856,7 @@ preview_expose_cb(
 
 	if (ud->preview->pix != NULL)
 	{
-		gdk_draw_pixbuf(
-			widget->window, NULL, ud->preview->pix, 0, 0, 0, 0,
-			-1, -1, GDK_RGB_DITHER_NONE, 0, 0);
+        _draw_pixbuf(gtk_widget_get_window(widget), ud->preview->pix);
 	}
 	return TRUE;
 }
@@ -1152,7 +1158,7 @@ preview_motion_cb(
 			g_source_destroy(source);
 	}
 	widget = GHB_WIDGET(ud->builder, "preview_hud");
-	if (!GTK_WIDGET_VISIBLE(widget))
+	if (!gtk_widget_get_visible(widget))
 	{
 		gtk_widget_show(widget);
 	}
@@ -1216,7 +1222,7 @@ preview_hud_size_alloc_cb(
 	GdkDrawable *shape;
 
 	//g_message("preview_hud_size_alloc_cb()");
-	if (GTK_WIDGET_VISIBLE(widget) && allocation->height > 50)
+	if (gtk_widget_get_visible(widget) && allocation->height > 50)
 	{
 		shape = ghb_curved_rect_mask(allocation->width, 
 									allocation->height, allocation->height/4);
@@ -1237,7 +1243,7 @@ preview_configure_cb(
 	gint x, y;
 
 	//g_message("preview_configure_cb()");
-	if (GTK_WIDGET_VISIBLE(widget))
+	if (gtk_widget_get_visible(widget))
 	{
 		gtk_window_get_position(GTK_WINDOW(widget), &x, &y);
 		ghb_settings_set_int(ud->settings, "preview_x", x);
@@ -1258,7 +1264,7 @@ settings_configure_cb(
 	gint x, y;
 
 	//g_message("settings_configure_cb()");
-	if (GTK_WIDGET_VISIBLE(widget))
+	if (gtk_widget_get_visible(widget))
 	{
 		gtk_window_get_position(GTK_WINDOW(widget), &x, &y);
 		ghb_settings_set_int(ud->settings, "settings_x", x);

@@ -20,6 +20,11 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include <glib/gstdio.h>
+#include <gio/gio.h>
+
+#include "ghbcompat.h"
+
 #if !defined(_WIN32)
 #include <poll.h>
 #define G_UDEV_API_IS_SUBJECT_TO_CHANGE 1
@@ -39,6 +44,10 @@
 #endif
 
 #include <libnotify/notify.h>
+#ifndef NOTIFY_CHECK_VERSION
+#define NOTIFY_CHECK_VERSION(x,y,z) 0
+#endif
+
 #include <gdk/gdkx.h>
 #else
 #define WINVER 0x0500
@@ -46,10 +55,9 @@
 #include <dbt.h>
 #endif
 
-#include <gtk/gtk.h>
-#include <gdk/gdkkeysyms.h>
-#include <glib/gstdio.h>
-#include <gio/gio.h>
+#if defined(_USE_APP_IND)
+#include <libappindicator/app-indicator.h>
+#endif
 
 #include "hb.h"
 #include "callbacks.h"
@@ -68,7 +76,8 @@
 #include "ghbcellrenderertext.h"
 
 static void reset_chapter_list(signal_user_data_t *ud, GValue *settings);
-static void update_chapter_list(signal_user_data_t *ud);
+static void update_chapter_list_from_settings(GtkBuilder *builder, GValue *settings);
+static void update_chapter_list_settings(GValue *settings);
 static GList* dvd_device_list();
 static void prune_logs(signal_user_data_t *ud);
 void ghb_notify_done(signal_user_data_t *ud);
@@ -119,7 +128,7 @@ dep_check(signal_user_data_t *ud, const gchar *name, gboolean *out_hide)
 		widget_name = ghb_value_string(ghb_array_get_nth(data, 0));
 		widget = GHB_WIDGET(ud->builder, widget_name);
 		dep_object = gtk_builder_get_object(ud->builder, name);
-		if (widget != NULL && !GTK_WIDGET_SENSITIVE(widget))
+		if (widget != NULL && !gtk_widget_is_sensitive(widget))
 			continue;
 		if (dep_object == NULL)
 		{
@@ -201,7 +210,7 @@ ghb_check_dependency(
 
 	if (widget != NULL)
 	{
-		type = GTK_WIDGET_TYPE(widget);
+		type = G_OBJECT_TYPE(widget);
 		if (type == GTK_TYPE_COMBO_BOX || type == GTK_TYPE_COMBO_BOX_ENTRY)
 			if (gtk_combo_box_get_active(GTK_COMBO_BOX(widget)) < 0) return;
 		name = ghb_get_setting_key(widget);
@@ -229,7 +238,6 @@ ghb_check_dependency(
 			continue;
 		}
 		sensitive = dep_check(ud, dep_name, &hide);
-		g_free(dep_name);
 		if (GTK_IS_ACTION(dep_object))
 		{
 			gtk_action_set_sensitive(GTK_ACTION(dep_object), sensitive);
@@ -240,13 +248,20 @@ ghb_check_dependency(
 			gtk_widget_set_sensitive(GTK_WIDGET(dep_object), sensitive);
 			if (!sensitive && hide)
 			{
-				gtk_widget_hide(GTK_WIDGET(dep_object));
+				if (gtk_widget_get_visible(GTK_WIDGET(dep_object)))
+				{
+					gtk_widget_hide(GTK_WIDGET(dep_object));
+				}
 			}
 			else
 			{
-				gtk_widget_show_now(GTK_WIDGET(dep_object));
+				if (!gtk_widget_get_visible(GTK_WIDGET(dep_object)))
+				{
+					gtk_widget_show_now(GTK_WIDGET(dep_object));
+				}
 			}
 		}
+		g_free(dep_name);
 	}
 }
 
@@ -531,23 +546,16 @@ ghb_cache_volnames(signal_user_data_t *ud)
 }
 
 static const gchar*
-get_extension(signal_user_data_t *ud)
+get_extension(GValue *settings)
 {
 	int container;
 	const gchar *extension = "error";
-	GValue *audio_list;
-	GValue *subtitle_list;
 
-	container = ghb_settings_combo_int(ud->settings, "FileFormat");
+	container = ghb_settings_combo_int(settings, "FileFormat");
 	if (container == HB_MUX_MP4)
 	{
 		extension = "mp4";
-		audio_list = ghb_settings_get_value(ud->settings, "audio_list");
-		subtitle_list = ghb_settings_get_value(ud->settings, "subtitle_list");
-		if (ghb_ac3_in_audio_list(audio_list) ||
-			ghb_soft_in_subtitle_list(subtitle_list) ||
-			ghb_settings_get_boolean(ud->settings, "ChapterMarkers") ||
-			ghb_settings_get_boolean(ud->settings, "UseM4v"))
+		if (ghb_settings_get_boolean(settings, "UseM4v"))
 		{
 			extension = "m4v";
 		}
@@ -560,44 +568,41 @@ get_extension(signal_user_data_t *ud)
 }
 
 static void
-set_destination(signal_user_data_t *ud)
+set_destination_settings(GValue *settings)
 {
-	g_debug("set_destination");
-	if (ghb_settings_get_boolean(ud->settings, "use_source_name"))
+	g_debug("set_destination_settings");
+	if (ghb_settings_get_boolean(settings, "use_source_name"))
 	{
 		GString *str = g_string_new("");
-		gchar *vol_name, *filename;
+		gchar *vol_name;
 		const gchar *extension;
 		gchar *new_name;
 		gint title;
 		
-		filename = ghb_settings_get_string(ud->settings, "dest_file");
-		extension = get_extension(ud);
-		vol_name = ghb_settings_get_string(ud->settings, "volume_label");
+		extension = get_extension(settings);
+		vol_name = ghb_settings_get_string(settings, "volume_label");
 		g_string_append_printf(str, "%s", vol_name);
-		title = ghb_settings_combo_int(ud->settings, "title");
+		title = ghb_settings_get_int(settings, "title_no");
 		if (title >= 0)
 		{
-			if (ghb_settings_get_boolean(
-					ud->settings, "title_no_in_destination"))
+			if (ghb_settings_get_boolean(settings, "title_no_in_destination"))
 			{
 
-				title = ghb_settings_combo_int(ud->settings, "title");
 				g_string_append_printf(str, " - %d", title+1);
 			}
-			if (ghb_settings_combo_int(ud->settings, "PtoPType") == 0 && 
+			if (ghb_settings_combo_int(settings, "PtoPType") == 0 && 
 				ghb_settings_get_boolean(
-					ud->settings, "chapters_in_destination"))
+					settings, "chapters_in_destination"))
 			{
 				gint start, end;
 
 				if (!ghb_settings_get_boolean(
-						ud->settings, "title_no_in_destination"))
+						settings, "title_no_in_destination"))
 				{
 					g_string_append_printf(str, " -");
 				}
-				start = ghb_settings_get_int(ud->settings, "start_point");
-				end = ghb_settings_get_int(ud->settings, "end_point");
+				start = ghb_settings_get_int(settings, "start_point");
+				end = ghb_settings_get_int(settings, "end_point");
 				if (start == end)
 					g_string_append_printf(str, " Ch %d", start);
 				else
@@ -606,11 +611,18 @@ set_destination(signal_user_data_t *ud)
 		}
 		g_string_append_printf(str, ".%s", extension);
 		new_name = g_string_free(str, FALSE);
-		ghb_ui_update(ud, "dest_file", ghb_string_value(new_name));
-		g_free(filename);
+		ghb_settings_set_string(settings, "dest_file", new_name);
 		g_free(vol_name);
 		g_free(new_name);
 	}
+}
+
+static void
+set_destination(signal_user_data_t *ud)
+{
+	set_destination_settings(ud->settings);
+	ghb_ui_update(ud, "dest_file", 
+		ghb_settings_get_value(ud->settings, "dest_file"));
 }
 
 static gchar*
@@ -970,6 +982,7 @@ do_source_dialog(GtkButton *button, gboolean single, signal_user_data_t *ud)
 		gtk_widget_hide(widget);
 	dialog = GHB_WIDGET(ud->builder, "source_dialog");
 	source_dialog_extra_widgets(ud, dialog);
+
 	gtk_file_chooser_set_filename(GTK_FILE_CHOOSER(dialog), sourcename);
 	response = gtk_dialog_run(GTK_DIALOG (dialog));
 	gtk_widget_hide(dialog);
@@ -1056,7 +1069,7 @@ ghb_update_destination_extension(signal_user_data_t *ud)
 	if (busy)
 		return;
 	busy = TRUE;
-	extension = get_extension(ud);
+	extension = get_extension(ud->settings);
 	entry = GTK_ENTRY(GHB_WIDGET(ud->builder, "dest_file"));
 	filename = g_strdup(gtk_entry_get_text(entry));
 	for (ii = 0; containers[ii] != NULL; ii++)
@@ -1240,7 +1253,8 @@ window_delete_event_cb(GtkWidget *widget, GdkEvent *event, signal_user_data_t *u
 static void
 update_acodec_combo(signal_user_data_t *ud)
 {
-	ghb_grey_combo_options (ud->builder);
+    ghb_adjust_audio_rate_combos(ud);
+	ghb_grey_combo_options (ud);
 }
 
 G_MODULE_EXPORT void
@@ -1346,7 +1360,7 @@ show_title_info(signal_user_data_t *ud, ghb_title_info_t *tinfo)
 	gchar *text;
 
 	ghb_settings_set_string(ud->settings, "source", tinfo->path);
-	if (tinfo->type == HB_STREAM_TYPE)
+	if (tinfo->type == HB_STREAM_TYPE || tinfo->type == HB_FF_STREAM_TYPE)
 	{
 		GtkWidget *widget = GHB_WIDGET (ud->builder, "source_title");
 		if (tinfo->name != NULL && tinfo->name[0] != 0)
@@ -1365,6 +1379,11 @@ show_title_info(signal_user_data_t *ud, ghb_title_info_t *tinfo)
 	ud->dont_clear_presets = TRUE;
 	ud->scale_busy = TRUE;
 	update_title_duration(ud);
+	widget = GHB_WIDGET (ud->builder, "source_codec");
+	if ( tinfo->video_codec_name )
+		gtk_label_set_text (GTK_LABEL(widget), tinfo->video_codec_name);
+	else
+		gtk_label_set_text (GTK_LABEL(widget), "Unknown");
 	widget = GHB_WIDGET (ud->builder, "source_dimensions");
 	text = g_strdup_printf ("%d x %d", tinfo->width, tinfo->height);
 	gtk_label_set_text (GTK_LABEL(widget), text);
@@ -1474,6 +1493,90 @@ show_title_info(signal_user_data_t *ud, ghb_title_info_t *tinfo)
 	ud->dont_clear_presets = FALSE;
 }
 
+void
+set_title_settings(GValue *settings, gint titleindex)
+{
+	ghb_title_info_t tinfo;
+
+	ghb_settings_set_int(settings, "title", titleindex);
+	ghb_settings_set_int(settings, "title_no", titleindex);
+
+	if (ghb_get_title_info (&tinfo, titleindex))
+	{
+		ghb_settings_set_int(settings, "source_width", tinfo.width);
+		ghb_settings_set_int(settings, "source_height", tinfo.height);
+		ghb_settings_set_string(settings, "source", tinfo.path);
+		if (tinfo.type == HB_STREAM_TYPE || tinfo.type == HB_FF_STREAM_TYPE)
+		{
+			if (tinfo.name != NULL && tinfo.name[0] != 0)
+			{
+				ghb_settings_set_string(settings, "volume_label", tinfo.name);
+			}
+			else
+			{
+				gchar *label = "No Title Found";
+				ghb_settings_set_string(settings, "volume_label", label);
+			}
+		}
+		ghb_settings_set_int(settings, "scale_width",
+							 tinfo.width - tinfo.crop[2] - tinfo.crop[3]);
+
+		// If anamorphic or keep_aspect, the hight will 
+		// be automatically calculated
+		gboolean keep_aspect;
+		gint pic_par;
+		keep_aspect = ghb_settings_get_boolean(settings, "PictureKeepRatio");
+		pic_par = ghb_settings_combo_int(settings, "PicturePAR");
+		if (!(keep_aspect || pic_par) || pic_par == 3)
+		{
+			ghb_settings_set_int(settings, "scale_height",
+							 tinfo.width - tinfo.crop[0] - tinfo.crop[1]);
+		}
+
+		ghb_set_scale_settings(settings, GHB_PIC_KEEP_PAR|GHB_PIC_USE_MAX);
+		ghb_settings_set_int(settings, "angle_count", tinfo.angle_count);
+	}
+	update_chapter_list_settings(settings);
+	ghb_set_pref_audio_settings(titleindex, settings);
+	ghb_set_pref_subtitle_settings(titleindex, settings);
+	set_destination_settings(settings);
+
+	char *dest_file, *dest_dir, *dest;
+	dest_file = ghb_settings_get_string(settings, "dest_file");
+	dest_dir = ghb_settings_get_string(settings, "dest_dir");
+	dest = g_strdup_printf("%s" G_DIR_SEPARATOR_S "%s", dest_dir, dest_file);
+	ghb_settings_set_string(settings, "destination", dest);
+	g_free(dest_file);
+	g_free(dest_dir);
+	g_free(dest);
+}
+
+void
+ghb_add_all_titles(signal_user_data_t *ud)
+{
+	gint ii;
+	gint count = ghb_get_title_count();
+
+	for (ii = 0; ii < count; ii++)
+	{
+		ghb_title_info_t tinfo;
+
+		GValue *settings = ghb_value_dup(ud->settings);
+		ghb_settings_set_boolean(settings, "use_source_name", TRUE);
+		if (ghb_get_title_info (&tinfo, ii))
+		{
+			if (tinfo.type == HB_DVD_TYPE ||
+				tinfo.type == HB_BD_TYPE)
+			{
+				ghb_settings_set_boolean(settings, 
+										"title_no_in_destination", TRUE);
+			}
+		}
+		set_title_settings(settings, ii);
+		ghb_queue_add(ud, settings, ii);
+	}
+}
+
 static gboolean update_preview = FALSE;
 
 G_MODULE_EXPORT void
@@ -1481,11 +1584,12 @@ title_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 {
 	ghb_title_info_t tinfo;
 	gint titleindex;
-	
+
 	g_debug("title_changed_cb ()");
 	ghb_widget_to_setting(ud->settings, widget);
 
 	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	ghb_settings_set_int(ud->settings, "title_no", titleindex);
 	ghb_update_ui_combo_box (ud, "AudioTrack", titleindex, FALSE);
 	ghb_update_ui_combo_box (ud, "SubtitleTrack", titleindex, FALSE);
 
@@ -1494,15 +1598,12 @@ title_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 		show_title_info(ud, &tinfo);
 	}
 	ghb_check_dependency(ud, widget, NULL);
-	update_chapter_list (ud);
-	ghb_adjust_audio_rate_combos(ud);
-	ghb_set_pref_audio(titleindex, ud);
+	update_chapter_list_settings(ud->settings);
+	update_chapter_list_from_settings(ud->builder, ud->settings);
+	ghb_set_pref_audio_settings(titleindex, ud->settings);
+	ghb_set_pref_audio_from_settings(ud, ud->settings);
 	ghb_set_pref_subtitle(titleindex, ud);
-	if (ghb_settings_get_boolean(ud->settings, "vquality_type_target"))
-	{
-		gint bitrate = ghb_calculate_target_bitrate (ud->settings, titleindex);
-		ghb_ui_update(ud, "VideoAvgBitrate", ghb_int64_value(bitrate));
-	}
+	ghb_grey_combo_options (ud);
 
 	// Unfortunately, there is no way to query how many frames were
 	// actually generated during the scan.
@@ -1524,14 +1625,14 @@ title_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 
 	gint end;
 	widget = GHB_WIDGET (ud->builder, "ChapterMarkers");
-	gtk_widget_set_sensitive(widget, TRUE);
 	end = ghb_settings_get_int(ud->settings, "end_point");
 	if (1 == end)
 	{
-		ud->dont_clear_presets = TRUE;
-		ghb_ui_update(ud, "ChapterMarkers", ghb_boolean_value(FALSE));
-		ud->dont_clear_presets = FALSE;
 		gtk_widget_set_sensitive(widget, FALSE);
+	}
+	else
+	{
+		gtk_widget_set_sensitive(widget, TRUE);
 	}
 }
 
@@ -1584,6 +1685,28 @@ ptop_widget_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 }
 
 G_MODULE_EXPORT void
+framerate_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
+{
+	ghb_widget_to_setting(ud->settings, widget);
+
+	if (ghb_settings_combo_int(ud->settings, "VideoFramerate") != 0)
+	{
+		if (!ghb_settings_get_boolean(ud->settings, "VideoFrameratePFR"))
+        {
+		    ghb_ui_update(ud, "VideoFramerateCFR", ghb_boolean_value(TRUE));
+        }
+	}
+	if (ghb_settings_combo_int(ud->settings, "VideoFramerate") == 0 &&
+		ghb_settings_get_boolean(ud->settings, "VideoFrameratePFR"))
+	{
+		ghb_ui_update(ud, "VideoFramerateVFR", ghb_boolean_value(TRUE));
+	}
+	ghb_check_dependency(ud, widget, NULL);
+	ghb_clear_presets_selection(ud);
+	ghb_live_reset(ud);
+}
+
+G_MODULE_EXPORT void
 setting_widget_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 {
 	ghb_widget_to_setting(ud->settings, widget);
@@ -1599,7 +1722,6 @@ chapter_markers_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
 	ghb_live_reset(ud);
-	ghb_update_destination_extension(ud);
 }
 
 G_MODULE_EXPORT void
@@ -1634,7 +1756,7 @@ http_opt_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_clear_presets_selection(ud);
 	ghb_live_reset(ud);
 	// AC3 is not allowed when Web optimized
-	ghb_grey_combo_options (ud->builder);
+	ghb_grey_combo_options (ud);
 }
 
 G_MODULE_EXPORT void
@@ -1657,24 +1779,6 @@ vcodec_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 }
 
 G_MODULE_EXPORT void
-target_size_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
-{
-	const gchar *name = ghb_get_setting_key(widget);
-	g_debug("target_size_changed_cb () %s", name);
-	ghb_widget_to_setting(ud->settings, widget);
-	ghb_check_dependency(ud, widget, NULL);
-	ghb_clear_presets_selection(ud);
-	ghb_live_reset(ud);
-	if (ghb_settings_get_boolean(ud->settings, "vquality_type_target"))
-	{
-		gint titleindex;
-		titleindex = ghb_settings_combo_int(ud->settings, "title");
-		gint bitrate = ghb_calculate_target_bitrate (ud->settings, titleindex);
-		ghb_ui_update(ud, "VideoAvgBitrate", ghb_int64_value(bitrate));
-	}
-}
-
-G_MODULE_EXPORT void
 start_point_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 {
 	gint start, end;
@@ -1694,15 +1798,15 @@ start_point_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 			set_destination(ud);
 		}
 		widget = GHB_WIDGET (ud->builder, "ChapterMarkers");
-		gtk_widget_set_sensitive(widget, TRUE);
 		// End may have been changed above, get it again
 		end = ghb_settings_get_int(ud->settings, "end_point");
 		if (start == end)
 		{
-			ud->dont_clear_presets = TRUE;
-			ghb_ui_update(ud, "ChapterMarkers", ghb_boolean_value(FALSE));
-			ud->dont_clear_presets = FALSE;
 			gtk_widget_set_sensitive(widget, FALSE);
+		}
+		else
+		{
+			gtk_widget_set_sensitive(widget, TRUE);
 		}
 		update_title_duration(ud);
 	}
@@ -1746,15 +1850,15 @@ end_point_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 			set_destination(ud);
 		}
 		widget = GHB_WIDGET (ud->builder, "ChapterMarkers");
-		gtk_widget_set_sensitive(widget, TRUE);
 		// Start may have been changed above, get it again
 		start = ghb_settings_get_int(ud->settings, "start_point");
 		if (start == end)
 		{
-			ud->dont_clear_presets = TRUE;
-			ghb_ui_update(ud, "ChapterMarkers", ghb_boolean_value(FALSE));
-			ud->dont_clear_presets = FALSE;
 			gtk_widget_set_sensitive(widget, FALSE);
+		}
+		else
+		{
+			gtk_widget_set_sensitive(widget, TRUE);
 		}
 		update_title_duration(ud);
 	}
@@ -1785,7 +1889,7 @@ scale_width_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_widget_to_setting(ud->settings, widget);
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, GHB_PIC_KEEP_WIDTH);
 	update_preview = TRUE;
 	gchar *text;
@@ -1805,7 +1909,7 @@ scale_height_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_widget_to_setting(ud->settings, widget);
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, GHB_PIC_KEEP_HEIGHT);
 	update_preview = TRUE;
 	gchar *text;
@@ -1828,7 +1932,7 @@ crop_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_widget_to_setting(ud->settings, widget);
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, 0);
 
 	crop[0] = ghb_settings_get_int(ud->settings, "PictureTopCrop");
@@ -1867,7 +1971,7 @@ display_width_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
 	ghb_live_reset(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, GHB_PIC_KEEP_DISPLAY_WIDTH);
 
 	update_preview = TRUE;
@@ -1881,7 +1985,7 @@ display_height_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
 	ghb_live_reset(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, GHB_PIC_KEEP_DISPLAY_HEIGHT);
 
 	update_preview = TRUE;
@@ -1895,7 +1999,7 @@ par_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
 	ghb_live_reset(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, GHB_PIC_KEEP_PAR);
 
 	update_preview = TRUE;
@@ -1909,7 +2013,7 @@ scale_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_clear_presets_selection(ud);
 	ghb_live_reset(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, 0);
 	update_preview = TRUE;
 	
@@ -1950,7 +2054,7 @@ show_crop_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 	ghb_widget_to_setting(ud->settings, widget);
 	ghb_check_dependency(ud, widget, NULL);
 	ghb_live_reset(ud);
-	if (GTK_WIDGET_SENSITIVE(widget))
+	if (gtk_widget_is_sensitive(widget))
 		ghb_set_scale (ud, 0);
 	update_preview = TRUE;
 }
@@ -1966,7 +2070,7 @@ generic_entry_changed_cb(GtkEntry *entry, signal_user_data_t *ud)
 	// I don't want to process upon every keystroke, so I prevent processing
 	// while the widget has focus.
 	g_debug("generic_entry_changed_cb ()");
-	if (!GTK_WIDGET_HAS_FOCUS((GtkWidget*)entry))
+	if (!gtk_widget_has_focus((GtkWidget*)entry))
 	{
 		ghb_widget_to_setting(ud->settings, (GtkWidget*)entry);
 	}
@@ -2159,7 +2263,7 @@ ghb_cancel_encode(signal_user_data_t *ud, const gchar *extra_msg)
 						   NULL);
 	response = gtk_dialog_run(GTK_DIALOG(dialog));
 	gtk_widget_destroy (dialog);
-	switch (response)
+	switch ((int)response)
 	{
 		case 1:
 			ghb_stop_queue();
@@ -2197,7 +2301,7 @@ ghb_cancel_encode2(signal_user_data_t *ud, const gchar *extra_msg)
 						   NULL);
 	response = gtk_dialog_run(GTK_DIALOG(dialog));
 	gtk_widget_destroy (dialog);
-	switch (response)
+	switch ((int)response)
 	{
 		case 1:
 			ghb_stop_queue();
@@ -2749,6 +2853,13 @@ ghb_backend_events(signal_user_data_t *ud)
 		si = GTK_STATUS_ICON(GHB_OBJECT(ud->builder, "hb_status"));
 		gtk_status_icon_set_tooltip(si, status_str);
 #endif
+#if defined(_USE_APP_IND)
+		char * ai_status_str= g_strdup_printf(
+			"%.2f%%",
+			100.0 * status.queue.progress);
+		app_indicator_set_label( ud->ai, ai_status_str, "99.99%");
+		g_free(ai_status_str);
+#endif
 		gtk_label_set_text (work_status, status_str);
 		gtk_progress_bar_set_fraction (progress, status.queue.progress);
 		g_free(status_str);
@@ -2781,11 +2892,19 @@ ghb_backend_events(signal_user_data_t *ud)
 		status_str = working_status_string(ud, &status.queue);
 		label = GTK_LABEL(GHB_WIDGET(ud->builder, "queue_status"));
 		gtk_label_set_text (label, status_str);
+#if defined(_USE_APP_IND)
+		char * ai_status_str= g_strdup_printf(
+			"%.2f%%",
+			100.0 * status.queue.progress);
+		app_indicator_set_label( ud->ai, ai_status_str, "99.99%");
+		g_free(ai_status_str);
+#else
 #if !GTK_CHECK_VERSION(2, 16, 0)
 		GtkStatusIcon *si;
 
 		si = GTK_STATUS_ICON(GHB_OBJECT(ud->builder, "hb_status"));
 		gtk_status_icon_set_tooltip(si, status_str);
+#endif
 #endif
 		gtk_label_set_text (work_status, status_str);
 		gtk_progress_bar_set_fraction (progress, status.queue.progress);
@@ -2804,7 +2923,7 @@ ghb_backend_events(signal_user_data_t *ud)
 		switch( status.queue.error )
 		{
 			case GHB_ERROR_NONE:
-				gtk_label_set_text (work_status, "Rip Done!");
+				gtk_label_set_text (work_status, "Encode Done!");
 				qstatus = GHB_QUEUE_DONE;
 				if (js != NULL)
 				{
@@ -2818,7 +2937,7 @@ ghb_backend_events(signal_user_data_t *ud)
 				}
 				break;
 			case GHB_ERROR_CANCELED:
-				gtk_label_set_text (work_status, "Rip Canceled.");
+				gtk_label_set_text (work_status, "Encode Canceled.");
 				qstatus = GHB_QUEUE_CANCELED;
 				if (js != NULL)
 				{
@@ -2832,7 +2951,7 @@ ghb_backend_events(signal_user_data_t *ud)
 				}
 				break;
 			default:
-				gtk_label_set_text (work_status, "Rip Failed.");
+				gtk_label_set_text (work_status, "Encode Failed.");
 				qstatus = GHB_QUEUE_CANCELED;
 				if (js != NULL)
 				{
@@ -2865,11 +2984,15 @@ ghb_backend_events(signal_user_data_t *ud)
 			ghb_settings_set_int(js, "job_status", qstatus);
 		ghb_save_queue(ud->queue);
 		ud->cancel_encode = GHB_CANCEL_NONE;
+#if defined(_USE_APP_IND)
+		app_indicator_set_label( ud->ai, "", "99.99%");
+#else
 #if !GTK_CHECK_VERSION(2, 16, 0)
 		GtkStatusIcon *si;
 
 		si = GTK_STATUS_ICON(GHB_OBJECT(ud->builder, "hb_status"));
 		gtk_status_icon_set_tooltip(si, "HandBrake");
+#endif
 #endif
 	}
 	else if (status.queue.state & GHB_STATE_MUXING)
@@ -3358,7 +3481,20 @@ reset_chapter_list(signal_user_data_t *ud, GValue *settings)
 }
 
 static void
-update_chapter_list(signal_user_data_t *ud)
+update_chapter_list_settings(GValue *settings)
+{
+	GValue *chapters;
+	gint titleindex;
+	
+	g_debug("update_chapter_list_settings ()");
+	titleindex = ghb_settings_get_int(settings, "title_no");
+	chapters = ghb_get_chapters(titleindex);
+	if (chapters)
+		ghb_settings_set_value(settings, "chapter_list", chapters);
+}
+
+static void
+update_chapter_list_from_settings(GtkBuilder *builder, GValue *settings)
 {
 	GtkTreeView *treeview;
 	GtkTreeIter iter;
@@ -3369,13 +3505,11 @@ update_chapter_list(signal_user_data_t *ud)
 	gint count;
 	
 	g_debug("update_chapter_list ()");
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
-	chapters = ghb_get_chapters(titleindex);
+	titleindex = ghb_settings_get_int(settings, "title_no");
+	chapters = ghb_settings_get_value(settings, "chapter_list");
 	count = ghb_array_len(chapters);
-	if (chapters)
-		ghb_settings_set_value(ud->settings, "chapter_list", chapters);
 	
-	treeview = GTK_TREE_VIEW(GHB_WIDGET(ud->builder, "chapters_list"));
+	treeview = GTK_TREE_VIEW(GHB_WIDGET(builder, "chapters_list"));
 	store = GTK_LIST_STORE(gtk_tree_view_get_model(treeview));
 	ii = 0;
 	if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter))
@@ -3483,7 +3617,7 @@ chapter_edited_cb(
 	chapters = ghb_settings_get_value(ud->settings, "chapter_list");
 	chapter = ghb_array_get_nth(chapters, index-1);
 	g_value_set_string(chapter, text);
-	if ((chapter_edit_key == GDK_Return || chapter_edit_key == GDK_Down) &&
+	if ((chapter_edit_key == GDK_KEY_Return || chapter_edit_key == GDK_KEY_Down) &&
 		gtk_tree_model_iter_next(GTK_TREE_MODEL(store), &iter))
 	{
 		GtkTreeViewColumn *column;
@@ -3516,7 +3650,7 @@ chapter_edited_cb(
 		column = gtk_tree_view_get_column(treeview, 2);
 		gtk_tree_view_set_cursor(treeview, treepath, column, TRUE);
 	}
-	else if (chapter_edit_key == GDK_Up && row > 0)
+	else if (chapter_edit_key == GDK_KEY_Up && row > 0)
 	{
 		GtkTreeViewColumn *column;
 		gtk_tree_path_prev(treepath);
@@ -3583,6 +3717,17 @@ hbfd_toggled_cb(GtkWidget *widget, signal_user_data_t *ud)
 }
 
 G_MODULE_EXPORT void
+advanced_audio_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
+{
+	g_debug("advanced_audio_changed_cb");
+	ghb_widget_to_setting (ud->settings, widget);
+	ghb_check_dependency(ud, widget, NULL);
+	const gchar *name = ghb_get_setting_key(widget);
+	ghb_pref_save(ud->settings, name);
+	ghb_show_hide_advanced_audio( ud );
+}
+
+G_MODULE_EXPORT void
 pref_changed_cb(GtkWidget *widget, signal_user_data_t *ud)
 {
 	g_debug("pref_changed_cb");
@@ -3612,11 +3757,25 @@ show_status_cb(GtkWidget *widget, signal_user_data_t *ud)
 	const gchar *name = ghb_get_setting_key(widget);
 	ghb_pref_save(ud->settings, name);
 
+#if defined(_USE_APP_IND)
+    if (ud->ai)
+    {
+        if (ghb_settings_get_boolean(ud->settings, "show_status"))
+        {
+            app_indicator_set_status(ud->ai, APP_INDICATOR_STATUS_ACTIVE);
+        }
+        else
+        {
+            app_indicator_set_status(ud->ai, APP_INDICATOR_STATUS_PASSIVE);
+        }
+    }
+#else
 	GtkStatusIcon *si;
 
 	si = GTK_STATUS_ICON(GHB_OBJECT (ud->builder, "hb_status"));
 	gtk_status_icon_set_visible(si,
 			ghb_settings_get_boolean(ud->settings, "show_status"));
+#endif
 }
 
 G_MODULE_EXPORT void
@@ -4414,7 +4573,7 @@ ghb_inhibit_gsm(signal_user_data_t *ud)
 		return;
 	}
 	widget = GHB_WIDGET(ud->builder, "hb_window");
-	xid = GDK_DRAWABLE_XID(widget->window);
+	xid = GDK_WINDOW_XID(gtk_widget_get_window(widget));
 	res = dbus_g_proxy_call(proxy, "Inhibit", &error,
 							G_TYPE_STRING, "ghb",
 							G_TYPE_UINT, xid,
@@ -4592,19 +4751,6 @@ format_deblock_cb(GtkScale *scale, gdouble val, signal_user_data_t *ud)
 }
 
 G_MODULE_EXPORT gchar*
-format_drc_cb(GtkScale *scale, gdouble val, signal_user_data_t *ud)
-{
-	if (val <= 0.0)
-	{
-		return g_strdup_printf("Off");
-	}
-	else
-	{
-		return g_strdup_printf("%.1f", val);
-	}
-}
-
-G_MODULE_EXPORT gchar*
 format_vquality_cb(GtkScale *scale, gdouble val, signal_user_data_t *ud)
 {
 	gint vcodec = ghb_settings_combo_int(ud->settings, "VideoEncoder");
@@ -4622,7 +4768,8 @@ format_vquality_cb(GtkScale *scale, gdouble val, signal_user_data_t *ud)
 			}
 		} break;
 
-		case HB_VCODEC_FFMPEG:
+		case HB_VCODEC_FFMPEG_MPEG4:
+		case HB_VCODEC_FFMPEG_MPEG2:
 		{
 			return g_strdup_printf("QP: %d", (int)val);
 		} break;
@@ -4852,7 +4999,28 @@ status_activate_cb(GtkStatusIcon *si, signal_user_data_t *ud)
 	GdkWindowState state;
 
 	window = GTK_WINDOW(GHB_WIDGET(ud->builder, "hb_window"));
-	state = gdk_window_get_state(GTK_WIDGET(window)->window);
+	state = gdk_window_get_state(gtk_widget_get_window(GTK_WIDGET(window)));
+	if ((state & GDK_WINDOW_STATE_ICONIFIED) ||
+		(ud->hb_visibility != GDK_VISIBILITY_UNOBSCURED))
+	{
+		gtk_window_present(window);
+		gtk_window_set_skip_taskbar_hint(window, FALSE);
+	}
+	else
+	{
+		gtk_window_set_skip_taskbar_hint(window, TRUE);
+		gtk_window_iconify(window);
+	}
+}
+
+G_MODULE_EXPORT void
+show_hide_toggle_cb(GtkWidget *xwidget, signal_user_data_t *ud)
+{
+	GtkWindow *window;
+	GdkWindowState state;
+
+	window = GTK_WINDOW(GHB_WIDGET(ud->builder, "hb_window"));
+	state = gdk_window_get_state(gtk_widget_get_window(GTK_WIDGET(window)));
 	if ((state & GDK_WINDOW_STATE_ICONIFIED) ||
 		(ud->hb_visibility != GDK_VISIBILITY_UNOBSCURED))
 	{
@@ -4889,9 +5057,13 @@ ghb_notify_done(signal_user_data_t *ud)
 	notification = notify_notification_new(
 		"Encode Complete",
 		"Put down that cocktail, Your HandBrake queue is done!",
-		"hb-icon",
-		NULL);
+		"hb-icon"
+#if NOTIFY_CHECK_VERSION (0, 7, 0)
+                );
+#else
+		,NULL);
 	notify_notification_attach_to_status_icon(notification, si);
+#endif
 	g_signal_connect(notification, "closed", (GCallback)notify_closed_cb, ud);
 	notify_notification_show(notification, NULL);
 #endif
@@ -4924,3 +5096,29 @@ ghb_notify_done(signal_user_data_t *ud)
 							"Cancel", (GSourceFunc)quit_cb, ud, 60);
 	}
 }
+
+G_MODULE_EXPORT gboolean
+window_configure_cb(
+	GtkWidget *widget,
+	GdkEventConfigure *event,
+	signal_user_data_t *ud)
+{
+	//g_message("preview_configure_cb()");
+	if (gtk_widget_get_visible(widget))
+	{
+		gint w, h;
+		w = ghb_settings_get_int(ud->settings, "window_width");
+		h = ghb_settings_get_int(ud->settings, "window_height");
+
+		if ( w != event->width || h != event->height )
+		{
+			ghb_settings_set_int(ud->settings, "window_width", event->width);
+			ghb_settings_set_int(ud->settings, "window_height", event->height);
+			ghb_pref_set(ud->settings, "window_width");
+			ghb_pref_set(ud->settings, "window_height");
+			ghb_prefs_store();
+		}
+	}
+	return FALSE;
+}
+

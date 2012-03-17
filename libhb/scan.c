@@ -149,14 +149,21 @@ static void ScanFunc( void * _data )
             }
         }
     }
-    else if ( (data->stream = hb_stream_open( data->path, 0 ) ) != NULL )
-    {
-        hb_list_add( data->list_title, hb_stream_title_scan( data->stream ) );
-    }
     else
     {
-        hb_log( "scan: unrecognized file type" );
-        return;
+        hb_title_t * title = hb_title_init( data->path, 0 );
+        if ( (data->stream = hb_stream_open( data->path, title, 1 ) ) != NULL )
+        {
+            title = hb_stream_title_scan( data->stream, title );
+            if ( title )
+                hb_list_add( data->list_title, title );
+        }
+        else
+        {
+            hb_title_close( &title );
+            hb_log( "scan: unrecognized file type" );
+            return;
+        }
     }
 
     for( i = 0; i < hb_list_count( data->list_title ); )
@@ -177,6 +184,7 @@ static void ScanFunc( void * _data )
         p.title_cur   = title->index;
         p.title_count = data->dvd ? hb_dvd_title_count( data->dvd ) : 
                         data->bd ? hb_bd_title_count( data->bd ) :
+                        data->batch ? hb_batch_title_count( data->batch ) :
                                    hb_list_count(data->list_title);
         hb_set_state( data->h, &state );
 #undef p
@@ -187,6 +195,16 @@ static void ScanFunc( void * _data )
         {
             /* TODO: free things */
             hb_list_rem( data->list_title, title );
+            for( j = 0; j < hb_list_count( title->list_audio ); j++)
+            {
+                audio = hb_list_item( title->list_audio, j );
+                if ( audio->priv.scan_cache )
+                {
+                    hb_fifo_flush( audio->priv.scan_cache );
+                    hb_fifo_close( &audio->priv.scan_cache );
+                }
+            }
+            hb_title_close( &title );
             continue;
         }
 
@@ -194,6 +212,11 @@ static void ScanFunc( void * _data )
         for( j = 0; j < hb_list_count( title->list_audio ); )
         {
             audio = hb_list_item( title->list_audio, j );
+            if ( audio->priv.scan_cache )
+            {
+                hb_fifo_flush( audio->priv.scan_cache );
+                hb_fifo_close( &audio->priv.scan_cache );
+            }
             if( !audio->config.in.bitrate )
             {
                 hb_log( "scan: removing audio 0x%x because no bitrate found",
@@ -201,11 +224,6 @@ static void ScanFunc( void * _data )
                 hb_list_rem( title->list_audio, audio );
                 free( audio );
                 continue;
-            }
-            if ( audio->priv.scan_cache )
-            {
-                hb_fifo_flush( audio->priv.scan_cache );
-                hb_fifo_close( &audio->priv.scan_cache );
             }
             j++;
         }
@@ -275,7 +293,7 @@ static void ScanFunc( void * _data )
 
         job->keep_ratio = 1;
 
-        job->vcodec     = HB_VCODEC_FFMPEG;
+        job->vcodec     = HB_VCODEC_FFMPEG_MPEG4;
         job->vquality   = -1.0;
         job->vbitrate   = 1000;
         job->pass       = 0;
@@ -327,17 +345,17 @@ static inline int clampBlack( int x )
     return x < 16 ? 16 : x;
 }
 
-static int row_all_dark( hb_title_t *title, uint8_t* luma, int row )
+static int row_all_dark( hb_work_info_t *info, uint8_t* luma, int row )
 {
-    luma += title->width * row;
+    luma += info->width * row;
 
     // compute the average luma value of the row
     int i, avg = 0;
-    for ( i = 0; i < title->width; ++i )
+    for ( i = 0; i < info->width; ++i )
     {
         avg += clampBlack( luma[i] );
     }
-    avg /= title->width;
+    avg /= info->width;
     if ( avg >= DARK )
         return 0;
 
@@ -345,7 +363,7 @@ static int row_all_dark( hb_title_t *title, uint8_t* luma, int row )
     // all pixels are within +-16 of the average (this range is fairly coarse
     // but there's a lot of quantization noise for luma values near black
     // so anything less will fail to crop because of the noise).
-    for ( i = 0; i < title->width; ++i )
+    for ( i = 0; i < info->width; ++i )
     {
         if ( absdiff( avg, clampBlack( luma[i] ) ) > 16 )
             return 0;
@@ -353,11 +371,11 @@ static int row_all_dark( hb_title_t *title, uint8_t* luma, int row )
     return 1;
 }
 
-static int column_all_dark( hb_title_t *title, uint8_t* luma, int top, int bottom,
+static int column_all_dark( hb_work_info_t *info, uint8_t* luma, int top, int bottom,
                             int col )
 {
-    int stride = title->width;
-    int height = title->height - top - bottom;
+    int stride = info->width;
+    int height = info->height - top - bottom;
     luma += stride * top + col;
 
     // compute the average value of the column
@@ -448,7 +466,29 @@ static void most_common_info( info_list_t *info_list, hb_work_info_t *info )
             biggest = i;
     }
     *info = info_list[biggest].info;
-    free( info_list );
+}
+
+static int has_resolution_change( info_list_t *info_list )
+{
+    int w, h, i;
+
+    if( !info_list[0].count )
+        return 0;
+    w = info_list[0].info.width;
+    h = info_list[0].info.height;
+    for ( i = 1; info_list[i].count; ++i )
+    {
+        if ( w != info_list[i].info.width || h != info_list[i].info.height )
+            return 1;
+    }
+    return 0;
+}
+
+static int is_close_to( int val, int target, int thresh )
+{
+    int diff = val - target;
+    diff = diff < 0 ? -diff : diff;
+    return diff < thresh;
 }
 
 /***********************************************************************
@@ -461,17 +501,25 @@ static void most_common_info( info_list_t *info_list, hb_work_info_t *info )
 static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
 {
     int             i, npreviews = 0;
-    hb_buffer_t   * buf_ps, * buf_es;
+    hb_buffer_t   * buf, * buf_es;
     hb_list_t     * list_es;
     int progressive_count = 0;
+    int pulldown_count = 0;
+    int doubled_frame_count = 0;
     int interlaced_preview_count = 0;
     info_list_t * info_list = calloc( data->preview_count+1, sizeof(*info_list) );
     crop_record_t *crops = calloc( 1, sizeof(*crops) );
 
-    buf_ps   = hb_buffer_init( HB_DVD_READ_BUFFER_SIZE );
     list_es  = hb_list_init();
 
-    hb_log( "scan: decoding previews for title %d", title->index );
+    if( data->batch )
+    {
+        hb_log( "scan: decoding previews for title %d (%s)", title->index, title->path );
+    }
+    else
+    {
+        hb_log( "scan: decoding previews for title %d", title->index );
+    }
 
     if (data->bd)
     {
@@ -486,8 +534,21 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
     }
     else if (data->batch)
     {
-        data->stream = hb_stream_open( title->path, title );
+        data->stream = hb_stream_open( title->path, title, 1 );
     }
+
+    int vcodec = title->video_codec? title->video_codec : WORK_DECMPEG2;
+#if defined(USE_FF_MPEG2)
+    if (vcodec == WORK_DECMPEG2)
+    {
+        vcodec = WORK_DECAVCODECV;
+        title->video_codec_param = CODEC_ID_MPEG2VIDEO;
+    }
+#endif
+    hb_work_object_t *vid_decoder = hb_get_work( vcodec );
+    vid_decoder->codec_param = title->video_codec_param;
+    vid_decoder->title = title;
+    vid_decoder->init( vid_decoder, NULL );
 
     for( i = 0; i < data->preview_count; i++ )
     {
@@ -497,6 +558,8 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
 
         if ( *data->die )
         {
+            free( info_list );
+            free( crops );
             return 0;
         }
         if (data->bd)
@@ -526,44 +589,16 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
 
         hb_deep_log( 2, "scan: preview %d", i + 1 );
 
-        int vcodec = title->video_codec? title->video_codec : WORK_DECMPEG2;
-#if defined(USE_FF_MPEG2)
-        if (vcodec == WORK_DECMPEG2)
-        {
-            vcodec = WORK_DECAVCODECV;
-            title->video_codec_param = CODEC_ID_MPEG2VIDEO;
-        }
-#endif
-        hb_work_object_t *vid_decoder = hb_get_work( vcodec );
-        vid_decoder->codec_param = title->video_codec_param;
-        vid_decoder->title = title;
-        vid_decoder->init( vid_decoder, NULL );
-        hb_buffer_t * vid_buf = NULL;
-        int vidskip = 0;
+        if ( vid_decoder->flush )
+            vid_decoder->flush( vid_decoder );
 
-        if ( title->flags & HBTF_NO_IDR )
-        {
-            // title doesn't have IDR frames so we decode but drop one second's
-            // worth of frames to allow the decoder to converge.
-            if ( ! title->rate_base )
-            {
-                vidskip = 30;
-            }
-            else
-            {
-                vidskip = (double)title->rate / (double)title->rate_base + 0.5;
-            }
-            // If it's a BD, we can relax this a bit. Since seeks will
-            // at least get us to a recovery point.
-            if (data->bd)
-                vidskip = 4;
-        }
+        hb_buffer_t * vid_buf = NULL;
 
         for( j = 0; j < 10240 ; j++ )
         {
             if (data->bd)
             {
-              if( !hb_bd_read( data->bd, buf_ps ) )
+              if( (buf = hb_bd_read( data->bd )) == NULL )
               {
                   if ( vid_buf )
                   {
@@ -573,9 +608,9 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
                   goto skip_preview;
               }
             }
-            if (data->dvd)
+            else if (data->dvd)
             {
-              if( !hb_dvd_read( data->dvd, buf_ps ) )
+              if( (buf = hb_dvd_read( data->dvd )) == NULL )
               {
                   if ( vid_buf )
                   {
@@ -587,7 +622,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
             }
             else if (data->stream)
             {
-              if ( !hb_stream_read(data->stream,buf_ps) )
+              if ( (buf = hb_stream_read( data->stream )) == NULL )
               {
                   if ( vid_buf )
                   {
@@ -597,7 +632,15 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
                   goto skip_preview;
               }
             }
-            (hb_demux[title->demuxer])(buf_ps, list_es, 0 );
+            else
+            {
+                // Silence compiler warning
+                buf = NULL;
+                hb_error( "Error: This can't happen!" );
+                goto skip_preview;
+            }
+
+            (hb_demux[title->demuxer])(buf, list_es, 0 );
 
             while( ( buf_es = hb_list_item( list_es, 0 ) ) )
             {
@@ -605,18 +648,6 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
                 if( buf_es->id == title->video_id && vid_buf == NULL )
                 {
                     vid_decoder->work( vid_decoder, &buf_es, &vid_buf );
-                    if ( vid_buf && vidskip && --vidskip > 0 )
-                    {
-                        // we're dropping frames to get the video decoder in sync
-                        // when the video stream doesn't contain IDR frames
-                        while (vid_buf && --vidskip >= 0)
-                        {
-                            hb_buffer_t * next = vid_buf->next;
-                            vid_buf->next = NULL;
-                            hb_buffer_close( &vid_buf );
-                            vid_buf = next;
-                        }
-                    }
                 }
                 else if( ! AllAudioOK( title ) ) 
                 {
@@ -650,58 +681,33 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
             {
                 hb_buffer_close( &vid_buf );
             }
-            vid_decoder->close( vid_decoder );
-            free( vid_decoder );
+            hb_log( "scan: could not get a video information" );
             continue;
         }
-        vid_decoder->close( vid_decoder );
-        free( vid_decoder );
 
         remember_info( info_list, &vid_info );
 
-        title->video_codec_name = strdup( vid_info.name );
-        title->width = vid_info.width;
-        title->height = vid_info.height;
-        title->rate = vid_info.rate;
-        title->rate_base = vid_info.rate_base;
-        title->video_bitrate = vid_info.bitrate;
-
-        if( title->rate_base == 1126125 )
+        if( is_close_to( vid_info.rate_base, 900900, 100 ) &&
+            ( vid_buf->flags & PIC_FLAG_REPEAT_FIRST_FIELD ) )
         {
-            /* Frame FPS is 23.976 (meaning it's progressive), so
-               start keeping track of how many are reporting at
-               that speed. When enough show up that way, we want
-               to make that the overall title FPS.
-            */
-            progressive_count++;
-
-            if( progressive_count < 6 )
-            {
-                /* Not enough frames are reporting as progressive,
-                   which means we should be conservative and use
-                   29.97 as the title's FPS for now.
-                */
-                title->rate_base = 900900;
-            }
-            else
-            {
-                /* A majority of the scan frames are progressive. Make that
-                    the title's FPS, and announce it once to the log.
-                */
-                if( progressive_count == 6 )
-                {
-                    hb_deep_log( 2, "Title's mostly NTSC Film, setting fps to 23.976");
-                }
-                title->rate_base = 1126125;
-            }
+            /* Potentially soft telecine material */
+            pulldown_count++;
         }
-        else if( title->rate_base == 900900 && progressive_count >= 6 )
+
+        if( vid_buf->flags & PIC_FLAG_REPEAT_FRAME )
         {
-            /*
-             * We've already deduced that the frame rate is 23.976, so set it
-             * back again.
-             */
-            title->rate_base = 1126125;
+            // AVCHD-Lite specifies that all streams are
+            // 50 or 60 fps.  To produce 25 or 30 fps, camera
+            // makers are repeating all frames.
+            doubled_frame_count++;
+        }
+
+        if( is_close_to( vid_info.rate_base, 1126125, 100 ) )
+        {
+            // Frame FPS is 23.976 (meaning it's progressive), so start keeping
+            // track of how many are reporting at that speed. When enough 
+            // show up that way, we want to make that the overall title FPS.
+            progressive_count++;
         }
 
         while( ( buf_es = hb_list_item( list_es, 0 ) ) )
@@ -711,7 +717,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         }
 
         /* Check preview for interlacing artifacts */
-        if( hb_detect_comb( vid_buf, title->width, title->height, 10, 30, 9, 10, 30, 9 ) )
+        if( hb_detect_comb( vid_buf, vid_info.width, vid_info.height, 10, 30, 9, 10, 30, 9 ) )
         {
             hb_deep_log( 2, "Interlacing detected in preview frame %i", i+1);
             interlaced_preview_count++;
@@ -725,7 +731,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
             file_preview = fopen( filename, "wb" );
             if( file_preview )
             {
-                fwrite( vid_buf->data, title->width * title->height * 3 / 2,
+                fwrite( vid_buf->data, vid_info.width * vid_info.height * 3 / 2,
                         1, file_preview );
                 fclose( file_preview );
             }
@@ -739,7 +745,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
 
 #define Y    vid_buf->data
         int top, bottom, left, right;
-        int h4 = title->height / 4, w4 = title->width / 4;
+        int h4 = vid_info.height / 4, w4 = vid_info.width / 4;
 
         // When widescreen content is matted to 16:9 or 4:3 there's sometimes
         // a thin border on the outer edge of the matte. On TV content it can be
@@ -749,11 +755,11 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         // we can crop the matte. The border width depends on the resolution
         // (12 pixels on 1080i looks visually the same as 4 pixels on 480i)
         // so we allow the border to be up to 1% of the frame height.
-        const int border = title->height / 100;
+        const int border = vid_info.height / 100;
 
         for ( top = border; top < h4; ++top )
         {
-            if ( ! row_all_dark( title, Y, top ) )
+            if ( ! row_all_dark( &vid_info, Y, top ) )
                 break;
         }
         if ( top <= border )
@@ -762,7 +768,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
             // didn't check are dark or if we shouldn't crop at all.
             for ( top = 0; top < border; ++top )
             {
-                if ( ! row_all_dark( title, Y, top ) )
+                if ( ! row_all_dark( &vid_info, Y, top ) )
                     break;
             }
             if ( top >= border )
@@ -772,14 +778,14 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         }
         for ( bottom = border; bottom < h4; ++bottom )
         {
-            if ( ! row_all_dark( title, Y, title->height - 1 - bottom ) )
+            if ( ! row_all_dark( &vid_info, Y, vid_info.height - 1 - bottom ) )
                 break;
         }
         if ( bottom <= border )
         {
             for ( bottom = 0; bottom < border; ++bottom )
             {
-                if ( ! row_all_dark( title, Y, title->height - 1 - bottom ) )
+                if ( ! row_all_dark( &vid_info, Y, vid_info.height - 1 - bottom ) )
                     break;
             }
             if ( bottom >= border )
@@ -789,12 +795,12 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         }
         for ( left = 0; left < w4; ++left )
         {
-            if ( ! column_all_dark( title, Y, top, bottom, left ) )
+            if ( ! column_all_dark( &vid_info, Y, top, bottom, left ) )
                 break;
         }
         for ( right = 0; right < w4; ++right )
         {
-            if ( ! column_all_dark( title, Y, top, bottom, title->width - 1 - right ) )
+            if ( ! column_all_dark( &vid_info, Y, top, bottom, vid_info.width - 1 - right ) )
                 break;
         }
 
@@ -822,6 +828,8 @@ skip_preview:
             hb_buffer_close( &vid_buf );
         }
     }
+    vid_decoder->close( vid_decoder );
+    free( vid_decoder );
 
     if ( data->batch && data->stream )
     {
@@ -834,35 +842,69 @@ skip_preview:
         hb_work_info_t vid_info;
         most_common_info( info_list, &vid_info );
 
+        title->has_resolution_change = has_resolution_change( info_list );
+        if ( title->video_codec_name == NULL )
+        {
+            title->video_codec_name = strdup( vid_info.name );
+        }
         title->width = vid_info.width;
         title->height = vid_info.height;
-        title->pixel_aspect_width = vid_info.pixel_aspect_width;
-        title->pixel_aspect_height = vid_info.pixel_aspect_height;
+        if ( vid_info.rate && vid_info.rate_base )
+        {
+            title->rate = vid_info.rate;
+            title->rate_base = vid_info.rate_base;
+            if( is_close_to( vid_info.rate_base, 900900, 100 ) )
+            {
+                if( pulldown_count >= npreviews / 4 )
+                {
+                    title->rate_base = 1126125;
+                    hb_deep_log( 2, "Pulldown detected, setting fps to 23.976" );
+                }
+                if( progressive_count >= npreviews / 2 )
+                {
+                    // We've already deduced that the frame rate is 23.976,
+                    // so set it back again.
+                    title->rate_base = 1126125;
+                    hb_deep_log( 2, "Title's mostly NTSC Film, setting fps to 23.976" );
+                }
+            }
+            if( doubled_frame_count >= 3 * npreviews / 4 )
+            {
+                // We've detected that a significant number of the frames
+                // have been doubled in duration by repeat flags.
+                title->rate_base = 2 * vid_info.rate_base;
+                hb_deep_log( 2, "Repeat frames detected, setting fps to %.3f", (float)title->rate / title->rate_base );
+            }
+        }
+        title->video_bitrate = vid_info.bitrate;
+
+        if( vid_info.pixel_aspect_width && vid_info.pixel_aspect_height )
+        {
+            title->pixel_aspect_width = vid_info.pixel_aspect_width;
+            title->pixel_aspect_height = vid_info.pixel_aspect_height;
+        }
 
         // compute the aspect ratio based on the storage dimensions and the
         // pixel aspect ratio (if supplied) or just storage dimensions if no PAR.
         title->aspect = (double)title->width / (double)title->height;
-        if( title->pixel_aspect_width && title->pixel_aspect_height )
-        {
-            title->aspect *= (double)title->pixel_aspect_width /
-                             (double)title->pixel_aspect_height;
+        title->aspect *= (double)title->pixel_aspect_width /
+                         (double)title->pixel_aspect_height;
 
-            // For unknown reasons some French PAL DVDs put the original
-            // content's aspect ratio into the mpeg PAR even though it's
-            // the wrong PAR for the DVD. Apparently they rely on the fact
-            // that DVD players ignore the content PAR and just use the
-            // aspect ratio from the DVD metadata. So, if the aspect computed
-            // from the PAR is different from the container's aspect we use
-            // the container's aspect & recompute the PAR from it.
-            if( title->container_aspect && (int)(title->aspect * 9) != (int)(title->container_aspect * 9) )
-            {
-                hb_log("scan: content PAR gives wrong aspect %.2f; "
-                       "using container aspect %.2f", title->aspect,
-                       title->container_aspect );
-                title->aspect = title->container_aspect;
-                hb_reduce( &title->pixel_aspect_width, &title->pixel_aspect_height,
-                           (int)(title->aspect * title->height + 0.5), title->width );
-            }
+        // For unknown reasons some French PAL DVDs put the original
+        // content's aspect ratio into the mpeg PAR even though it's
+        // the wrong PAR for the DVD. Apparently they rely on the fact
+        // that DVD players ignore the content PAR and just use the
+        // aspect ratio from the DVD metadata. So, if the aspect computed
+        // from the PAR is different from the container's aspect we use
+        // the container's aspect & recompute the PAR from it.
+        if( title->container_aspect && (int)(title->aspect * 9) != (int)(title->container_aspect * 9) )
+        {
+            hb_log("scan: content PAR gives wrong aspect %.2f; "
+                   "using container aspect %.2f", title->aspect,
+                   title->container_aspect );
+            title->aspect = title->container_aspect;
+            hb_reduce( &title->pixel_aspect_width, &title->pixel_aspect_height,
+                       (int)(title->aspect * title->height + 0.5), title->width );
         }
 
         // don't try to crop unless we got at least 3 previews
@@ -881,7 +923,6 @@ skip_preview:
             title->crop[2] = EVEN( crops->l[i] );
             title->crop[3] = EVEN( crops->r[i] );
         }
-        free( crops );
 
         hb_log( "scan: %d previews, %dx%d, %.3f fps, autocrop = %d/%d/%d/%d, "
                 "aspect %s, PAR %d:%d",
@@ -902,8 +943,9 @@ skip_preview:
             title->detected_interlacing = 0;
         }
     }
+    free( crops );
+    free( info_list );
 
-    hb_buffer_close( &buf_ps );
     while( ( buf_es = hb_list_item( list_es, 0 ) ) )
     {
         hb_list_rem( list_es, buf_es );
@@ -960,7 +1002,7 @@ static void LookForAudio( hb_title_t * title, hb_buffer_t * b )
     if ( audio->priv.scan_cache == NULL )
         audio->priv.scan_cache = hb_fifo_init( 16, 16 );
 
-    if ( hb_fifo_size_bytes( audio->priv.scan_cache ) >= 4096 )
+    if ( hb_fifo_size_bytes( audio->priv.scan_cache ) >= 16384 )
     {
         hb_buffer_t * tmp;
         tmp = hb_fifo_get( audio->priv.scan_cache );
@@ -992,14 +1034,17 @@ static void LookForAudio( hb_title_t * title, hb_buffer_t * b )
     if ( !info.bitrate )
     {
         /* didn't find any info */
+        free( w );
         return;
     }
     hb_fifo_flush( audio->priv.scan_cache );
     hb_fifo_close( &audio->priv.scan_cache );
 
     audio->config.in.samplerate = info.rate;
+    audio->config.in.samples_per_frame = info.samples_per_frame;
     audio->config.in.bitrate = info.bitrate;
     audio->config.in.channel_layout = info.channel_layout;
+    audio->config.in.channel_map = info.channel_map;
     audio->config.in.version = info.version;
     audio->config.in.mode = info.mode;
     audio->config.flags.ac3 = info.flags;

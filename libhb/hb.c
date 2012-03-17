@@ -40,8 +40,6 @@ struct hb_handle_s
     int            work_error;
     hb_thread_t  * work_thread;
 
-    int            cpu_count;
-
     hb_lock_t    * state_lock;
     hb_state_t     state;
 
@@ -59,7 +57,6 @@ struct hb_handle_s
 
 };
 
-hb_lock_t *hb_avcodec_lock;
 hb_work_object_t * hb_objects = NULL;
 int hb_instance_counter = 0;
 int hb_process_initialized = 0;
@@ -67,28 +64,75 @@ int hb_process_initialized = 0;
 static void thread_func( void * );
 hb_title_t * hb_get_title_by_index( hb_handle_t *, int );
 
+static int ff_lockmgr_cb(void **mutex, enum AVLockOp op)
+{
+    switch ( op )
+    {
+        case AV_LOCK_CREATE:
+        {
+            *mutex  = hb_lock_init();
+        } break;
+        case AV_LOCK_DESTROY:
+        {
+            hb_lock_close( (hb_lock_t**)mutex );
+        } break;
+        case AV_LOCK_OBTAIN:
+        {
+            hb_lock( (hb_lock_t*)*mutex );
+        } break;
+        case AV_LOCK_RELEASE:
+        {
+            hb_unlock( (hb_lock_t*)*mutex );
+        } break;
+        default:
+            break;
+    }
+    return 0;
+}
+
 void hb_avcodec_init()
 {
-    hb_avcodec_lock  = hb_lock_init();
+    av_lockmgr_register( ff_lockmgr_cb );
     av_register_all();
 }
 
-int hb_avcodec_open(AVCodecContext *avctx, AVCodec *codec)
+int hb_avcodec_open(AVCodecContext *avctx, AVCodec *codec, AVDictionary **av_opts, int thread_count)
 {
     int ret;
-    hb_lock( hb_avcodec_lock );
-    ret = avcodec_open(avctx, codec);
-    hb_unlock( hb_avcodec_lock );
+
+    if ( ( thread_count == HB_FFMPEG_THREADS_AUTO || thread_count > 0 ) && 
+         ( codec->type == AVMEDIA_TYPE_VIDEO ) )
+    {
+        avctx->thread_count = ( thread_count == HB_FFMPEG_THREADS_AUTO ) ? 
+                                hb_get_cpu_count() / 2 + 1 : thread_count;
+        avctx->thread_type = FF_THREAD_FRAME|FF_THREAD_SLICE;
+        avctx->thread_safe_callbacks = 1;
+    }
+    else
+    {
+        avctx->thread_count = 1;
+    }
+
+    ret = avcodec_open2(avctx, codec, av_opts);
     return ret;
 }
 
-int hb_av_find_stream_info(AVFormatContext *ic)
+int hb_avcodec_close(AVCodecContext *avctx)
 {
     int ret;
-    hb_lock( hb_avcodec_lock );
-    ret = av_find_stream_info( ic );
-    hb_unlock( hb_avcodec_lock );
+    ret = avcodec_close(avctx);
     return ret;
+}
+
+static int handle_jpeg(enum PixelFormat *format)
+{
+    switch (*format) {
+    case PIX_FMT_YUVJ420P: *format = PIX_FMT_YUV420P; return 1;
+    case PIX_FMT_YUVJ422P: *format = PIX_FMT_YUV422P; return 1;
+    case PIX_FMT_YUVJ444P: *format = PIX_FMT_YUV444P; return 1;
+    case PIX_FMT_YUVJ440P: *format = PIX_FMT_YUV440P; return 1;
+    default:                                          return 0;
+    }
 }
 
 struct SwsContext*
@@ -98,20 +142,35 @@ hb_sws_get_context(int srcW, int srcH, enum PixelFormat srcFormat,
 {
     struct SwsContext * ctx;
 
-#if 0
-    // sws_getContext is being depricated.  But it appears that
-    // the new method isn't quite wrung out yet.  So when it is
-    // this code should be fixed up and enabled.
     ctx = sws_alloc_context();
     if ( ctx )
     {
-        av_set_int(ctx, "srcw", srcW);
-        av_set_int(ctx, "srch", srcH);
-        av_set_int(ctx, "src_format", srcFormat);
-        av_set_int(ctx, "dstw", dstW);
-        av_set_int(ctx, "dsth", dstH);
-        av_set_int(ctx, "dst_format", dstFormat);
-        av_set_int(ctx, "sws_flags", flags);
+        int srcRange, dstRange;
+
+        srcRange = handle_jpeg(&srcFormat);
+        dstRange = handle_jpeg(&dstFormat);
+        /* enable this when implemented in Libav
+        flags |= SWS_FULL_CHR_H_INT | SWS_FULL_CHR_H_INP;
+         */
+
+        av_opt_set_int(ctx, "srcw", srcW, 0);
+        av_opt_set_int(ctx, "srch", srcH, 0);
+        av_opt_set_int(ctx, "src_range", srcRange, 0);
+        av_opt_set_int(ctx, "src_format", srcFormat, 0);
+        av_opt_set_int(ctx, "dstw", dstW, 0);
+        av_opt_set_int(ctx, "dsth", dstH, 0);
+        av_opt_set_int(ctx, "dst_range", dstRange, 0);
+        av_opt_set_int(ctx, "dst_format", dstFormat, 0);
+        av_opt_set_int(ctx, "sws_flags", flags, 0);
+
+        sws_setColorspaceDetails( ctx, 
+                      sws_getCoefficients( SWS_CS_DEFAULT ), // src colorspace
+                      srcRange, // src range 0 = MPG, 1 = JPG
+                      sws_getCoefficients( SWS_CS_DEFAULT ), // dst colorspace
+                      dstRange, // dst range 0 = MPG, 1 = JPG
+                      0,         // brightness
+                      1 << 16,   // contrast
+                      1 << 16 ); // saturation
 
         if (sws_init_context(ctx, NULL, NULL) < 0) {
             fprintf(stderr, "Cannot initialize resampling context\n");
@@ -119,66 +178,45 @@ hb_sws_get_context(int srcW, int srcH, enum PixelFormat srcFormat,
             ctx = NULL;
         } 
     }
-#else
-    ctx = sws_getContext(srcW, srcH, srcFormat, dstW, dstH, dstFormat, 
-                         flags, NULL, NULL, NULL);
-#endif
     return ctx;
 }
 
-int hb_avcodec_close(AVCodecContext *avctx)
-{
-    int ret;
-    hb_lock( hb_avcodec_lock );
-    ret = avcodec_close(avctx);
-    hb_unlock( hb_avcodec_lock );
-    return ret;
-}
-
-int hb_ff_layout_xlat(int64_t ff_channel_layout, int channels)
+int hb_ff_layout_xlat( int64_t ff_channel_layout, int channels )
 {
     int hb_layout;
 
-    switch (ff_channel_layout)
+    switch( ff_channel_layout )
     {
-        case CH_LAYOUT_MONO:
+        case AV_CH_LAYOUT_MONO:
             hb_layout = HB_INPUT_CH_LAYOUT_MONO;
             break;
-        case CH_LAYOUT_STEREO:
+        case AV_CH_LAYOUT_STEREO:
+        case AV_CH_LAYOUT_STEREO_DOWNMIX:
             hb_layout = HB_INPUT_CH_LAYOUT_STEREO;
             break;
-        case CH_LAYOUT_SURROUND:
+        case AV_CH_LAYOUT_SURROUND:
             hb_layout = HB_INPUT_CH_LAYOUT_3F;
             break;
-        case CH_LAYOUT_4POINT0:
+        case AV_CH_LAYOUT_4POINT0:
             hb_layout = HB_INPUT_CH_LAYOUT_3F1R;
             break;
-        case CH_LAYOUT_2_2:
+        case AV_CH_LAYOUT_2_2:
+        case AV_CH_LAYOUT_QUAD:
             hb_layout = HB_INPUT_CH_LAYOUT_2F2R;
             break;
-        case CH_LAYOUT_QUAD:
-            hb_layout = HB_INPUT_CH_LAYOUT_2F2R;
-            break;
-        case CH_LAYOUT_5POINT0:
+        case AV_CH_LAYOUT_5POINT0:
+        case AV_CH_LAYOUT_5POINT0_BACK:
             hb_layout = HB_INPUT_CH_LAYOUT_3F2R;
             break;
-        case CH_LAYOUT_5POINT1:
+        case AV_CH_LAYOUT_5POINT1:
+        case AV_CH_LAYOUT_5POINT1_BACK:
             hb_layout = HB_INPUT_CH_LAYOUT_3F2R|HB_INPUT_CH_LAYOUT_HAS_LFE;
             break;
-        case CH_LAYOUT_5POINT0_BACK:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F2R;
-            break;
-        case CH_LAYOUT_5POINT1_BACK:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F2R|HB_INPUT_CH_LAYOUT_HAS_LFE;
-            break;
-        case CH_LAYOUT_7POINT0:
+        case AV_CH_LAYOUT_7POINT0:
             hb_layout = HB_INPUT_CH_LAYOUT_3F4R;
             break;
-        case CH_LAYOUT_7POINT1:
+        case AV_CH_LAYOUT_7POINT1:
             hb_layout = HB_INPUT_CH_LAYOUT_3F4R|HB_INPUT_CH_LAYOUT_HAS_LFE;
-            break;
-        case CH_LAYOUT_STEREO_DOWNMIX:
-            hb_layout = HB_INPUT_CH_LAYOUT_STEREO;
             break;
         default:
             hb_layout = HB_INPUT_CH_LAYOUT_STEREO;
@@ -189,12 +227,19 @@ int hb_ff_layout_xlat(int64_t ff_channel_layout, int channels)
     // about this. So we will make a best guess based on the number
     // of channels.
     int chans = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT( hb_layout );
-    if ( chans == channels )
+    if( ff_channel_layout && chans == channels )
     {
         return hb_layout;
     }
-    hb_log( "Channels reported by ffmpeg (%d) != computed layout channels (%d).", channels, chans );
-    switch (channels)
+    if( !ff_channel_layout )
+    {
+        hb_log( "No channel layout reported by Libav; guessing one from channel count." );
+    }
+    else
+    {
+        hb_log( "Channels reported by Libav (%d) != computed layout channels (%d). Guessing layout from channel count.", channels, chans );
+    }
+    switch( channels )
     {
         case 1:
             hb_layout = HB_INPUT_CH_LAYOUT_MONO;
@@ -221,11 +266,53 @@ int hb_ff_layout_xlat(int64_t ff_channel_layout, int channels)
             hb_layout = HB_INPUT_CH_LAYOUT_3F4R|HB_INPUT_CH_LAYOUT_HAS_LFE;
             break;
         default:
-            hb_log("Unsupported number of audio channels (%d).\n", channels);
+            hb_log( "Unsupported number of audio channels (%d).", channels );
             hb_layout = 0;
             break;
     }
     return hb_layout;
+}
+
+// Set sample format to AV_SAMPLE_FMT_FLT if supported.
+// If it is not supported, we will have to translate using
+// av_audio_convert.
+void hb_ff_set_sample_fmt(AVCodecContext *context, AVCodec *codec)
+{
+    if ( codec && codec->sample_fmts )
+    {
+        if ( codec->type != AVMEDIA_TYPE_AUDIO )
+            return; // Not audio
+
+        const enum AVSampleFormat *fmt;
+
+        for ( fmt = codec->sample_fmts; *fmt != -1; fmt++ )
+        {
+            if ( *fmt == AV_SAMPLE_FMT_FLT )
+            {
+                context->request_sample_fmt = AV_SAMPLE_FMT_FLT;
+                context->sample_fmt = AV_SAMPLE_FMT_FLT;
+                break;
+            }
+        }
+        if ( *fmt == -1 )
+            context->sample_fmt = codec->sample_fmts[0];
+
+    }
+}
+
+// Libav can decode DTS-ES 6.0/6.1 (5.0/5.1 core + XCh extension)
+// but we don't support 6.0/6.1 (and incorrectly assume 5.1/7.0)
+// request channels-1 to disable XCh processing in Libav
+int hb_ff_dts_disable_xch( AVCodecContext *c )
+{
+    if( ( c->codec_id == CODEC_ID_DTS ) &&
+        ( ( c->channel_layout & ~AV_CH_LOW_FREQUENCY ) == ( AV_CH_LAYOUT_5POINT0|AV_CH_BACK_CENTER ) ) )
+    {
+        c->request_channels = --c->channels;
+        c->channel_layout &= ~AV_CH_BACK_CENTER;
+        return 1;
+    }
+    return 0;
 }
 
 /**
@@ -331,10 +418,6 @@ hb_handle_t * hb_init( int verbose, int update_check )
      */
     hb_buffer_pool_init();
 
-    /* CPU count detection */
-    hb_log( "hb_init: checking cpu count" );
-    h->cpu_count = hb_get_cpu_count();
-
     h->list_title = hb_list_init();
     h->jobs       = hb_list_init();
 
@@ -369,10 +452,8 @@ hb_handle_t * hb_init( int verbose, int update_check )
     hb_register( &hb_enctheora );
 	hb_register( &hb_deca52 );
 	hb_register( &hb_decdca );
-	hb_register( &hb_decavcodec );
+	hb_register( &hb_decavcodeca );
 	hb_register( &hb_decavcodecv );
-	hb_register( &hb_decavcodecvi );
-	hb_register( &hb_decavcodecai );
 	hb_register( &hb_declpcm );
 	hb_register( &hb_encfaac );
 	hb_register( &hb_enclame );
@@ -380,8 +461,10 @@ hb_handle_t * hb_init( int verbose, int update_check )
 	hb_register( &hb_muxer );
 #ifdef __APPLE__
 	hb_register( &hb_encca_aac );
+	hb_register( &hb_encca_haac );
 #endif
-	hb_register( &hb_encac3 );
+	hb_register( &hb_encavcodeca );
+	hb_register( &hb_reader );
     
     return h;
 }
@@ -435,10 +518,6 @@ hb_handle_t * hb_init_dl( int verbose, int update_check )
         }
     }
 
-    /* CPU count detection */
-    hb_log( "hb_init: checking cpu count" );
-    h->cpu_count = hb_get_cpu_count();
-
     h->list_title = hb_list_init();
     h->jobs       = hb_list_init();
     h->current_job = NULL;
@@ -449,8 +528,7 @@ hb_handle_t * hb_init_dl( int verbose, int update_check )
     h->pause_lock = hb_lock_init();
 
     /* libavcodec */
-    avcodec_init();
-    avcodec_register_all();
+    hb_avcodec_init();
 
     /* Start library thread */
     hb_log( "hb_init: starting libhb thread" );
@@ -474,10 +552,8 @@ hb_handle_t * hb_init_dl( int verbose, int update_check )
     hb_register( &hb_enctheora );
 	hb_register( &hb_deca52 );
 	hb_register( &hb_decdca );
-	hb_register( &hb_decavcodec );
+	hb_register( &hb_decavcodeca );
 	hb_register( &hb_decavcodecv );
-	hb_register( &hb_decavcodecvi );
-	hb_register( &hb_decavcodecai );
 	hb_register( &hb_declpcm );
 	hb_register( &hb_encfaac );
 	hb_register( &hb_enclame );
@@ -485,8 +561,10 @@ hb_handle_t * hb_init_dl( int verbose, int update_check )
 	hb_register( &hb_muxer );
 #ifdef __APPLE__
 	hb_register( &hb_encca_aac );
+	hb_register( &hb_encca_haac );
 #endif
-	hb_register( &hb_encac3 );
+	hb_register( &hb_encavcodeca );
+	hb_register( &hb_reader );
 
 	return h;
 }
@@ -522,18 +600,6 @@ int hb_check_update( hb_handle_t * h, char ** version )
 {
     *version = ( h->build < 0 ) ? NULL : h->version;
     return h->build;
-}
-
-/**
- * Sets the cpu count to the desired value.
- * @param h Handle to hb_handle_t
- * @param cpu_count Number of CPUs to use.
- */
-void hb_set_cpu_count( hb_handle_t * h, int cpu_count )
-{
-    cpu_count    = MAX( 1, cpu_count );
-    cpu_count    = MIN( cpu_count, 64 );
-    h->cpu_count = cpu_count;
 }
 
 /**
@@ -708,7 +774,7 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
 
     // Scale
     sws_scale(context,
-              pic_crop.data, pic_crop.linesize,
+              (const uint8_t* const *)pic_crop.data, pic_crop.linesize,
               0, title->height - (job->crop[0] + job->crop[1]),
               pic_scale.data, pic_scale.linesize);
 
@@ -722,7 +788,7 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
 
     // Create preview
     sws_scale(context,
-              pic_scale.data, pic_scale.linesize,
+              (const uint8_t* const *)pic_scale.data, pic_scale.linesize,
               0, job->height,
               pic_preview.data, pic_preview.linesize);
 
@@ -1009,8 +1075,12 @@ void hb_set_anamorphic_size( hb_job_t * job,
             /* The film AR is the source's display width / cropped source height.
                The output display width is the output height * film AR.
                The output PAR is the output display width / output storage width. */
-            pixel_aspect_width = height * cropped_width * pixel_aspect_width;
-            pixel_aspect_height = width * cropped_height * pixel_aspect_height;
+            int64_t par_w, par_h;
+            par_w = (int64_t)height * cropped_width * pixel_aspect_width;
+            par_h = (int64_t)width * cropped_height * pixel_aspect_height;
+            hb_limit_rational64( &par_w, &par_h, par_w, par_h, 65535);
+            pixel_aspect_width = par_w;
+            pixel_aspect_height = par_h;
 
             /* Pass the results back to the caller */
             *output_width = width;
@@ -1342,6 +1412,7 @@ void hb_add( hb_handle_t * h, hb_job_t * job )
             hb_list_add( title_copy->list_attachment, hb_attachment_copy(attachment) );
         }
     }
+    title_copy->video_codec_name = strdup( title->video_codec_name );
 
     /*
      * The following code is confusing, there are two ways in which
@@ -1508,8 +1579,7 @@ void hb_start( hb_handle_t * h )
     h->paused = 0;
 
     h->work_die    = 0;
-    h->work_thread = hb_work_init( h->jobs, h->cpu_count,
-                                   &h->work_die, &h->work_error, &h->current_job );
+    h->work_thread = hb_work_init( h->jobs, &h->work_die, &h->work_error, &h->current_job );
 }
 
 /**
@@ -1687,6 +1757,8 @@ void hb_close( hb_handle_t ** _h )
     hb_list_close( &h->jobs );
     hb_lock_close( &h->state_lock );
     hb_lock_close( &h->pause_lock );
+
+    free( h->interjob );
 
     free( h );
     *_h = NULL;
@@ -1920,4 +1992,57 @@ void hb_set_state( hb_handle_t * h, hb_state_t * s )
 hb_interjob_t * hb_interjob_get( hb_handle_t * h )
 {
     return h->interjob;
+}
+
+/************************************************************************
+ * encca_haac_available()
+ ************************************************************************
+ * Returns whether the Core Audio HE-AAC encoder is available for use
+ * on the system. Under 10.5, if the encoder is available, register it.
+ * The registration is actually only performed on the first call.
+ ************************************************************************/
+int encca_haac_available()
+{
+#ifdef __APPLE__
+    static int encca_haac_available = -1;
+
+    if (encca_haac_available != -1)
+        return encca_haac_available;
+
+    encca_haac_available = 0;
+
+    long minorVersion, majorVersion, quickTimeVersion;
+    Gestalt(gestaltSystemVersionMajor, &majorVersion);
+    Gestalt(gestaltSystemVersionMinor, &minorVersion);
+    Gestalt(gestaltQuickTime, &quickTimeVersion);
+
+    if (majorVersion > 10 || (majorVersion == 10 && minorVersion >= 6))
+    {
+        // OS X 10.6+ - ca_haac is available and ready to use
+        encca_haac_available = 1;
+    }
+    else if (majorVersion == 10 && minorVersion >= 5 && quickTimeVersion >= 0x07630000)
+    {
+        // OS X 10.5, QuickTime 7.6.3+ - register the component
+        ComponentDescription cd;
+        cd.componentType         = kAudioEncoderComponentType;
+        cd.componentSubType      = kAudioFormatMPEG4AAC_HE;
+        cd.componentManufacturer = kAudioUnitManufacturer_Apple;
+        cd.componentFlags        = 0;
+        cd.componentFlagsMask    = 0;
+        ComponentResult (*ComponentRoutine) (ComponentParameters * cp, Handle componentStorage);
+        void *handle = dlopen("/System/Library/Components/AudioCodecs.component/Contents/MacOS/AudioCodecs", RTLD_LAZY|RTLD_LOCAL);
+        if (handle)
+        {
+            ComponentRoutine = dlsym(handle, "ACMP4AACHighEfficiencyEncoderEntry");
+            if (ComponentRoutine)
+                if (RegisterComponent(&cd, ComponentRoutine, 0, NULL, NULL, NULL))
+                    encca_haac_available = 1;
+        }
+    }
+
+    return encca_haac_available;
+#else
+    return 0;
+#endif
 }

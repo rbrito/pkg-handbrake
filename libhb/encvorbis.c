@@ -47,7 +47,6 @@ int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
     hb_audio_t * audio = w->audio;
     int i;
     ogg_packet header[3];
-    struct ovectl_ratemanage2_arg  ctl_rate_arg;
 
     hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
     w->private_data = pv;
@@ -57,16 +56,6 @@ int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
 
     hb_log( "encvorbis: opening libvorbis" );
 
-    /* 28kbps/channel seems to be the minimum for 6ch vorbis. */
-    int min_bitrate = 28 * pv->out_discrete_channels;
-    if (pv->out_discrete_channels > 2 && audio->config.out.bitrate < min_bitrate)
-    {
-        hb_log( "encvorbis: Selected bitrate (%d kbps) too low for %d channel audio.", audio->config.out.bitrate, pv->out_discrete_channels);
-        hb_log( "encvorbis: Resetting bitrate to %d kbps", min_bitrate);
-        /* Naughty! We shouldn't modify the audio from here. */
-        audio->config.out.bitrate = min_bitrate;
-    }
-
     /* init */
     for( i = 0; i < 3; i++ )
     {
@@ -75,28 +64,45 @@ int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
         memset( w->config->vorbis.headers[i], 0, sizeof( ogg_packet ) );
     }
     vorbis_info_init( &pv->vi );
-    if( vorbis_encode_setup_managed( &pv->vi, pv->out_discrete_channels,
-          audio->config.out.samplerate, -1, 1000 * audio->config.out.bitrate, -1 ) )
+
+    if( audio->config.out.bitrate > 0 )
     {
-        hb_error( "encvorbis: vorbis_encode_setup_managed failed.\n" );
-        *job->die = 1;
-        return 0;
+        /* 28kbps/channel seems to be the minimum for 6ch vorbis. */
+        int min_bitrate = 28 * pv->out_discrete_channels;
+        if (pv->out_discrete_channels > 2 && audio->config.out.bitrate < min_bitrate)
+        {
+            hb_log( "encvorbis: Selected bitrate (%d kbps) too low for %d channel audio.", audio->config.out.bitrate, pv->out_discrete_channels);
+            hb_log( "encvorbis: Resetting bitrate to %d kbps", min_bitrate);
+            /* Naughty! We shouldn't modify the audio from here. */
+            audio->config.out.bitrate = min_bitrate;
+        }
+
+        if( vorbis_encode_setup_managed( &pv->vi, pv->out_discrete_channels,
+              audio->config.out.samplerate, -1, 1000 * audio->config.out.bitrate, -1 ) )
+        {
+            hb_error( "encvorbis: vorbis_encode_setup_managed failed.\n" );
+            *job->die = 1;
+            return -1;
+        }
+    }
+    else if( audio->config.out.quality != HB_INVALID_AUDIO_QUALITY )
+    {
+        // map VBR quality to Vorbis API (divide by 10)
+        if( vorbis_encode_setup_vbr( &pv->vi, pv->out_discrete_channels,
+              audio->config.out.samplerate, audio->config.out.quality/10 ) )
+        {
+            hb_error( "encvorbis: vorbis_encode_setup_vbr failed.\n" );
+            *job->die = 1;
+            return -1;
+        }
     }
 
-    if( vorbis_encode_ctl( &pv->vi, OV_ECTL_RATEMANAGE2_GET, &ctl_rate_arg) )
-    {
-        hb_log( "encvorbis: vorbis_encode_ctl( ratemanage2_get ) failed" );
-    }
-
-    ctl_rate_arg.bitrate_average_kbps = audio->config.out.bitrate;
-    ctl_rate_arg.management_active = 1;
-
-    if( vorbis_encode_ctl( &pv->vi, OV_ECTL_RATEMANAGE2_SET, &ctl_rate_arg ) ||
+    if( vorbis_encode_ctl( &pv->vi, OV_ECTL_RATEMANAGE2_SET, NULL ) ||
           vorbis_encode_setup_init( &pv->vi ) )
     {
         hb_error( "encvorbis: vorbis_encode_ctl( ratemanage2_set ) OR vorbis_encode_setup_init failed.\n" );
         *job->die = 1;
-        return 0;
+        return -1;
     }
 
     /* add a comment */
@@ -120,6 +126,7 @@ int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
     }
 
     pv->input_samples = pv->out_discrete_channels * OGGVORBIS_FRAME_SIZE;
+    audio->config.out.samples_per_frame = OGGVORBIS_FRAME_SIZE;
     pv->buf = malloc( pv->input_samples * sizeof( float ) );
 
     pv->list = hb_list_init();
@@ -129,8 +136,8 @@ int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
             pv->channel_map[0] = 0;
             break;
         case 6:
-            // Vorbis use the following channels map = L C R Ls Rs Lfe
-            if( audio->config.in.codec == HB_ACODEC_AC3 )
+            // Vorbis uses the following channel map = L C R Ls Rs Lfe
+            if( audio->config.in.channel_map == &hb_ac3_chan_map )
             {
                 pv->channel_map[0] = 1;
                 pv->channel_map[1] = 2;
@@ -139,7 +146,16 @@ int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
                 pv->channel_map[4] = 5;
                 pv->channel_map[5] = 0;
             }
-            else
+            else if( audio->config.in.channel_map == &hb_smpte_chan_map )
+            {
+                pv->channel_map[0] = 0;
+                pv->channel_map[1] = 2;
+                pv->channel_map[2] = 1;
+                pv->channel_map[3] = 4;
+                pv->channel_map[4] = 5;
+                pv->channel_map[5] = 3;
+            }
+            else // &hb_qt_chan_map
             {
                 pv->channel_map[0] = 1;
                 pv->channel_map[1] = 0;
@@ -251,9 +267,10 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
     {
         for( j = 0; j < pv->out_discrete_channels; j++)
         {
-            buffer[j][i] = ((float *) pv->buf)[(pv->out_discrete_channels * i + pv->channel_map[j])] / 32768.f;
+            buffer[j][i] = ((float *) pv->buf)[(pv->out_discrete_channels * i + pv->channel_map[j])];
         }
     }
+
     vorbis_analysis_wrote( &pv->vd, OGGVORBIS_FRAME_SIZE );
 
     /* Try to extract again */

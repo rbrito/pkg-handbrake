@@ -5,6 +5,8 @@
    It may be used under the terms of the GNU General Public License. */
 
 #include "hb.h"
+#include "downmix.h"
+
 #include "dca.h"
 
 struct hb_work_private_s
@@ -79,14 +81,12 @@ static int decdcaInit( hb_work_object_t * w, hb_job_t * job )
     work.c has already done some of this deduction for us in do_job() */
 
     pv->flags_out = HB_AMIXDOWN_GET_DCA_FORMAT(audio->config.out.mixdown);
-    if ( audio->config.out.codec == HB_ACODEC_LAME )
-        pv->flags_out |= DCA_ADJUST_LEVEL;
 
     /* pass the number of channels used into the private work data */
     /* will only be actually used if we're not doing AC3 passthru */
     pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
 
-    pv->level     = 32768.0;
+    pv->level     = 1.0;
 
     return 0;
 }
@@ -270,7 +270,7 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
         {
             for ( k = 0; k < pv->out_discrete_channels; k++ )
             {
-                samples_out[(pv->out_discrete_channels*j)+k]   = samples_in[(256*k)+j] * 16384;
+                samples_out[(pv->out_discrete_channels*j)+k]   = samples_in[(256*k)+j];
             }
         }
 
@@ -302,6 +302,7 @@ static int decdcaBSInfo( hb_work_object_t *w, const hb_buffer_t *b,
     if ( i >= b->size - 7 )
     {
         /* didn't find DCA sync */
+        dca_free( state );
         return 0;
     }
 
@@ -310,6 +311,7 @@ static int decdcaBSInfo( hb_work_object_t *w, const hb_buffer_t *b,
     info->rate_base = 1;
     info->bitrate = bitrate;
     info->flags = flags;
+    info->samples_per_frame = frame_length;
 
     if ( ( flags & DCA_CHANNEL_MASK) == DCA_DOLBY )
     {
@@ -360,5 +362,8 @@ static int decdcaBSInfo( hb_work_object_t *w, const hb_buffer_t *b,
         info->channel_layout |= HB_INPUT_CH_LAYOUT_HAS_LFE;
     }
 
+    info->channel_map = &hb_qt_chan_map;
+
+    dca_free( state );
     return 1;
 }

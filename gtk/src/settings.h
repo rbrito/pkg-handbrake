@@ -17,6 +17,9 @@
 #define _SETTINGS_H_
 
 #include <gtk/gtk.h>
+#if defined(_USE_APP_IND)
+#include <libappindicator/app-indicator.h>
+#endif
 
 #define GHB_WIDGET(b,n)	GTK_WIDGET(gtk_builder_get_object ((b), (n)))
 //#define GHB_WIDGET(b,n)	GTK_WIDGET(debug_get_object((b), (n)))
@@ -64,6 +67,9 @@ typedef struct
 	gchar *appcast;
 	gint appcast_len;
 	GdkVisibilityState hb_visibility;
+#if defined(_USE_APP_IND)
+	AppIndicator *ai;
+#endif
 } signal_user_data_t;
 
 enum
@@ -109,6 +115,8 @@ gint ghb_widget_boolean(GtkWidget *widget);
 void ghb_widget_to_setting(GValue *settings, GtkWidget *widget);
 int ghb_ui_update(
 	signal_user_data_t *ud, const gchar *name, const GValue *value);
+int ghb_ui_update_from_settings(
+	GtkBuilder *builder, const gchar *name, const GValue *settings);
 const gchar* ghb_get_setting_key(GtkWidget *widget);
 
 #endif // _SETTINGS_H_

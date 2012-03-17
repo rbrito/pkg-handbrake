@@ -1,7 +1,7 @@
-Index: handbrake-0.9.5/libhb/ports.h
+Index: handbrake-0.9.6/libhb/ports.h
 ===================================================================
---- handbrake-0.9.5.orig/libhb/ports.h	2011-01-15 10:37:13.000000000 +0100
-+++ handbrake-0.9.5/libhb/ports.h	2011-01-15 10:37:40.000000000 +0100
+--- handbrake-0.9.6.orig/libhb/ports.h	2012-02-29 12:38:40.325128187 +0100
++++ handbrake-0.9.6/libhb/ports.h	2012-02-29 12:38:43.917250555 +0100
 @@ -51,7 +51,7 @@
  #elif defined( SYS_DARWIN )
  #  define HB_LOW_PRIORITY    0
@@ -11,25 +11,25 @@ Index: handbrake-0.9.5/libhb/ports.h
  #  define HB_LOW_PRIORITY    0
  #  define HB_NORMAL_PRIORITY 0
  #elif defined( SYS_CYGWIN )
-Index: handbrake-0.9.5/gtk/configure.ac
+Index: handbrake-0.9.6/gtk/configure.ac
 ===================================================================
---- handbrake-0.9.5.orig/gtk/configure.ac	2011-01-15 10:37:13.000000000 +0100
-+++ handbrake-0.9.5/gtk/configure.ac	2011-01-15 10:37:40.000000000 +0100
+--- handbrake-0.9.6.orig/gtk/configure.ac	2012-02-29 12:38:40.317127916 +0100
++++ handbrake-0.9.6/gtk/configure.ac	2012-02-29 12:38:43.917250555 +0100
 @@ -93,6 +93,9 @@
  	fi
  	mingw_flag=yes
      ;;
-+  *kfreebsd*)
-+	GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify webkit-1.0"
-+   ;;
++    *kfreebsd*)
++    	GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify dbus-glib-1 webkit-1.0"
++    ;;
    *)
- 	GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify gudev-1.0"
- 	mingw_flag=no
-Index: handbrake-0.9.5/gtk/src/callbacks.c
+     if test "x$gst_disable" = "xyes" ; then
+ 	    GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gio-2.0 libnotify dbus-glib-1 gudev-1.0"
+Index: handbrake-0.9.6/gtk/src/callbacks.c
 ===================================================================
---- handbrake-0.9.5.orig/gtk/src/callbacks.c	2011-01-15 10:37:13.000000000 +0100
-+++ handbrake-0.9.5/gtk/src/callbacks.c	2011-01-15 10:37:40.000000000 +0100
-@@ -23,7 +23,9 @@
+--- handbrake-0.9.6.orig/gtk/src/callbacks.c	2012-02-29 12:38:40.309127642 +0100
++++ handbrake-0.9.6/gtk/src/callbacks.c	2012-02-29 12:38:43.917250555 +0100
+@@ -28,7 +28,9 @@
  #if !defined(_WIN32)
  #include <poll.h>
  #define G_UDEV_API_IS_SUBJECT_TO_CHANGE 1
@@ -39,7 +39,17 @@ Index: handbrake-0.9.5/gtk/src/callbacks.c
  #include <dbus/dbus-glib.h>
  #include <dbus/dbus-glib-lowlevel.h>
  
-@@ -3784,14 +3786,14 @@
+@@ -49,6 +51,9 @@
+ #endif
+ 
+ #include <gdk/gdkx.h>
++#ifndef NOTIFY_CHECK_VERSION
++#define NOTIFY_CHECK_VERSION(x,y,z) 0
++#endif
+ #else
+ #define WINVER 0x0500
+ #include <winsock2.h>
+@@ -3943,14 +3948,14 @@
  	return dvd_devices;
  }
  
@@ -56,7 +66,7 @@ Index: handbrake-0.9.5/gtk/src/callbacks.c
  	gchar *device;
  	GUdevDevice *udd;
  
-@@ -3825,7 +3827,7 @@
+@@ -3984,7 +3989,7 @@
  void
  ghb_udev_init()
  {
@@ -65,3 +75,20 @@ Index: handbrake-0.9.5/gtk/src/callbacks.c
  	udev_ctx = g_udev_client_new(NULL);
  #endif
  }
+Index: handbrake-0.9.6/contrib/ffmpeg/A09-kfreebsd.patch
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ handbrake-0.9.6/contrib/ffmpeg/A09-kfreebsd.patch	2012-02-29 12:39:03.985934154 +0100
+@@ -0,0 +1,12 @@
++--- a/libavdevice/v4l2.c      2011-11-03 12:29:48.000000000 +0100
+++++ b/libavdevice/v4l2.c   2012-02-29 11:21:14.000000000 +0100
++@@ -38,7 +38,9 @@
++ #if HAVE_SYS_VIDEOIO_H
++ #include <sys/videoio.h>
++ #else
+++#if HAVE_ASM_TYPES_H
++ #include <asm/types.h>
+++#endif
++ #include <linux/videodev2.h>
++ #endif
++ #include <time.h>

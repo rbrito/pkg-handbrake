@@ -16,8 +16,12 @@ ifneq ($(HAS.bz2),1)
 endif
 endif
 
+ifneq (,$(filter $(BUILD.system),darwin cygwin mingw))
+    MODULES += contrib/fribidi
+endif
+
+
 MODULES += contrib/faac
-MODULES += contrib/faad2
 MODULES += contrib/ffmpeg
 MODULES += contrib/fontconfig
 MODULES += contrib/freetype
@@ -77,6 +81,10 @@ endif
 ifeq (1-linux,$(FEATURE.gtk)-$(BUILD.system))
     ## build gtk when gtk+linux
     MODULES += gtk
+endif
+
+ifeq (1,$(FEATURE.local_yasm))
+    MODULES += contrib/yasm
 endif
 
 ###############################################################################

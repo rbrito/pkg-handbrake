@@ -19,7 +19,7 @@
 #include <glib-object.h>
 #include <glib/gstdio.h>
 #include <string.h>
-#include <gtk/gtk.h>
+#include "ghbcompat.h"
 #include "hb.h"
 #include "settings.h"
 #include "callbacks.h"
@@ -820,7 +820,7 @@ init_settings_from_dict(
 	GHashTableIter iter;
 	gchar *key;
 	GValue *gval, *val;
-	
+
 	ghb_dict_iter_init(&iter, internal);
 	// middle (void*) cast prevents gcc warning "defreferencing type-punned
 	// pointer will break strict-aliasing rules"
@@ -1988,8 +1988,10 @@ typedef struct
 
 static value_map_t vcodec_xlat[] =
 {
+	{"MPEG-2 (FFmpeg)", "ffmpeg2"},
+	{"MPEG-4 (FFmpeg)", "ffmpeg4"},
 	{"MPEG-4 (FFmpeg)", "ffmpeg"},
-	{"MPEG-4 (XviD)", "ffmpeg"},
+	{"MPEG-4 (XviD)", "ffmpeg4"},
 	{"H.264 (x264)", "x264"},
 	{"VP3 (Theora)", "theora"},
 	{NULL,NULL}
@@ -1997,11 +1999,27 @@ static value_map_t vcodec_xlat[] =
 
 static value_map_t acodec_xlat[] =
 {
+	{"AAC (ffmpeg)", "ffaac"},
 	{"AAC (faac)", "faac"},
 	{"AAC (CoreAudio)", "faac"},
+	{"HE-AAC (CoreAudio)", "faac"},
+	{"AC3 (ffmpeg)", "ffac3"},
+	{"AC3 (ffmpeg)", "ac3"},
+	{"AC3", "ac3"},			// Backwards compatibility with mac ui
+	{"MP3 Passthru", "copy:mp3"},
+	{"MP3 Passthru", "mp3pass"},
+	{"AAC Passthru", "copy:aac"},
+	{"AAC Passthru", "aacpass"},
+	{"AC3 Passthru", "copy:ac3"},
 	{"AC3 Passthru", "ac3pass"},
+	{"DTS Passthru", "copy:dts"},
 	{"DTS Passthru", "dtspass"},
+	{"DTS-HD Passthru", "copy:dtshd"},
+	{"DTS-HD Passthru", "dtshdpass"},
+	{"Auto Passthru", "copy"},
+	{"Auto Passthru", "auto"},
 	{"MP3 (lame)", "lame"},
+	{"FLAC (ffmpeg)", "ffflac"},
 	{"Vorbis (vorbis)", "vorbis"},
 	{NULL,NULL}
 };
@@ -2048,7 +2066,10 @@ value_map_t mix_xlat[] =
 	{"Dolby Surround", "dpl1"},
 	{"Dolby Pro Logic II", "dpl2"},
 	{"6-channel discrete", "6ch"},
-	{"AC3 Passthru", "none"},
+	{"None", "none"},
+	{"AC3 Passthru", "none"},    // Backwards compatibility with mac ui
+	{"DTS Passthru", "none"},    // Backwards compatibility with mac ui
+	{"DTS-HD Passthru", "none"}, // Backwards compatibility with mac ui
 	{NULL, NULL}
 };
 
@@ -2085,6 +2106,7 @@ value_map_t decomb_xlat[] =
 	{"0", "off"},
 	{"1", "custom"},
 	{"2", "default"},
+	{"3", "fast"},
 	{NULL, NULL}
 };
 
@@ -2333,6 +2355,12 @@ export_value_xlat(GValue *dict)
 	GValue *alist;
 	GValue *adict;
 
+	key = "AudioEncoderFallback";
+	lin_val = ghb_dict_lookup(dict, key);
+	gval = export_value_xlat2(acodec_xlat, lin_val, G_TYPE_STRING);
+	if (gval)
+		ghb_dict_insert(dict, g_strdup(key), gval);
+
 	alist = ghb_dict_lookup(dict, "AudioList");
 	count = ghb_array_len(alist);
 	for (ii = 0; ii < count; ii++)
@@ -2382,7 +2410,8 @@ import_value_xlat2(
 		str = ghb_value_string(mac_val);
 		for (ii = 0; value_map[ii].mac_val; ii++)
 		{
-			if (strcmp(str, value_map[ii].mac_val) == 0)
+			if (strcmp(str, value_map[ii].mac_val) == 0 ||
+				strcmp(str, value_map[ii].lin_val) == 0)
 			{
 				sval = ghb_string_value_new(value_map[ii].lin_val);
 				g_free(str);
@@ -2399,6 +2428,7 @@ import_value_xlat2(
 			}
 		}
 		g_free(str);
+		return ghb_value_dup(def_val);
 	}
 	else
 	{
@@ -2409,7 +2439,8 @@ import_value_xlat2(
 		str = ghb_value_string(mac_val);
 		for (ii = 0; value_map[ii].mac_val; ii++)
 		{
-			if (strcmp(str, value_map[ii].mac_val) == 0)
+			if (strcmp(str, value_map[ii].mac_val) == 0 ||
+				strcmp(str, value_map[ii].lin_val) == 0)
 			{
 				sval = ghb_string_value_new(value_map[ii].lin_val);
 				g_free(str);
@@ -2550,6 +2581,12 @@ import_value_xlat(GValue *dict)
 	GValue *adefaults;
 	GValue *adeflist;
 
+	key = "AudioEncoderFallback";
+	mac_val = ghb_dict_lookup(dict, key);
+	gval = import_value_xlat2(defaults, acodec_xlat, key, mac_val);
+	if (gval)
+		ghb_dict_insert(dict, g_strdup(key), gval);
+
 	adeflist = ghb_dict_lookup(defaults, "AudioList");
 	if (adeflist)
 	{
@@ -2643,21 +2680,18 @@ import_xlat_preset(GValue *dict)
 	} break;
 	}
 	// VideoQualityType/0/1/2 - vquality_type_/target/bitrate/constant
+	// *note: target is no longer used
 	switch (vqtype)
 	{
 	case 0:
 	{
-		ghb_dict_insert(dict, g_strdup("vquality_type_target"), 
-						ghb_boolean_value_new(TRUE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_bitrate"), 
-						ghb_boolean_value_new(FALSE));
+						ghb_boolean_value_new(TRUE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_constant"), 
 						ghb_boolean_value_new(FALSE));
 	} break;
 	case 1:
 	{
-		ghb_dict_insert(dict, g_strdup("vquality_type_target"), 
-						ghb_boolean_value_new(FALSE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_bitrate"), 
 						ghb_boolean_value_new(TRUE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_constant"), 
@@ -2665,8 +2699,6 @@ import_xlat_preset(GValue *dict)
 	} break;
 	case 2:
 	{
-		ghb_dict_insert(dict, g_strdup("vquality_type_target"), 
-						ghb_boolean_value_new(FALSE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_bitrate"), 
 						ghb_boolean_value_new(FALSE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_constant"), 
@@ -2674,50 +2706,85 @@ import_xlat_preset(GValue *dict)
 	} break;
 	default:
 	{
-		ghb_dict_insert(dict, g_strdup("vquality_type_target"), 
-						ghb_boolean_value_new(FALSE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_bitrate"), 
 						ghb_boolean_value_new(FALSE));
 		ghb_dict_insert(dict, g_strdup("vquality_type_constant"), 
 						ghb_boolean_value_new(TRUE));
 	} break;
 	}
+
 	import_value_xlat(dict);
 
-	gdouble vquality;
-	const GValue *gval;
-
-	vquality = ghb_value_double(preset_dict_get_value(dict, "VideoQualitySlider"));
-	if (vquality > 0.0 && vquality < 1.0)
+	GValue *mode = ghb_dict_lookup(dict, "VideoFramerateMode");
+	if (mode == NULL)
 	{
-		gint vcodec;
-
-		gval = preset_dict_get_value(dict, "VideoEncoder");
-		vcodec = ghb_lookup_combo_int("VideoEncoder", gval);
-		switch (vcodec)
+		GValue *fr = ghb_dict_lookup(dict, "VideoFramerate");
+		if (fr)
 		{
-			case HB_VCODEC_X264:
+			gchar *str;
+			gboolean pfr = FALSE;
+			GValue *pfr_val = ghb_dict_lookup(dict, "VideoFrameratePFR");
+			if (pfr_val)
 			{
-				vquality = 51. - vquality * 51.;
-			} break;
-
-			case HB_VCODEC_FFMPEG:
+				pfr = ghb_value_boolean(pfr_val);
+			}
+			str = ghb_value_string(fr);
+			if (strcmp(str, "source") == 0)
 			{
-				vquality = 31. - vquality * 30.;
-			} break;
-
-			case HB_VCODEC_THEORA:
+				ghb_dict_insert(dict, g_strdup("VideoFramerateCFR"), 
+								ghb_boolean_value_new(FALSE));
+				ghb_dict_insert(dict, g_strdup("VideoFramerateVFR"), 
+								ghb_boolean_value_new(TRUE));
+			}
+			else if (!pfr)
 			{
-				vquality = vquality * 63.;
-			} break;
-
-			default:
+				ghb_dict_insert(dict, g_strdup("VideoFramerateCFR"), 
+								ghb_boolean_value_new(TRUE));
+				ghb_dict_insert(dict, g_strdup("VideoFramerateVFR"), 
+								ghb_boolean_value_new(FALSE));
+			}
+			else
 			{
-				vquality = 0.;
-			} break;
+				ghb_dict_insert(dict, g_strdup("VideoFramerateCFR"), 
+								ghb_boolean_value_new(FALSE));
+				ghb_dict_insert(dict, g_strdup("VideoFramerateVFR"), 
+								ghb_boolean_value_new(FALSE));
+			}
+            g_free(str);
 		}
-		ghb_dict_insert(dict, g_strdup("VideoQualitySlider"), 
-						ghb_double_value_new(vquality));
+	}
+	else
+	{
+		gchar *str;
+		str = ghb_value_string(mode);
+		if (strcmp(str, "cfr") == 0)
+		{
+				ghb_dict_insert(dict, g_strdup("VideoFramerateCFR"), 
+								ghb_boolean_value_new(TRUE));
+				ghb_dict_insert(dict, g_strdup("VideoFrameratePFR"), 
+								ghb_boolean_value_new(FALSE));
+				ghb_dict_insert(dict, g_strdup("VideoFramerateVFR"), 
+								ghb_boolean_value_new(FALSE));
+		}
+		else if (strcmp(str, "pfr") == 0)
+		{
+				ghb_dict_insert(dict, g_strdup("VideoFramerateCFR"), 
+								ghb_boolean_value_new(FALSE));
+				ghb_dict_insert(dict, g_strdup("VideoFrameratePFR"), 
+								ghb_boolean_value_new(TRUE));
+				ghb_dict_insert(dict, g_strdup("VideoFramerateVFR"), 
+								ghb_boolean_value_new(FALSE));
+		}
+		else
+		{
+				ghb_dict_insert(dict, g_strdup("VideoFramerateCFR"), 
+								ghb_boolean_value_new(FALSE));
+				ghb_dict_insert(dict, g_strdup("VideoFrameratePFR"), 
+								ghb_boolean_value_new(FALSE));
+				ghb_dict_insert(dict, g_strdup("VideoFramerateVFR"), 
+								ghb_boolean_value_new(TRUE));
+		}
+		g_free(str);
 	}
 }
 
@@ -2752,12 +2819,10 @@ import_xlat_presets(GValue *presets)
 static void
 export_xlat_preset(GValue *dict)
 {
-	gboolean autoscale, target, br, constant;
+	gboolean autoscale, br, constant;
 
 	g_debug("export_xlat_prest ()");
 	autoscale = ghb_value_boolean(preset_dict_get_value(dict, "autoscale"));
-	target = ghb_value_boolean(
-				preset_dict_get_value(dict, "vquality_type_target"));
 	br = ghb_value_boolean(
 				preset_dict_get_value(dict, "vquality_type_bitrate"));
 	constant = ghb_value_boolean(
@@ -2771,12 +2836,8 @@ export_xlat_preset(GValue *dict)
 						ghb_int_value_new(1));
 
 	// VideoQualityType/0/1/2 - vquality_type_/target/bitrate/constant
-	if (target)
-	{
-		ghb_dict_insert(dict, g_strdup("VideoQualityType"), 
-						ghb_int_value_new(0));
-	}
-	else if (br)
+	// *note: target is no longer used
+	if (br)
 	{
 		ghb_dict_insert(dict, g_strdup("VideoQualityType"), 
 						ghb_int_value_new(1));
@@ -2785,6 +2846,22 @@ export_xlat_preset(GValue *dict)
 	{
 		ghb_dict_insert(dict, g_strdup("VideoQualityType"), 
 						ghb_int_value_new(2));
+	}
+
+	if (ghb_value_boolean(preset_dict_get_value(dict, "VideoFramerateCFR")))
+	{
+		ghb_dict_insert(dict, g_strdup("VideoFramerateMode"), 
+						ghb_string_value_new("cfr"));
+	}
+	else if (ghb_value_boolean(preset_dict_get_value(dict, "VideoFrameratePFR")))
+	{
+		ghb_dict_insert(dict, g_strdup("VideoFramerateMode"), 
+						ghb_string_value_new("pfr"));
+	}
+	else
+	{
+		ghb_dict_insert(dict, g_strdup("VideoFramerateMode"), 
+						ghb_string_value_new("vfr"));
 	}
 
 	GValue *alist, *adict;
@@ -2806,11 +2883,25 @@ export_xlat_preset(GValue *dict)
 		}
 	}
 
+	GValue *internal;
+	GHashTableIter iter;
+	gchar *key;
+	GValue *value;
+	internal = plist_get_dict(internalPlist, "XlatPresets");
+	ghb_dict_iter_init(&iter, internal);
+	// middle (void*) cast prevents gcc warning "defreferencing type-punned
+	// pointer will break strict-aliasing rules"
+	while (g_hash_table_iter_next(
+			&iter, (gpointer*)(void*)&key, (gpointer*)(void*)&value))
+	{
+		ghb_dict_remove(dict, key);
+	}
+
+	// remove obsolete keys
 	ghb_dict_remove(dict, "UsesMaxPictureSettings");
-	ghb_dict_remove(dict, "autoscale");
-	ghb_dict_remove(dict, "vquality_type_target");
-	ghb_dict_remove(dict, "vquality_type_bitrate");
-	ghb_dict_remove(dict, "vquality_type_constant");
+	ghb_dict_remove(dict, "VFR");
+	ghb_dict_remove(dict, "VideoFrameratePFR");
+
 	export_value_xlat(dict);
 }
 
@@ -2983,7 +3074,7 @@ replace_standard_presets()
 	store_presets();
 }
 
-static void
+static int
 update_standard_presets(signal_user_data_t *ud)
 {
 	gint count, ii;
@@ -3002,7 +3093,7 @@ update_standard_presets(signal_user_data_t *ud)
 		{
 			// Old preset that doesn't have a Type
 			replace_standard_presets();
-			return;
+			return 1;
 		}
 			
 		type = ghb_value_int(gval);
@@ -3013,7 +3104,7 @@ update_standard_presets(signal_user_data_t *ud)
 			{
 				// Old preset that doesn't have a build number
 				replace_standard_presets();
-				return;
+				return 1;
 			}
 
 			build = ghb_value_int64(gval);
@@ -3021,11 +3112,11 @@ update_standard_presets(signal_user_data_t *ud)
 			{
 				// Build number does not match
 				replace_standard_presets();
-				return;
+				return 1;
 			}
 		}
 	}
-	return;
+	return 0;
 }
 
 void
@@ -3052,8 +3143,12 @@ ghb_presets_load(signal_user_data_t *ud)
 		import_xlat_presets(presetsPlist);
 		store_presets();
 	}
-	update_standard_presets(ud);
-	import_xlat_presets(presetsPlist);
+	else
+	{
+		if (!update_standard_presets(ud))
+			import_xlat_presets(presetsPlist);
+	}
+ 
 }
 
 static void
@@ -4139,14 +4234,11 @@ ghb_refresh_preset(signal_user_data_t *ud)
 			GtkWidget *qp = GHB_WIDGET(ud->builder, "VideoQualitySlider");
 			gtk_range_set_range (GTK_RANGE(qp), 0, 100);
 			gtk_scale_set_digits(GTK_SCALE(qp), 3);
-			// Clear the audio list prior to changing the preset.  Existing 
-			// audio can cause the container extension to be automatically 
-			// changed when it shouldn't be
-			ghb_clear_audio_list(ud);
 			ghb_set_preset_from_indices(ud, indices, len);
 			gint titleindex;
 			titleindex = ghb_settings_combo_int(ud->settings, "title");
-			ghb_set_pref_audio(titleindex, ud);
+			ghb_set_pref_audio_settings(titleindex, ud->settings);
+			ghb_set_pref_audio_from_settings(ud, ud->settings);
 			ghb_set_pref_subtitle(titleindex, ud);
 			ghb_settings_set_boolean(ud->settings, "preset_modified", FALSE);
 			if (ghb_get_title_info (&tinfo, titleindex))
@@ -4219,14 +4311,11 @@ presets_list_selection_changed_cb(GtkTreeSelection *selection, signal_user_data_
 			GtkWidget *qp = GHB_WIDGET(ud->builder, "VideoQualitySlider");
 			gtk_range_set_range (GTK_RANGE(qp), 0, 100);
 			gtk_scale_set_digits(GTK_SCALE(qp), 3);
-			// Clear the audio list prior to changing the preset.  Existing 
-			// audio can cause the container extension to be automatically 
-			// changed when it shouldn't be
-			ghb_clear_audio_list(ud);
 			ghb_set_preset_from_indices(ud, indices, len);
 			gint titleindex;
 			titleindex = ghb_settings_combo_int(ud->settings, "title");
-			ghb_set_pref_audio(titleindex, ud);
+			ghb_set_pref_audio_settings(titleindex, ud->settings);
+			ghb_set_pref_audio_from_settings(ud, ud->settings);
 			ghb_set_pref_subtitle(titleindex, ud);
 			ghb_settings_set_boolean(ud->settings, "preset_modified", FALSE);
 			if (ghb_get_title_info (&tinfo, titleindex))

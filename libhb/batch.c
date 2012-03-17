@@ -57,6 +57,7 @@ hb_batch_t * hb_batch_init( char * path )
         hb_list_add( d->list_file, filename );
     }
 
+    closedir( dir );
     if ( hb_list_count( d->list_file ) == 0 )
     {
         hb_list_close( &d->list_file );
@@ -94,11 +95,16 @@ hb_title_t * hb_batch_title_scan( hb_batch_t * d, int t )
     if ( filename == NULL )
         return NULL;
 
-    stream = hb_stream_open( filename, 0 );
+    hb_log( "batch: scanning %s", filename );
+    title = hb_title_init( filename, 0 );
+    stream = hb_stream_open( filename, title, 1 );
     if ( stream == NULL )
+    {
+        hb_title_close( &title );
         return NULL;
+    }
 
-    title = hb_stream_title_scan( stream );
+    title = hb_stream_title_scan( stream, title );
     hb_stream_close( &stream );
     if ( title != NULL )
     {

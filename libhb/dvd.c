@@ -20,7 +20,7 @@ static hb_title_t  * hb_dvdread_title_scan( hb_dvd_t * d, int t, uint64_t min_du
 static int           hb_dvdread_start( hb_dvd_t * d, hb_title_t *title, int chapter );
 static void          hb_dvdread_stop( hb_dvd_t * d );
 static int           hb_dvdread_seek( hb_dvd_t * d, float f );
-static int           hb_dvdread_read( hb_dvd_t * d, hb_buffer_t * b );
+static hb_buffer_t * hb_dvdread_read( hb_dvd_t * d );
 static int           hb_dvdread_chapter( hb_dvd_t * d );
 static int           hb_dvdread_angle_count( hb_dvd_t * d );
 static void          hb_dvdread_set_angle( hb_dvd_t * d, int angle );
@@ -360,7 +360,7 @@ static hb_title_t * hb_dvdread_title_scan( hb_dvd_t * e, int t, uint64_t min_dur
             case 0x02:
             case 0x03:
                 audio->id    = 0xc0 + position;
-                audio->config.in.codec = HB_ACODEC_MPGA;
+                audio->config.in.codec = HB_ACODEC_FFMPEG;
                 break;
 
             case 0x04:
@@ -411,7 +411,7 @@ static hb_title_t * hb_dvdread_title_scan( hb_dvd_t * e, int t, uint64_t min_dur
             strlen(lang->native_name) ? lang->native_name : lang->eng_name,
             audio->config.in.codec == HB_ACODEC_AC3 ? "AC3" : ( audio->config.in.codec ==
                 HB_ACODEC_DCA ? "DTS" : ( audio->config.in.codec ==
-                HB_ACODEC_MPGA ? "MPEG" : "LPCM" ) ) );
+                HB_ACODEC_FFMPEG ? "MPEG" : "LPCM" ) ) );
         snprintf( audio->config.lang.simple, sizeof( audio->config.lang.simple ), "%s",
                   strlen(lang->native_name) ? lang->native_name : lang->eng_name );
         snprintf( audio->config.lang.iso639_2, sizeof( audio->config.lang.iso639_2 ), "%s",
@@ -435,7 +435,7 @@ static hb_title_t * hb_dvdread_title_scan( hb_dvd_t * e, int t, uint64_t min_dur
             break;
         }
 
-        hb_log( "scan: id=%x, lang=%s, 3cc=%s ext=%i", audio->id,
+        hb_log( "scan: id=0x%x, lang=%s, 3cc=%s ext=%i", audio->id,
                 audio->config.lang.description, audio->config.lang.iso639_2,
                 lang_extension );
 
@@ -549,7 +549,7 @@ static hb_title_t * hb_dvdread_title_scan( hb_dvd_t * e, int t, uint64_t min_dur
             break;
         }
 
-        hb_log( "scan: id=%x, lang=%s, 3cc=%s", subtitle->id,
+        hb_log( "scan: id=0x%x, lang=%s, 3cc=%s", subtitle->id,
                 subtitle->lang, subtitle->iso639_2 );
 
         hb_list_add( title->list_subtitle, subtitle );
@@ -651,9 +651,7 @@ static hb_title_t * hb_dvdread_title_scan( hb_dvd_t * e, int t, uint64_t min_dur
     goto cleanup;
 
 fail:
-    hb_list_close( &title->list_audio );
-    free( title );
-    title = NULL;
+    hb_title_close( &title );
 
 cleanup:
     if( vts ) ifoClose( vts );
@@ -840,9 +838,10 @@ int is_nav_pack( unsigned char *buf )
  ***********************************************************************
  *
  **********************************************************************/
-static int hb_dvdread_read( hb_dvd_t * e, hb_buffer_t * b )
+static hb_buffer_t * hb_dvdread_read( hb_dvd_t * e )
 {
     hb_dvdread_t *d = &(e->dvdread);
+    hb_buffer_t *b = hb_buffer_init( HB_DVD_READ_BUFFER_SIZE );
  top:
     if( !d->pack_len )
     {
@@ -855,7 +854,10 @@ static int hb_dvdread_read( hb_dvd_t * e, hb_buffer_t * b )
         // is probably invalid. Just return 'no data' & our caller
         // should check and discover we're at eof.
         if ( d->cell_cur > d->cell_end )
-            return 0;
+        {
+            hb_buffer_close( &b );
+            return NULL;
+        }
 
         for( ;; )
         {
@@ -896,7 +898,10 @@ static int hb_dvdread_read( hb_dvd_t * e, hb_buffer_t * b )
                         d->next_vobu, d->cell_next );
                 d->cell_cur  = d->cell_next;
                 if ( d->cell_cur > d->cell_end )
-                    return 0;
+                {
+                    hb_buffer_close( &b );
+                    return NULL;
+                }
                 d->in_cell = 0;
                 d->next_vobu = d->pgc->cell_playback[d->cell_cur].first_sector;
                 FindNextCell( d );
@@ -994,7 +999,8 @@ static int hb_dvdread_read( hb_dvd_t * e, hb_buffer_t * b )
             if( ++error > 1024 )
             {
                 hb_log( "dvd: couldn't find a VOBU after 1024 blocks" );
-                return 0;
+                hb_buffer_close( &b );
+                return NULL;
             }
 
             (d->next_vobu)++;
@@ -1099,7 +1105,7 @@ static int hb_dvdread_read( hb_dvd_t * e, hb_buffer_t * b )
 
     d->block++;
 
-    return 1;
+    return b;
 }
 
 /***********************************************************************
@@ -1303,9 +1309,9 @@ int hb_dvd_seek( hb_dvd_t * d, float f )
     return dvd_methods->seek(d, f);
 }
 
-int hb_dvd_read( hb_dvd_t * d, hb_buffer_t * b )
+hb_buffer_t * hb_dvd_read( hb_dvd_t * d )
 {
-    return dvd_methods->read(d, b);
+    return dvd_methods->read(d);
 }
 
 int hb_dvd_chapter( hb_dvd_t * d )

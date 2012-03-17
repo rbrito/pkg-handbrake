@@ -25,7 +25,7 @@
 #include <limits.h>
 #include <math.h>
 #include "hb.h"
-#include <gtk/gtk.h>
+#include "ghbcompat.h"
 #include <glib/gstdio.h>
 #include "hb-backend.h"
 #include "settings.h"
@@ -39,7 +39,7 @@
 
 typedef struct
 {
-	const gchar *option;
+	gchar *option;
 	const gchar *shortOpt;
 	gdouble ivalue;
 	const gchar *svalue;
@@ -57,7 +57,7 @@ static gint index_str_size = 0;
 static void 
 index_str_init(gint max_index)
 {
-	int ii;
+	gint ii;
 
 	if (max_index+1 > index_str_size)
 	{
@@ -201,6 +201,7 @@ static options_map_t d_decomb_opts[] =
 	{"Off",    "off",   0, ""},
 	{"Custom", "custom", 1, ""},
 	{"Default","default",2, NULL},
+	{"Fast",   "fast",   3, "7:2:6:9:1:80"},
 };
 combo_opts_t decomb_opts =
 {
@@ -234,34 +235,6 @@ combo_opts_t denoise_opts =
 {
 	sizeof(d_denoise_opts)/sizeof(options_map_t),
 	d_denoise_opts
-};
-
-static options_map_t d_vcodec_opts[] =
-{
-	{"H.264 (x264)",    "x264",   HB_VCODEC_X264, ""},
-	{"MPEG-4 (FFmpeg)", "ffmpeg", HB_VCODEC_FFMPEG, ""},
-	{"VP3 (Theora)",    "theora", HB_VCODEC_THEORA, ""},
-};
-combo_opts_t vcodec_opts =
-{
-	sizeof(d_vcodec_opts)/sizeof(options_map_t),
-	d_vcodec_opts
-};
-
-static options_map_t d_acodec_opts[] =
-{
-	{"AAC (faac)",      "faac",    HB_ACODEC_FAAC,     "faac"},
-	{"MP3 (lame)",      "lame",    HB_ACODEC_LAME,     "lame"},
-	{"Vorbis",          "vorbis",  HB_ACODEC_VORBIS,   "vorbis"},
-	{"AC3 (ffmpeg)",    "ac3",     HB_ACODEC_AC3,      "ac3"},
-	{"AC3 (pass-thru)", "ac3pass", HB_ACODEC_AC3_PASS, "ac3pass"},
-	{"DTS (pass-thru)", "dtspass", HB_ACODEC_DCA_PASS, "dtspass"},
-	{"Choose For Me",   "auto",    HB_ACODEC_ANY,      "auto"},
-};
-combo_opts_t acodec_opts =
-{
-	sizeof(d_acodec_opts)/sizeof(options_map_t),
-	d_acodec_opts
 };
 
 static options_map_t d_direct_opts[] =
@@ -303,9 +276,9 @@ combo_opts_t bpyramid_opts =
 
 static options_map_t d_weightp_opts[] =
 {
-	{"Off",   "0", 0, "0"},
-	{"Blind", "1", 1, "1"},
-	{"Smart", "2", 2, "2"},
+	{"Off",    "0", 0, "0"},
+	{"Simple", "1", 1, "1"},
+	{"Smart",  "2", 2, "2"},
 };
 combo_opts_t weightp_opts =
 {
@@ -340,6 +313,7 @@ static options_map_t d_subme_opts[] =
 	{"8: RD refine in I/P-frames", "8", 8, "8"},
 	{"9: RD refine in all frames", "9", 9, "9"},
 	{"10: QPRD in all frames",     "10", 10, "10"},
+	{"11: No early terminations in analysis", "11", 11, "11"},
 };
 combo_opts_t subme_opts =
 {
@@ -412,9 +386,6 @@ combo_name_map_t combo_name_map[] =
 	{"PictureDecomb", &decomb_opts},
 	{"PictureDetelecine", &detel_opts},
 	{"PictureDenoise", &denoise_opts},
-	{"VideoEncoder", &vcodec_opts},
-	{"AudioEncoder", &acodec_opts},
-	{"AudioEncoderActual", &acodec_opts},
 	{"x264_direct", &direct_opts},
 	{"x264_b_adapt", &badapt_opts},
 	{"x264_bpyramid", &bpyramid_opts},
@@ -736,7 +707,8 @@ ghb_vquality_range(
 			*inverted = TRUE;
 		} break;
 
-		case HB_VCODEC_FFMPEG:
+		case HB_VCODEC_FFMPEG_MPEG2:
+		case HB_VCODEC_FFMPEG_MPEG4:
 		{
 			*min = 1;
 			*max = 31;
@@ -946,7 +918,7 @@ static const gchar*
 lookup_mix_string(const GValue *mix)
 {
 	gint ii;
-	gchar *result = "None";
+	gchar *result = "none";
 
 
 	if (G_VALUE_TYPE(mix) == G_TYPE_STRING)
@@ -1060,10 +1032,10 @@ lookup_audio_rate_int(const GValue *rate)
 }
 
 static const gchar*
-lookup_audio_rate_option(const GValue *rate)
+lookup_audio_rate(const GValue *rate, const char *def)
 {
 	gint ii;
-	const gchar *result = "Same as source";
+	const gchar *result = def;
 
 	if (G_VALUE_TYPE(rate) == G_TYPE_STRING)
 	{
@@ -1097,6 +1069,18 @@ lookup_audio_rate_option(const GValue *rate)
 	return result;
 }
 
+static const gchar*
+lookup_audio_rate_option(const GValue *rate)
+{
+    return lookup_audio_rate(rate, "Same as Source");
+}
+
+static const gchar*
+lookup_audio_rate_string(const GValue *rate)
+{
+    return lookup_audio_rate(rate, "source");
+}
+
 gint
 ghb_find_closest_audio_rate(gint rate)
 {
@@ -1122,7 +1106,7 @@ static gint
 lookup_audio_bitrate_int(const GValue *rate)
 {
 	gint ii;
-	gint result = 0;
+	gint result = 160;
 
 	if (G_VALUE_TYPE(rate) == G_TYPE_STRING)
 	{
@@ -1160,7 +1144,7 @@ static const gchar*
 lookup_audio_bitrate_option(const GValue *rate)
 {
 	gint ii;
-	const gchar *result = "Same as source";
+	const gchar *result = "160";
 
 	if (G_VALUE_TYPE(rate) == G_TYPE_STRING)
 	{
@@ -1192,6 +1176,111 @@ lookup_audio_bitrate_option(const GValue *rate)
 		}
 	}
 	return result;
+}
+
+static gint
+lookup_hb_encoder_int(const GValue *enc, hb_encoder_t *encoders, int len)
+{
+	gint ii;
+
+	if (G_VALUE_TYPE(enc) == G_TYPE_STRING)
+	{
+		gchar *str = ghb_value_string(enc);
+		for (ii = 0; ii < len; ii++)
+		{
+			if (strcmp(encoders[ii].human_readable_name, str) == 0 ||
+				strcmp(encoders[ii].short_name, str) == 0)
+			{
+				g_free(str);
+				return encoders[ii].encoder;
+			}
+		}
+		g_free(str);
+	}
+	else if (G_VALUE_TYPE(enc) == G_TYPE_INT ||
+			 G_VALUE_TYPE(enc) == G_TYPE_INT64 ||
+			 G_VALUE_TYPE(enc) == G_TYPE_DOUBLE)
+	{
+		int val = ghb_value_int(enc);
+		for (ii = 0; ii < len; ii++)
+		{
+			if (encoders[ii].encoder == val)
+			{
+				return encoders[ii].encoder;
+			}
+		}
+	}
+	return 0;
+}
+
+static const gchar*
+lookup_hb_encoder_option(const GValue *enc, hb_encoder_t *encoders, int len)
+{
+	gint ii;
+
+	if (G_VALUE_TYPE(enc) == G_TYPE_STRING)
+	{
+		gchar *str = ghb_value_string(enc);
+		for (ii = 0; ii < len; ii++)
+		{
+			if (strcmp(encoders[ii].human_readable_name, str) == 0 ||
+				strcmp(encoders[ii].short_name, str) == 0)
+			{
+				g_free(str);
+				return encoders[ii].human_readable_name;
+			}
+		}
+		g_free(str);
+	}
+	else if (G_VALUE_TYPE(enc) == G_TYPE_INT ||
+			 G_VALUE_TYPE(enc) == G_TYPE_INT64 ||
+			 G_VALUE_TYPE(enc) == G_TYPE_DOUBLE)
+	{
+		int val = ghb_value_int(enc);
+		for (ii = 0; ii < len; ii++)
+		{
+			if (encoders[ii].encoder == val)
+			{
+				return encoders[ii].human_readable_name;
+			}
+		}
+	}
+	return 0;
+}
+
+static const gchar*
+lookup_hb_encoder_string(const GValue *enc, hb_encoder_t *encoders, int len)
+{
+	gint ii;
+
+	if (G_VALUE_TYPE(enc) == G_TYPE_STRING)
+	{
+		gchar *str = ghb_value_string(enc);
+		for (ii = 0; ii < len; ii++)
+		{
+			if (strcmp(encoders[ii].human_readable_name, str) == 0 ||
+				strcmp(encoders[ii].short_name, str) == 0)
+			{
+				g_free(str);
+				return encoders[ii].short_name;
+			}
+		}
+		g_free(str);
+	}
+	else if (G_VALUE_TYPE(enc) == G_TYPE_INT ||
+			 G_VALUE_TYPE(enc) == G_TYPE_INT64 ||
+			 G_VALUE_TYPE(enc) == G_TYPE_DOUBLE)
+	{
+		int val = ghb_value_int(enc);
+		for (ii = 0; ii < len; ii++)
+		{
+			if (encoders[ii].encoder == val)
+			{
+				return encoders[ii].short_name;
+			}
+		}
+	}
+	return 0;
 }
 
 static gint
@@ -1247,15 +1336,15 @@ ghb_lookup_acodec_value(gint val)
 	GValue *value = NULL;
 	gint ii;
 
-	for (ii = 0; ii < acodec_opts.count; ii++)
+	for (ii = 0; ii < hb_audio_encoders_count; ii++)
 	{
-		if ((int)acodec_opts.map[ii].ivalue == val)
+		if ((int)hb_audio_encoders[ii].encoder == val)
 		{
-			value = ghb_string_value_new(acodec_opts.map[ii].shortOpt);
+			value = ghb_string_value_new(hb_audio_encoders[ii].short_name);
 			return value;
 		}
 	}
-	value = ghb_string_value_new("auto");
+	value = ghb_string_value_new("copy");
 	return value;
 }
 
@@ -1301,7 +1390,7 @@ ghb_hb_cleanup(gboolean partial)
 }
 
 gint
-ghb_subtitle_track_source(signal_user_data_t *ud, gint track)
+ghb_subtitle_track_source(GValue *settings, gint track)
 {
 	gint titleindex;
 
@@ -1309,7 +1398,7 @@ ghb_subtitle_track_source(signal_user_data_t *ud, gint track)
 		return SRTSUB;
 	if (track < 0)
 		return VOBSUB;
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	titleindex = ghb_settings_combo_int(settings, "title");
 	if (titleindex < 0)
 		return VOBSUB;
 
@@ -1365,7 +1454,7 @@ ghb_subtitle_source_name(gint source)
 }
 
 const char*
-ghb_subtitle_track_source_name(signal_user_data_t *ud, gint track)
+ghb_subtitle_track_source_name(GValue *settings, gint track)
 {
 	gint titleindex;
 	const gchar * name = "Unknown";
@@ -1381,7 +1470,7 @@ ghb_subtitle_track_source_name(signal_user_data_t *ud, gint track)
 		goto done;
 	}
 
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	titleindex = ghb_settings_combo_int(settings, "title");
 	if (titleindex < 0)
 		goto done;
 
@@ -1410,15 +1499,15 @@ done:
 }
 
 gchar*
-ghb_subtitle_track_lang(signal_user_data_t *ud, gint track)
+ghb_subtitle_track_lang(GValue *settings, gint track)
 {
 	gint titleindex;
 
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	titleindex = ghb_settings_combo_int(settings, "title");
 	if (titleindex < 0)
 		goto fail;
 	if (track == -1)
-		return ghb_get_user_audio_lang(ud, titleindex, 0);
+		return ghb_get_user_audio_lang(settings, titleindex, 0);
 	if (track < 0)
 		goto fail;
 
@@ -1531,89 +1620,117 @@ grey_combo_box_item(GtkBuilder *builder, const gchar *name, gint value, gboolean
 }
 
 void
-ghb_grey_combo_options(GtkBuilder *builder)
+ghb_grey_combo_options(signal_user_data_t *ud)
 {
 	GtkWidget *widget;
-	gint container, track, titleindex, acodec;
-    hb_audio_config_t *aconfig = NULL;
+	gint mux, track, titleindex, acodec, fallback;
+	hb_audio_config_t *aconfig = NULL;
 	GValue *gval;
-	
-	widget = GHB_WIDGET (builder, "title");
+	int ii;
+
+	widget = GHB_WIDGET (ud->builder, "title");
 	gval = ghb_widget_value(widget);
 	titleindex = ghb_lookup_combo_int("title", gval);
 	ghb_value_free(gval);
-	widget = GHB_WIDGET (builder, "AudioTrack");
+	widget = GHB_WIDGET (ud->builder, "AudioTrack");
 	gval = ghb_widget_value(widget);
 	track = ghb_lookup_combo_int("AudioTrack", gval);
 	ghb_value_free(gval);
 	aconfig = get_hb_audio(h_scan, titleindex, track);
-	widget = GHB_WIDGET (builder, "FileFormat");
+	widget = GHB_WIDGET (ud->builder, "FileFormat");
 	gval = ghb_widget_value(widget);
-	container = ghb_lookup_combo_int("FileFormat", gval);
+	mux = ghb_lookup_combo_int("FileFormat", gval);
 	ghb_value_free(gval);
 
-	grey_combo_box_item(builder, "x264_analyse", 4, TRUE);
-	grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_FAAC, FALSE);
-	grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_LAME, FALSE);
-	grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_VORBIS, FALSE);
-
-	gboolean allow_dca = TRUE;
-	allow_dca = (container != HB_MUX_MP4);
-
-	grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_AC3_PASS, FALSE);
-	if (allow_dca)
-		grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_DCA_PASS, FALSE);
-	else
-		grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_DCA_PASS, TRUE);
-
-	if (aconfig && aconfig->in.codec != HB_ACODEC_AC3)
+	grey_combo_box_item(ud->builder, "x264_analyse", 4, TRUE);
+	for (ii = 0; ii < hb_audio_encoders_count; ii++)
 	{
-		grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_AC3_PASS, TRUE);
+		if (!(mux & hb_audio_encoders[ii].muxers))
+		{
+			grey_combo_box_item(ud->builder, "AudioEncoder", 
+				hb_audio_encoders[ii].encoder, TRUE);
+			grey_combo_box_item(ud->builder, "AudioEncoderFallback",
+				hb_audio_encoders[ii].encoder, TRUE);
+		}
+        else
+        {
+			grey_combo_box_item(ud->builder, "AudioEncoder", 
+				hb_audio_encoders[ii].encoder, FALSE);
+			grey_combo_box_item(ud->builder, "AudioEncoderFallback",
+				hb_audio_encoders[ii].encoder, FALSE);
+        }
 	}
-	if (aconfig && aconfig->in.codec != HB_ACODEC_DCA)
+	for (ii = 0; ii < hb_video_encoders_count; ii++)
 	{
-		grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_DCA_PASS, TRUE);
+		if (!(mux & hb_video_encoders[ii].muxers))
+		{
+			grey_combo_box_item(ud->builder, "VideoEncoder", 
+				hb_video_encoders[ii].encoder, TRUE);
+		}
+        else
+		{
+			grey_combo_box_item(ud->builder, "VideoEncoder", 
+				hb_video_encoders[ii].encoder, FALSE);
+		}
 	}
-	grey_combo_box_item(builder, "VideoEncoder", HB_VCODEC_THEORA, FALSE);
 
-	widget = GHB_WIDGET (builder, "AudioEncoder");
+	if (aconfig && (aconfig->in.codec & HB_ACODEC_MASK) != HB_ACODEC_MP3)
+	{
+		grey_combo_box_item(ud->builder, "AudioEncoder", HB_ACODEC_MP3_PASS, TRUE);
+	}
+	if (aconfig && (aconfig->in.codec & HB_ACODEC_MASK) != HB_ACODEC_FFAAC)
+	{
+		grey_combo_box_item(ud->builder, "AudioEncoder", HB_ACODEC_AAC_PASS, TRUE);
+	}
+	if (aconfig && (aconfig->in.codec & HB_ACODEC_MASK) != HB_ACODEC_AC3)
+	{
+		grey_combo_box_item(ud->builder, "AudioEncoder", HB_ACODEC_AC3_PASS, TRUE);
+	}
+	if (aconfig && (aconfig->in.codec & HB_ACODEC_MASK) != HB_ACODEC_DCA)
+	{
+		grey_combo_box_item(ud->builder, "AudioEncoder", HB_ACODEC_DCA_PASS, TRUE);
+	}
+	if (aconfig && (aconfig->in.codec & HB_ACODEC_MASK) != HB_ACODEC_DCA_HD)
+	{
+		grey_combo_box_item(ud->builder, "AudioEncoder", HB_ACODEC_DCA_HD_PASS, TRUE);
+	}
+
+	widget = GHB_WIDGET (ud->builder, "AudioEncoder");
 	gval = ghb_widget_value(widget);
 	acodec = ghb_lookup_combo_int("AudioEncoder", gval);
 	ghb_value_free(gval);
-	grey_combo_box_item(builder, "AudioMixdown", 0, TRUE);
-	if (container == HB_MUX_MP4)
-	{
-		grey_combo_box_item(builder, "AudioEncoder", HB_ACODEC_VORBIS, TRUE);
-		grey_combo_box_item(builder, "VideoEncoder", HB_VCODEC_THEORA, TRUE);
-	}
+	grey_combo_box_item(ud->builder, "AudioMixdown", 0, TRUE);
 
 	gboolean allow_mono = TRUE;
 	gboolean allow_stereo = TRUE;
 	gboolean allow_dolby = TRUE;
 	gboolean allow_dpl2 = TRUE;
 	gboolean allow_6ch = TRUE;
-	allow_mono = TRUE;
 	allow_6ch = acodec & ~HB_ACODEC_LAME;
 	if (aconfig)
 	{
+		fallback = ghb_settings_combo_int(ud->settings, "AudioEncoderFallback");
+		gint copy_mask = ghb_get_copy_mask(ud->settings);
+		acodec = ghb_select_audio_codec(mux, aconfig, acodec, fallback, copy_mask);
 		gint best = hb_get_best_mixdown(acodec, aconfig->in.channel_layout, 0);
 
 		allow_stereo = best >= HB_AMIXDOWN_STEREO;
 		allow_dolby = best >= HB_AMIXDOWN_DOLBY;
 		allow_dpl2 = best >= HB_AMIXDOWN_DOLBYPLII;
 		allow_6ch = best >= HB_AMIXDOWN_6CH;
+		allow_mono = best >= HB_AMIXDOWN_MONO;
 	}
-	grey_combo_box_item(builder, "AudioMixdown", HB_AMIXDOWN_MONO, !allow_mono);
-	grey_combo_box_item(builder, "AudioMixdown", HB_AMIXDOWN_STEREO, !allow_stereo);
-	grey_combo_box_item(builder, "AudioMixdown", HB_AMIXDOWN_DOLBY, !allow_dolby);
-	grey_combo_box_item(builder, "AudioMixdown", HB_AMIXDOWN_DOLBYPLII, !allow_dpl2);
-	grey_combo_box_item(builder, "AudioMixdown", HB_AMIXDOWN_6CH, !allow_6ch);
+	grey_combo_box_item(ud->builder, "AudioMixdown", HB_AMIXDOWN_MONO, !allow_mono);
+	grey_combo_box_item(ud->builder, "AudioMixdown", HB_AMIXDOWN_STEREO, !allow_stereo);
+	grey_combo_box_item(ud->builder, "AudioMixdown", HB_AMIXDOWN_DOLBY, !allow_dolby);
+	grey_combo_box_item(ud->builder, "AudioMixdown", HB_AMIXDOWN_DOLBYPLII, !allow_dpl2);
+	grey_combo_box_item(ud->builder, "AudioMixdown", HB_AMIXDOWN_6CH, !allow_6ch);
 }
 
 gint
 ghb_get_best_mix(hb_audio_config_t *aconfig, gint acodec, gint mix)
 {
-	int layout;
+	gint layout;
 	layout = aconfig ? aconfig->in.channel_layout : 
 						HB_INPUT_CH_LAYOUT_3F2R | HB_INPUT_CH_LAYOUT_HAS_LFE;
 	return hb_get_best_mixdown( acodec, layout, mix );
@@ -1642,7 +1759,7 @@ init_combo_box(GtkBuilder *builder, const gchar *name)
 							   G_TYPE_STRING, G_TYPE_DOUBLE, G_TYPE_STRING);
 	gtk_combo_box_set_model(combo, GTK_TREE_MODEL(store));
 
-	if (GTK_WIDGET_TYPE(combo) == GTK_TYPE_COMBO_BOX)
+	if (G_OBJECT_TYPE(combo) == GTK_TYPE_COMBO_BOX)
 	{
 		gtk_cell_layout_clear(GTK_CELL_LAYOUT(combo));
     	cell = GTK_CELL_RENDERER(gtk_cell_renderer_text_new());
@@ -1740,6 +1857,60 @@ video_rate_opts_set(GtkBuilder *builder, const gchar *name, hb_rate_t *rates, gi
 }
 
 static void
+hb_encoder_opts_set_with_mask(
+	GtkBuilder *builder,
+	const gchar *name,
+	hb_encoder_t *encoders,
+	int len,
+	int mask,
+	int neg_mask)
+{
+	GtkTreeIter iter;
+	GtkListStore *store;
+	gint ii;
+	gchar *str;
+	
+	g_debug("hb_encoder_opts_set ()\n");
+	store = get_combo_box_store(builder, name);
+	gtk_list_store_clear(store);
+	for (ii = 0; ii < len; ii++)
+	{
+		if ((mask & encoders[ii].encoder) &&
+			!(neg_mask & encoders[ii].encoder))
+		{
+			gtk_list_store_append(store, &iter);
+			str = g_strdup_printf("<small>%s</small>",
+				encoders[ii].human_readable_name);
+			gtk_list_store_set(store, &iter, 
+							   0, str,
+							   1, TRUE, 
+							   2, encoders[ii].short_name, 
+							   3, (gdouble)encoders[ii].encoder, 
+							   4, encoders[ii].short_name, 
+							   -1);
+			g_free(str);
+		}
+	}
+}
+
+static void
+hb_encoder_opts_set(
+	GtkBuilder *builder,
+	const gchar *name,
+	hb_encoder_t *encoders,
+	int len)
+{
+	hb_encoder_opts_set_with_mask(builder, name, encoders, len, ~0, 0);
+}
+
+static void
+acodec_fallback_opts_set(GtkBuilder *builder, const gchar *name)
+{
+	hb_encoder_opts_set_with_mask(builder, name, hb_audio_encoders, 
+							hb_audio_encoders_count, ~0, HB_ACODEC_PASS_FLAG);
+}
+
+static void
 mix_opts_set(GtkBuilder *builder, const gchar *name)
 {
 	GtkTreeIter iter;
@@ -1750,14 +1921,6 @@ mix_opts_set(GtkBuilder *builder, const gchar *name)
 	g_debug("mix_opts_set ()\n");
 	store = get_combo_box_store(builder, name);
 	gtk_list_store_clear(store);
-	gtk_list_store_append(store, &iter);
-	gtk_list_store_set(store, &iter, 
-					   0, "<small>None</small>", 
-					   1, TRUE, 
-					   2, "none", 
-					   3, 0.0, 
-					   4, "none", 
-					   -1);
 	for (ii = 0; ii < hb_audio_mixdowns_count; ii++)
 	{
 		gtk_list_store_append(store, &iter);
@@ -1886,30 +2049,50 @@ title_opts_set(GtkBuilder *builder, const gchar *name)
 	for (ii = 0; ii < count; ii++)
 	{
 		title = (hb_title_t*)hb_list_item(list, ii);
-		if (title->type == HB_STREAM_TYPE)
+		if (title->type == HB_STREAM_TYPE || title->type == HB_FF_STREAM_TYPE)
 		{
 			if (title->duration != 0)
 			{
-				titles[ii]  = g_strdup_printf ("%d - %02dh%02dm%02ds - %s",
+                char *tmp;
+				tmp  = g_strdup_printf ("%d - %02dh%02dm%02ds - %s",
 					title->index, title->hours, title->minutes, title->seconds, 
 					title->name);
+                titles[ii] = g_markup_escape_text(tmp, -1);
+                g_free(tmp);
 			}
 			else
 			{
-				titles[ii]  = g_strdup_printf ("%d - %s", 
+                char *tmp;
+				tmp  = g_strdup_printf ("%d - %s", 
 										title->index, title->name);
+                titles[ii] = g_markup_escape_text(tmp, -1);
+                g_free(tmp);
+			}
+		}
+		else if (title->type == HB_BD_TYPE)
+		{
+			if (title->duration != 0)
+			{
+				titles[ii] = g_strdup_printf("%d (%05d.MPLS) - %02dh%02dm%02ds",
+					title->index, title->playlist, title->hours, 
+					title->minutes, title->seconds);
+			}
+			else
+			{
+				titles[ii] = g_strdup_printf("%d (%05d.MPLS) - Unknown Length",
+					title->index, title->playlist);
 			}
 		}
 		else
 		{
 			if (title->duration != 0)
 			{
-				titles[ii]  = g_strdup_printf ("%d - %02dh%02dm%02ds",
+				titles[ii]  = g_strdup_printf("%d - %02dh%02dm%02ds",
 					title->index, title->hours, title->minutes, title->seconds);
 			}
 			else
 			{
-				titles[ii]  = g_strdup_printf ("%d - Unknown Length", 
+				titles[ii]  = g_strdup_printf("%d - Unknown Length",
 										title->index);
 			}
 		}
@@ -1927,6 +2110,12 @@ title_opts_set(GtkBuilder *builder, const gchar *name)
 		title_opts.map[ii].svalue = titles[ii];
 	}
 	titles[ii] = NULL;
+}
+
+int
+ghb_get_title_count()
+{
+    return title_opts.count;
 }
 
 static gboolean
@@ -1975,7 +2164,15 @@ audio_track_opts_set(GtkBuilder *builder, const gchar *name, gint titleindex)
 		}
 	}
 	if (count > 100) count = 100;
-	if (audio_track_opts.map) g_free(audio_track_opts.map);
+	if (audio_track_opts.map)
+	{
+		for (ii = 0; ii < audio_track_opts.count; ii++)
+		{
+			if (audio_track_opts.map[ii].option)
+				g_free(audio_track_opts.map[ii].option);
+		}
+		g_free(audio_track_opts.map);
+	}
 	if (count > 0)
 	{
 		audio_track_opts.count = count;
@@ -1997,7 +2194,7 @@ audio_track_opts_set(GtkBuilder *builder, const gchar *name, gint titleindex)
 						   3, -1.0, 
 						   4, "none", 
 						   -1);
-		audio_track_opts.map[0].option = "No Audio";
+		audio_track_opts.map[0].option = g_strdup("No Audio");
 		audio_track_opts.map[0].shortOpt = "none";
 		audio_track_opts.map[0].ivalue = -1;
 		audio_track_opts.map[0].svalue = "none";
@@ -2008,7 +2205,8 @@ audio_track_opts_set(GtkBuilder *builder, const gchar *name, gint titleindex)
 	{
         audio = (hb_audio_config_t *) hb_list_audio_config_item( title->list_audio, ii );
 		gtk_list_store_append(store, &iter);
-		str = g_strdup_printf("<small>%s</small>", audio->lang.description);
+		char *tmp = g_strdup_printf("%d - %s", ii + 1, audio->lang.description);
+		str = g_strdup_printf("<small>%s</small>", tmp);
 		gtk_list_store_set(store, &iter, 
 						   0, str,
 						   1, TRUE, 
@@ -2017,11 +2215,35 @@ audio_track_opts_set(GtkBuilder *builder, const gchar *name, gint titleindex)
 						   4, index_str[ii], 
 						   -1);
 		g_free(str);
-		audio_track_opts.map[ii].option = audio->lang.description,
+		audio_track_opts.map[ii].option = g_strdup(tmp);
+		g_free(tmp);
 		audio_track_opts.map[ii].shortOpt = index_str[ii];
 		audio_track_opts.map[ii].ivalue = ii;
 		audio_track_opts.map[ii].svalue = index_str[ii];
 	}
+	GtkComboBox *combo = GTK_COMBO_BOX(GHB_WIDGET(builder, name));
+	gtk_combo_box_set_active (combo, 0);
+}
+
+const gchar*
+ghb_audio_track_description(gint track, int titleindex)
+{
+	hb_list_t  * list = NULL;
+	hb_title_t * title = NULL;
+    hb_audio_config_t * audio;
+	gchar * desc = "Unknown";
+	
+	g_debug("ghb_audio_track_description ()\n");
+
+	if (h_scan == NULL) return desc;
+	list = hb_get_titles( h_scan );
+	title = (hb_title_t*)hb_list_item( list, titleindex );
+	if (title == NULL) return desc;
+	if (track >= hb_list_count( title->list_audio )) return desc;
+
+	audio = hb_list_audio_config_item(title->list_audio, track);
+	if (audio == NULL) return desc;
+	return audio->lang.description;
 }
 
 void
@@ -2110,7 +2332,7 @@ subtitle_track_opts_set(GtkBuilder *builder, const gchar *name, gint titleindex)
 			else
 				lang = ghb_language_table[ii].eng_name;
 
-			subtitle_opts.map[ii+1].option = lang;
+			subtitle_opts.map[ii+1].option = (gchar*)lang;
 			subtitle_opts.map[ii+1].shortOpt = index_str[ii];
 			subtitle_opts.map[ii+1].ivalue = ii;
 			subtitle_opts.map[ii+1].svalue = ghb_language_table[ii].iso639_2;
@@ -2124,6 +2346,8 @@ subtitle_track_opts_set(GtkBuilder *builder, const gchar *name, gint titleindex)
 					-1);
 		}
 	}
+	GtkComboBox *combo = GTK_COMBO_BOX(GHB_WIDGET(builder, name));
+	gtk_combo_box_set_active (combo, 0);
 }
 
 gint
@@ -2617,6 +2841,14 @@ ghb_lookup_combo_int(const gchar *name, const GValue *gval)
 		return lookup_audio_lang_int(gval);
 	else if (strcmp(name, "PreferredLanguage") == 0)
 		return lookup_audio_lang_int(gval);
+	else if (strcmp(name, "VideoEncoder") == 0)
+		return lookup_hb_encoder_int(gval, hb_video_encoders, hb_video_encoders_count);
+	else if (strcmp(name, "AudioEncoder") == 0)
+		return lookup_hb_encoder_int(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderFallback") == 0)
+		return lookup_hb_encoder_int(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderActual") == 0)
+		return lookup_hb_encoder_int(gval, hb_audio_encoders, hb_audio_encoders_count);
 	else
 	{
 		return lookup_generic_int(find_combo_table(name), gval);
@@ -2642,6 +2874,14 @@ ghb_lookup_combo_double(const gchar *name, const GValue *gval)
 		return lookup_audio_lang_int(gval);
 	else if (strcmp(name, "PreferredLanguage") == 0)
 		return lookup_audio_lang_int(gval);
+	else if (strcmp(name, "VideoEncoder") == 0)
+		return lookup_hb_encoder_int(gval, hb_video_encoders, hb_video_encoders_count);
+	else if (strcmp(name, "AudioEncoder") == 0)
+		return lookup_hb_encoder_int(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderFallback") == 0)
+		return lookup_hb_encoder_int(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderActual") == 0)
+		return lookup_hb_encoder_int(gval, hb_audio_encoders, hb_audio_encoders_count);
 	else
 	{
 		return lookup_generic_double(find_combo_table(name), gval);
@@ -2667,6 +2907,14 @@ ghb_lookup_combo_option(const gchar *name, const GValue *gval)
 		return lookup_audio_lang_option(gval);
 	else if (strcmp(name, "PreferredLanguage") == 0)
 		return lookup_audio_lang_option(gval);
+	else if (strcmp(name, "VideoEncoder") == 0)
+		return lookup_hb_encoder_option(gval, hb_video_encoders, hb_video_encoders_count);
+	else if (strcmp(name, "AudioEncoder") == 0)
+		return lookup_hb_encoder_option(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderFallback") == 0)
+		return lookup_hb_encoder_option(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderActual") == 0)
+		return lookup_hb_encoder_option(gval, hb_audio_encoders, hb_audio_encoders_count);
 	else
 	{
 		return lookup_generic_option(find_combo_table(name), gval);
@@ -2683,7 +2931,7 @@ ghb_lookup_combo_string(const gchar *name, const GValue *gval)
 	if (strcmp(name, "AudioBitrate") == 0)
 		return lookup_audio_bitrate_option(gval);
 	else if (strcmp(name, "AudioSamplerate") == 0)
-		return lookup_audio_rate_option(gval);
+		return lookup_audio_rate_string(gval);
 	else if (strcmp(name, "VideoFramerate") == 0)
 		return lookup_video_rate_option(gval);
 	else if (strcmp(name, "AudioMixdown") == 0)
@@ -2692,6 +2940,14 @@ ghb_lookup_combo_string(const gchar *name, const GValue *gval)
 		return lookup_audio_lang_option(gval);
 	else if (strcmp(name, "PreferredLanguage") == 0)
 		return lookup_audio_lang_option(gval);
+	else if (strcmp(name, "VideoEncoder") == 0)
+		return lookup_hb_encoder_string(gval, hb_video_encoders, hb_video_encoders_count);
+	else if (strcmp(name, "AudioEncoder") == 0)
+		return lookup_hb_encoder_string(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderFallback") == 0)
+		return lookup_hb_encoder_string(gval, hb_audio_encoders, hb_audio_encoders_count);
+	else if (strcmp(name, "AudioEncoderActual") == 0)
+		return lookup_hb_encoder_string(gval, hb_audio_encoders, hb_audio_encoders_count);
 	else
 	{
 		return lookup_generic_string(find_combo_table(name), gval);
@@ -2737,6 +2993,9 @@ ghb_update_ui_combo_box(
 		audio_samplerate_opts_set(ud->builder, "AudioSamplerate", hb_audio_rates, hb_audio_rates_count);
 		video_rate_opts_set(ud->builder, "VideoFramerate", hb_video_rates, hb_video_rates_count);
 		mix_opts_set(ud->builder, "AudioMixdown");
+		hb_encoder_opts_set(ud->builder, "VideoEncoder", hb_video_encoders, hb_video_encoders_count);
+		hb_encoder_opts_set(ud->builder, "AudioEncoder", hb_audio_encoders, hb_audio_encoders_count);
+		acodec_fallback_opts_set(ud->builder, "AudioEncoderFallback");
 		language_opts_set(ud->builder, "SrtLanguage");
 		language_opts_set(ud->builder, "PreferredLanguage");
 		srt_codeset_opts_set(ud->builder, "SrtCodeset");
@@ -2756,8 +3015,6 @@ ghb_update_ui_combo_box(
 		generic_opts_set(ud->builder, "PictureDetelecine", &detel_opts);
 		generic_opts_set(ud->builder, "PictureDecomb", &decomb_opts);
 		generic_opts_set(ud->builder, "PictureDenoise", &denoise_opts);
-		generic_opts_set(ud->builder, "VideoEncoder", &vcodec_opts);
-		small_opts_set(ud->builder, "AudioEncoder", &acodec_opts);
 		small_opts_set(ud->builder, "x264_direct", &direct_opts);
 		small_opts_set(ud->builder, "x264_b_adapt", &badapt_opts);
 		small_opts_set(ud->builder, "x264_bpyramid", &bpyramid_opts);
@@ -2777,6 +3034,12 @@ ghb_update_ui_combo_box(
 			video_rate_opts_set(ud->builder, "VideoFramerate", hb_video_rates, hb_video_rates_count);
 		else if (strcmp(name, "AudioMixdown") == 0)
 			mix_opts_set(ud->builder, "AudioMixdown");
+		else if (strcmp(name, "VideoEncoder") == 0)
+			hb_encoder_opts_set(ud->builder, "VideoEncoder", hb_video_encoders, hb_video_encoders_count);
+		else if (strcmp(name, "AudioEncoder") == 0)
+			hb_encoder_opts_set(ud->builder, "AudioEncoder", hb_audio_encoders, hb_audio_encoders_count);
+		else if (strcmp(name, "AudioEncoderFallback") == 0)
+			acodec_fallback_opts_set(ud->builder, "AudioEncoderFallback");
 		else if (strcmp(name, "SrtLanguage") == 0)
 			language_opts_set(ud->builder, "SrtLanguage");
 		else if (strcmp(name, "PreferredLanguage") == 0)
@@ -2812,30 +3075,64 @@ init_ui_combo_boxes(GtkBuilder *builder)
 	init_combo_box(builder, "SrtCodeset");
 	init_combo_box(builder, "title");
 	init_combo_box(builder, "AudioTrack");
+	init_combo_box(builder, "VideoEncoder");
+	init_combo_box(builder, "AudioEncoder");
+	init_combo_box(builder, "AudioEncoderFallback");
 	for (ii = 0; combo_name_map[ii].name != NULL; ii++)
 	{
 		init_combo_box(builder, combo_name_map[ii].name);
 	}
 }
 	
-static const char * turbo_opts = 
+static const char * turbo_lavc_opts = "";
+
+static const char * turbo_x264_opts = 
 	"ref=1:subme=2:me=dia:analyse=none:trellis=0:"
 	"no-fast-pskip=0:8x8dct=0";
 
-// Construct the x264 options string
+// Construct the advanced options string
 // The result is allocated, so someone must free it at some point.
 gchar*
-ghb_build_x264opts_string(GValue *settings)
+ghb_build_advanced_opts_string(GValue *settings)
 {
 	gchar *result;
-	gchar *opts = ghb_settings_get_string(settings, "x264Option");
-	if (opts != NULL)
+
+	gint vcodec = ghb_settings_combo_int(settings, "VideoEncoder");
+
+	switch (vcodec)
 	{
-		result = opts;
-	}
-	else
-	{
-		result = g_strdup("");
+		case HB_VCODEC_X264:
+		{
+			gchar *opts = ghb_settings_get_string(settings, "x264Option");
+			if (opts != NULL)
+			{
+				result = opts;
+			}
+			else
+			{
+				result = g_strdup("");
+			}
+		} break;
+
+		case HB_VCODEC_FFMPEG_MPEG2:
+		case HB_VCODEC_FFMPEG_MPEG4:
+		{
+			gchar *opts = ghb_settings_get_string(settings, "lavcOption");
+			if (opts != NULL)
+			{
+				result = opts;
+			}
+			else
+			{
+				result = g_strdup("");
+			}
+		} break;
+
+		case HB_VCODEC_THEORA:
+		default:
+		{
+			result = g_strdup("");
+		} break;
 	}
 	return result;
 }
@@ -2911,12 +3208,13 @@ ghb_get_chapters(gint titleindex)
 	GValue *chapters = NULL;
 	
 	g_debug("ghb_get_chapters (title = %d)\n", titleindex);
-	if (h_scan == NULL) return NULL;
+	chapters = ghb_array_value_new(0);
+
+	if (h_scan == NULL) return chapters;
 	list = hb_get_titles( h_scan );
     title = (hb_title_t*)hb_list_item( list, titleindex );
-	if (title == NULL) return NULL;
+	if (title == NULL) return chapters;
 	count = hb_list_count( title->list_chapter );
-	chapters = ghb_array_value_new(count);
 	for (ii = 0; ii < count; ii++)
 	{
 		chapter = hb_list_item(title->list_chapter, ii);
@@ -2964,21 +3262,30 @@ audio_bitrate_opts_add(GtkBuilder *builder, const gchar *name, gint rate)
 	
 	g_debug("audio_bitrate_opts_add ()\n");
 
-	if (rate < 8) return;
+	if (rate >= 0 && rate < 8) return;
 
 	if (ghb_audio_bitrates[hb_audio_bitrates_count].string)
 	{
 		g_free(ghb_audio_bitrates[hb_audio_bitrates_count].string);
 	}
 	ghb_audio_bitrates[hb_audio_bitrates_count].rate = rate;
-	ghb_audio_bitrates[hb_audio_bitrates_count].string = 
-		g_strdup_printf("%d", rate);
+	if (rate < 0)
+	{
+		ghb_audio_bitrates[hb_audio_bitrates_count].string = 
+			g_strdup_printf("N/A");
+	}
+	else
+	{
+		ghb_audio_bitrates[hb_audio_bitrates_count].string = 
+			g_strdup_printf("%d", rate);
+	}
 	ghb_audio_bitrates_count = hb_audio_bitrates_count + 1;
 
 	store = get_combo_box_store(builder, name);
 	if (!find_combo_item_by_int(GTK_TREE_MODEL(store), rate, &iter))
 	{
-		str = g_strdup_printf ("<small>%d</small>", rate);
+		str = g_strdup_printf ("<small>%s</small>",
+						ghb_audio_bitrates[hb_audio_bitrates_count].string);
 		gtk_list_store_append(store, &iter);
 		gtk_list_store_set(store, &iter, 
 						   0, str, 
@@ -2992,11 +3299,12 @@ audio_bitrate_opts_add(GtkBuilder *builder, const gchar *name, gint rate)
 }
 
 static void
-audio_bitrate_opts_clean(
+audio_bitrate_opts_update(
 	GtkBuilder *builder, 
 	const gchar *name, 
 	gint first_rate, 
-	gint last_rate)
+	gint last_rate,
+	gint extra_rate)
 {
 	GtkTreeIter iter;
 	GtkListStore *store;
@@ -3015,12 +3323,14 @@ audio_bitrate_opts_clean(
 		do
 		{
 			gtk_tree_model_get(GTK_TREE_MODEL(store), &iter, 3, &ivalue, -1);
-			if (search_rates(
+			if (ivalue != first_rate && ivalue != last_rate && 
+				!(ivalue == extra_rate && extra_rate >= first_rate) &&
+				search_rates(
 				ghb_audio_bitrates, ivalue, ghb_audio_bitrates_count) < 0)
 			{
 				done = !gtk_list_store_remove(store, &iter);
 			}
-			else if (ivalue < first || ivalue > last)
+			else if ((int)ivalue < first || (int)ivalue > last)
 			{
 				ii++;
 				gtk_list_store_set(store, &iter, 1, FALSE, -1);
@@ -3034,6 +3344,8 @@ audio_bitrate_opts_clean(
 			}
 		} while (!done);
 	}
+	if (extra_rate >= first_rate)
+		audio_bitrate_opts_add(builder, name, extra_rate);
 }
 
 static void
@@ -3072,18 +3384,13 @@ audio_bitrate_opts_set(GtkBuilder *builder, const gchar *name)
 }
 
 void
-ghb_set_passthru_bitrate_opts(GtkBuilder *builder, gint bitrate)
-{
-	audio_bitrate_opts_add(builder, "AudioBitrate", bitrate);
-}
-
-void
-ghb_set_default_bitrate_opts(
+ghb_set_bitrate_opts(
 	GtkBuilder *builder, 
 	gint first_rate, 
-	gint last_rate)
+	gint last_rate,
+	gint extra_rate)
 {
-	audio_bitrate_opts_clean(builder, "AudioBitrate", first_rate, last_rate);
+	audio_bitrate_opts_update(builder, "AudioBitrate", first_rate, last_rate, extra_rate);
 }
 
 static ghb_status_t hb_status;
@@ -3370,6 +3677,7 @@ ghb_get_title_info(ghb_title_info_t *tinfo, gint titleindex)
 	title = hb_list_item( list, titleindex );
 	if (title == NULL) return FALSE;	// Bad titleindex
 	tinfo->index = titleindex;
+	tinfo->video_codec_name = title->video_codec_name;
 	tinfo->width = title->width;
 	tinfo->height = title->height;
 	memcpy(tinfo->crop, title->crop, 4 * sizeof(int));
@@ -3436,17 +3744,7 @@ picture_settings_deps(signal_user_data_t *ud)
 	GtkWidget *widget;
 
 	pic_par = ghb_settings_combo_int(ud->settings, "PicturePAR");
-	if (pic_par == 1)
-	{
-		ghb_ui_update(ud, "autoscale", ghb_boolean_value(TRUE));
-		ghb_ui_update(ud, "PictureModulus", ghb_int_value(2));
-		ghb_ui_update(ud, "PictureLooseCrop", ghb_boolean_value(TRUE));
-	}
 	enable_keep_aspect = (pic_par != 1 && pic_par != 2);
-	if (!enable_keep_aspect)
-	{
-		ghb_ui_update(ud, "PictureKeepRatio", ghb_boolean_value(TRUE));
-	}
 	keep_aspect = ghb_settings_get_boolean(ud->settings, "PictureKeepRatio");
 	autoscale = ghb_settings_get_boolean(ud->settings, "autoscale");
 
@@ -3479,7 +3777,27 @@ picture_settings_deps(signal_user_data_t *ud)
 }
 
 void
-ghb_set_scale(signal_user_data_t *ud, gint mode)
+ghb_limit_rational( gint *num, gint *den, gint limit )
+{
+    if (*num < limit && *den < limit)
+        return;
+
+    if (*num > *den)
+    {
+        gdouble factor = (double)limit / *num;
+        *num = limit;
+        *den = factor * *den;
+    }
+    else
+    {
+        gdouble factor = (double)limit / *den;
+        *den = limit;
+        *num = factor * *num;
+    }
+}
+
+void
+ghb_set_scale_settings(GValue *settings, gint mode)
 {
 	hb_list_t  * list;
 	hb_title_t * title;
@@ -3492,14 +3810,24 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 	gint aspect_n, aspect_d;
 	gboolean keep_width = (mode & GHB_PIC_KEEP_WIDTH);
 	gboolean keep_height = (mode & GHB_PIC_KEEP_HEIGHT);
-	gint step;
-	GtkWidget *widget;
 	gint mod;
 	gint max_width = 0;
 	gint max_height = 0;
 	
 	g_debug("ghb_set_scale ()\n");
-	picture_settings_deps(ud);
+
+	pic_par = ghb_settings_combo_int(settings, "PicturePAR");
+	if (pic_par == 1)
+	{
+		ghb_settings_set_boolean(settings, "autoscale", TRUE);
+		ghb_settings_set_int(settings, "PictureModulus", 2);
+		ghb_settings_set_boolean(settings, "PictureLooseCrop", TRUE);
+	}
+	if (pic_par == 1 || pic_par == 2)
+	{
+		ghb_settings_set_boolean(settings, "PictureKeepRatio", TRUE);
+	}
+
 	if (h_scan == NULL) return;
 	list = hb_get_titles( h_scan );
 	if( !hb_list_count( list ) )
@@ -3509,24 +3837,20 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 	}
 	gint titleindex;
 
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	titleindex = ghb_settings_combo_int(settings, "title");
 	title = hb_list_item( list, titleindex );
 	if (title == NULL) return;
 	job   = title->job;
 	if (job == NULL) return;
 
-	if (ud->scale_busy) return;
-	ud->scale_busy = TRUE;
-
 	// First configure widgets
-	mod = ghb_settings_combo_int(ud->settings, "PictureModulus");
-	pic_par = ghb_settings_combo_int(ud->settings, "PicturePAR");
-	keep_aspect = ghb_settings_get_boolean(ud->settings, "PictureKeepRatio");
-	autocrop = ghb_settings_get_boolean(ud->settings, "PictureAutoCrop");
-	autoscale = ghb_settings_get_boolean(ud->settings, "autoscale");
+	mod = ghb_settings_combo_int(settings, "PictureModulus");
+	keep_aspect = ghb_settings_get_boolean(settings, "PictureKeepRatio");
+	autocrop = ghb_settings_get_boolean(settings, "PictureAutoCrop");
+	autoscale = ghb_settings_get_boolean(settings, "autoscale");
 	// "Noscale" is a flag that says we prefer to crop extra to satisfy
 	// alignment constraints rather than scaling to satisfy them.
-	noscale = ghb_settings_get_boolean(ud->settings, "PictureLooseCrop");
+	noscale = ghb_settings_get_boolean(settings, "PictureLooseCrop");
 	// Align dimensions to either 16 or 2 pixels
 	// The scaler crashes if the dimensions are not divisible by 2
 	// x264 also will not accept dims that are not multiple of 2
@@ -3535,34 +3859,7 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 		keep_width = FALSE;
 		keep_height = FALSE;
 	}
-	// Step needs to be at least 2 because odd widths cause scaler crash
-	step = mod;
-	widget = GHB_WIDGET (ud->builder, "scale_width");
-	gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), step, 16);
-	widget = GHB_WIDGET (ud->builder, "scale_height");
-	gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), step, 16);
-	if (noscale)
-	{
-		widget = GHB_WIDGET (ud->builder, "PictureTopCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), step, 16);
-		widget = GHB_WIDGET (ud->builder, "PictureBottomCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), step, 16);
-		widget = GHB_WIDGET (ud->builder, "PictureLeftCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), step, 16);
-		widget = GHB_WIDGET (ud->builder, "PictureRightCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), step, 16);
-	}
-	else
-	{
-		widget = GHB_WIDGET (ud->builder, "PictureTopCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 1, 16);
-		widget = GHB_WIDGET (ud->builder, "PictureBottomCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 1, 16);
-		widget = GHB_WIDGET (ud->builder, "PictureLeftCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 1, 16);
-		widget = GHB_WIDGET (ud->builder, "PictureRightCrop");
-		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 1, 16);
-	}
+
 	ghb_title_info_t tinfo;
 	ghb_get_title_info (&tinfo, titleindex);
 	if (autocrop)
@@ -3571,17 +3868,17 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 		crop[1] = tinfo.crop[1];
 		crop[2] = tinfo.crop[2];
 		crop[3] = tinfo.crop[3];
-		ghb_ui_update(ud, "PictureTopCrop", ghb_int64_value(crop[0]));
-		ghb_ui_update(ud, "PictureBottomCrop", ghb_int64_value(crop[1]));
-		ghb_ui_update(ud, "PictureLeftCrop", ghb_int64_value(crop[2]));
-		ghb_ui_update(ud, "PictureRightCrop", ghb_int64_value(crop[3]));
+		ghb_settings_set_int(settings, "PictureTopCrop", crop[0]);
+		ghb_settings_set_int(settings, "PictureBottomCrop", crop[1]);
+		ghb_settings_set_int(settings, "PictureLeftCrop", crop[2]);
+		ghb_settings_set_int(settings, "PictureRightCrop", crop[3]);
 	}
 	else
 	{
-		crop[0] = ghb_settings_get_int(ud->settings, "PictureTopCrop");
-		crop[1] = ghb_settings_get_int(ud->settings, "PictureBottomCrop");
-		crop[2] = ghb_settings_get_int(ud->settings, "PictureLeftCrop");
-		crop[3] = ghb_settings_get_int(ud->settings, "PictureRightCrop");
+		crop[0] = ghb_settings_get_int(settings, "PictureTopCrop");
+		crop[1] = ghb_settings_get_int(settings, "PictureBottomCrop");
+		crop[2] = ghb_settings_get_int(settings, "PictureLeftCrop");
+		crop[3] = ghb_settings_get_int(settings, "PictureRightCrop");
 	}
 	if (noscale)
 	{
@@ -3601,10 +3898,10 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 		need2 = crop_width - width - need1;
 		crop[2] += need1;
 		crop[3] += need2;
-		ghb_ui_update(ud, "PictureTopCrop", ghb_int64_value(crop[0]));
-		ghb_ui_update(ud, "PictureBottomCrop", ghb_int64_value(crop[1]));
-		ghb_ui_update(ud, "PictureLeftCrop", ghb_int64_value(crop[2]));
-		ghb_ui_update(ud, "PictureRightCrop", ghb_int64_value(crop[3]));
+		ghb_settings_set_int(settings, "PictureTopCrop", crop[0]);
+		ghb_settings_set_int(settings, "PictureBottomCrop", crop[1]);
+		ghb_settings_set_int(settings, "PictureLeftCrop", crop[2]);
+		ghb_settings_set_int(settings, "PictureRightCrop", crop[3]);
 	}
 	hb_reduce(&aspect_n, &aspect_d, 
 				title->width * title->pixel_aspect_width, 
@@ -3618,14 +3915,14 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 	}
 	else
 	{
-		width = ghb_settings_get_int(ud->settings, "scale_width");
-		height = ghb_settings_get_int(ud->settings, "scale_height");
+		width = ghb_settings_get_int(settings, "scale_width");
+		height = ghb_settings_get_int(settings, "scale_height");
 		if (mode & GHB_PIC_USE_MAX)
 		{
 			max_width = MOD_DOWN(
-				ghb_settings_get_int(ud->settings, "PictureWidth"), mod);
+				ghb_settings_get_int(settings, "PictureWidth"), mod);
 			max_height = MOD_DOWN(
-				ghb_settings_get_int(ud->settings, "PictureHeight"), mod);
+				ghb_settings_get_int(settings, "PictureHeight"), mod);
 		}
 	}
 	g_debug("max_width %d, max_height %d\n", max_width, max_height);
@@ -3650,28 +3947,32 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 		job->anamorphic.dar_height = 0;
 
 		if (keep_height && pic_par == 2)
+		{
 			width = ((double)height * crop_width / crop_height);
+			width = MOD_ROUND(width, mod);
+		}
 		job->width = width;
 		job->height = height;
 		job->maxWidth = max_width;
 		job->maxHeight = max_height;
-		job->crop[0] = crop[0];	job->crop[1] = crop[1];
-		job->crop[2] = crop[2];	job->crop[3] = crop[3];
+		job->crop[0] = crop[0];
+		job->crop[1] = crop[1];
+		job->crop[2] = crop[2];
+		job->crop[3] = crop[3];
 		if (job->anamorphic.mode == 3 && !keep_aspect)
 		{
 			job->anamorphic.keep_display_aspect = 0;
 			if (mode & GHB_PIC_KEEP_PAR)
 			{
 				job->anamorphic.par_width = 
-					ghb_settings_get_int(ud->settings, "PicturePARWidth");
+					ghb_settings_get_int(settings, "PicturePARWidth");
 				job->anamorphic.par_height = 
-					ghb_settings_get_int(ud->settings, "PicturePARHeight");
+					ghb_settings_get_int(settings, "PicturePARHeight");
 			}
 			else
 			{
 				job->anamorphic.dar_width = 
-					ghb_settings_get_int(ud->settings, 
-										"PictureDisplayWidth");
+					ghb_settings_get_int(settings, "PictureDisplayWidth");
 				job->anamorphic.dar_height = height;
 			}
 		}
@@ -3682,27 +3983,22 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 		// hb_set_anamorphic_size will adjust par, dar, and width/height
 		// to conform to job parameters that have been set, including 
 		// maxWidth and maxHeight
-		hb_set_anamorphic_size( job, &width, &height, 
-								&par_width, &par_height );
+		hb_set_anamorphic_size(job, &width, &height, &par_width, &par_height);
 		if (job->anamorphic.mode == 3 && !keep_aspect && 
 			mode & GHB_PIC_KEEP_PAR)
 		{
 			// hb_set_anamorphic_size reduces the par, which we
 			// don't want in this case because the user is
 			// explicitely specifying it.
-			par_width = ghb_settings_get_int(ud->settings, 
-											"PicturePARWidth");
-			par_height = ghb_settings_get_int(ud->settings, 
-												"PicturePARHeight");
+			par_width = ghb_settings_get_int(settings, "PicturePARWidth");
+			par_height = ghb_settings_get_int(settings, "PicturePARHeight");
 		}
 	}
 	else 
 	{
 		// Adjust dims according to max values
-		if (max_height)
-			height = MIN(height, max_height);
-		if (max_width)
-			width = MIN(width, max_width);
+		if (max_height) height = MIN(height, max_height);
+		if (max_width) width = MIN(width, max_width);
 
 		if (keep_aspect)
 		{
@@ -3750,15 +4046,87 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 			width = MIN(width, max_width);
 		par_width = par_height = 1;
 	}
-	ghb_ui_update(ud, "scale_width", ghb_int64_value(width));
-	ghb_ui_update(ud, "scale_height", ghb_int64_value(height));
+	ghb_settings_set_int(settings, "scale_width", width);
+	ghb_settings_set_int(settings, "scale_height", height);
 
-	gint disp_width, dar_width, dar_height;
+	gint disp_width;
+
+	disp_width = ((gdouble)par_width / par_height) * width + 0.5;
+    ghb_limit_rational(&par_width, &par_height, 65535);
+
+	ghb_settings_set_int(settings, "PicturePARWidth", par_width);
+	ghb_settings_set_int(settings, "PicturePARHeight", par_height);
+	ghb_settings_set_int(settings, "PictureDisplayWidth", disp_width);
+	ghb_settings_set_int(settings, "PictureDisplayHeight", height);
+}
+
+void
+ghb_set_scale(signal_user_data_t *ud, gint mode)
+{
+	if (ud->scale_busy) return;
+	ud->scale_busy = TRUE;
+
+	ghb_set_scale_settings(ud->settings, mode);
+	picture_settings_deps(ud);
+
+	// Step needs to be at least 2 because odd widths cause scaler crash
+	// subsampled chroma requires even crop values.
+	GtkWidget *widget;
+	int mod = ghb_settings_combo_int(ud->settings, "PictureModulus");
+	widget = GHB_WIDGET (ud->builder, "scale_width");
+	gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), mod, 16);
+	widget = GHB_WIDGET (ud->builder, "scale_height");
+	gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), mod, 16);
+
+	// "Noscale" is a flag that says we prefer to crop extra to satisfy
+	// alignment constraints rather than scaling to satisfy them.
+	gboolean noscale = ghb_settings_get_boolean(ud->settings, "PictureLooseCrop");
+	if (noscale)
+	{
+		widget = GHB_WIDGET (ud->builder, "PictureTopCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), mod, 16);
+		widget = GHB_WIDGET (ud->builder, "PictureBottomCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), mod, 16);
+		widget = GHB_WIDGET (ud->builder, "PictureLeftCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), mod, 16);
+		widget = GHB_WIDGET (ud->builder, "PictureRightCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), mod, 16);
+	}
+	else
+	{
+		widget = GHB_WIDGET (ud->builder, "PictureTopCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 2, 16);
+		widget = GHB_WIDGET (ud->builder, "PictureBottomCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 2, 16);
+		widget = GHB_WIDGET (ud->builder, "PictureLeftCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 2, 16);
+		widget = GHB_WIDGET (ud->builder, "PictureRightCrop");
+		gtk_spin_button_set_increments (GTK_SPIN_BUTTON(widget), 2, 16);
+	}
+
+	ghb_ui_update_from_settings(ud->builder, "autoscale", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureModulus", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureLooseCrop", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureKeepRatio", ud->settings);
+
+	ghb_ui_update_from_settings(ud->builder, "PictureTopCrop", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureBottomCrop", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureLeftCrop", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureRightCrop", ud->settings);
+
+	ghb_ui_update_from_settings(ud->builder, "scale_width", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "scale_height", ud->settings);
+
+	ghb_ui_update_from_settings(ud->builder, "PicturePARWidth", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PicturePARHeight", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureDisplayWidth", ud->settings);
+	ghb_ui_update_from_settings(ud->builder, "PictureDisplayHeight", ud->settings);
+	gint disp_width, disp_height, dar_width, dar_height;
 	gchar *str;
 
-	disp_width = (gdouble)(width * par_width / par_height) + 0.5;
-	hb_reduce(&dar_width, &dar_height, disp_width, height);
-		
+	disp_width = ghb_settings_get_int(ud->settings, "PictureDisplayWidth");
+	disp_height = ghb_settings_get_int(ud->settings, "PictureDisplayHeight");
+	hb_reduce(&dar_width, &dar_height, disp_width, disp_height);
 	gint iaspect = dar_width * 9 / dar_height;
 	if (dar_width > 2 * dar_height)
 	{
@@ -3778,10 +4146,6 @@ ghb_set_scale(signal_user_data_t *ud, gint mode)
 	}
 	ghb_ui_update(ud, "display_aspect", ghb_string_value(str));
 	g_free(str);
-	ghb_ui_update(ud, "PicturePARWidth", ghb_int64_value(par_width));
-	ghb_ui_update(ud, "PicturePARHeight", ghb_int64_value(par_height));
-	ghb_ui_update(ud, "PictureDisplayWidth", ghb_int64_value(disp_width));
-	ghb_ui_update(ud, "PictureDisplayHeight", ghb_int64_value(height));
 	ud->scale_busy = FALSE;
 }
 
@@ -3850,24 +4214,6 @@ set_preview_job_settings(hb_job_t *job, GValue *settings)
 	}
 }
 
-gint
-ghb_calculate_target_bitrate(GValue *settings, gint titleindex)
-{
-	hb_list_t  * list;
-	hb_title_t * title;
-	hb_job_t   * job;
-	gint size;
-
-	if (h_scan == NULL) return 1500;
-	list = hb_get_titles( h_scan );
-    title = hb_list_item( list, titleindex );
-	if (title == NULL) return 1500;
-	job   = title->job;
-	if (job == NULL) return 1500;
-	size = ghb_settings_get_int(settings, "VideoTargetSize");
-	return hb_calc_bitrate( job, size );
-}
-
 gboolean
 ghb_validate_filter_string(const gchar *str, gint max_fields)
 {
@@ -3897,18 +4243,18 @@ ghb_validate_filter_string(const gchar *str, gint max_fields)
 }
 
 gboolean
-ghb_validate_filters(signal_user_data_t *ud)
+ghb_validate_filters(GValue *settings)
 {
 	gchar *str;
 	gint index;
 	gchar *message;
 
-	gboolean decomb_deint = ghb_settings_get_boolean(ud->settings, "PictureDecombDeinterlace");
+	gboolean decomb_deint = ghb_settings_get_boolean(settings, "PictureDecombDeinterlace");
 	// deinte
-	index = ghb_settings_combo_int(ud->settings, "PictureDeinterlace");
+	index = ghb_settings_combo_int(settings, "PictureDeinterlace");
 	if (!decomb_deint && index == 1)
 	{
-		str = ghb_settings_get_string(ud->settings, "PictureDeinterlaceCustom");
+		str = ghb_settings_get_string(settings, "PictureDeinterlaceCustom");
 		if (!ghb_validate_filter_string(str, -1))
 		{
 			message = g_strdup_printf(
@@ -3922,10 +4268,10 @@ ghb_validate_filters(signal_user_data_t *ud)
 		g_free(str);
 	}
 	// detel
-	index = ghb_settings_combo_int(ud->settings, "PictureDetelecine");
+	index = ghb_settings_combo_int(settings, "PictureDetelecine");
 	if (index == 1)
 	{
-		str = ghb_settings_get_string(ud->settings, "PictureDetelecineCustom");
+		str = ghb_settings_get_string(settings, "PictureDetelecineCustom");
 		if (!ghb_validate_filter_string(str, -1))
 		{
 			message = g_strdup_printf(
@@ -3939,10 +4285,10 @@ ghb_validate_filters(signal_user_data_t *ud)
 		g_free(str);
 	}
 	// decomb
-	index = ghb_settings_combo_int(ud->settings, "PictureDecomb");
+	index = ghb_settings_combo_int(settings, "PictureDecomb");
 	if (decomb_deint && index == 1)
 	{
-		str = ghb_settings_get_string(ud->settings, "PictureDecombCustom");
+		str = ghb_settings_get_string(settings, "PictureDecombCustom");
 		if (!ghb_validate_filter_string(str, -1))
 		{
 			message = g_strdup_printf(
@@ -3956,10 +4302,10 @@ ghb_validate_filters(signal_user_data_t *ud)
 		g_free(str);
 	}
 	// denois
-	index = ghb_settings_combo_int(ud->settings, "PictureDenoise");
+	index = ghb_settings_combo_int(settings, "PictureDenoise");
 	if (index == 1)
 	{
-		str = ghb_settings_get_string(ud->settings, "PictureDenoiseCustom");
+		str = ghb_settings_get_string(settings, "PictureDenoiseCustom");
 		if (!ghb_validate_filter_string(str, -1))
 		{
 			message = g_strdup_printf(
@@ -3976,13 +4322,13 @@ ghb_validate_filters(signal_user_data_t *ud)
 }
 
 gboolean
-ghb_validate_video(signal_user_data_t *ud)
+ghb_validate_video(GValue *settings)
 {
 	gint vcodec, mux;
 	gchar *message;
 
-	mux = ghb_settings_combo_int(ud->settings, "FileFormat");
-	vcodec = ghb_settings_combo_int(ud->settings, "VideoEncoder");
+	mux = ghb_settings_combo_int(settings, "FileFormat");
+	vcodec = ghb_settings_combo_int(settings, "VideoEncoder");
 	if ((mux == HB_MUX_MP4) && (vcodec == HB_VCODEC_THEORA))
 	{
 		// mp4/theora combination is not supported.
@@ -3996,14 +4342,13 @@ ghb_validate_video(signal_user_data_t *ud)
 			return FALSE;
 		}
 		g_free(message);
-		vcodec = HB_VCODEC_FFMPEG;
-		ghb_ui_update(ud, "VideoEncoder", ghb_int64_value(vcodec));
+		ghb_settings_set_int(settings, "VideoEncoder", HB_VCODEC_FFMPEG_MPEG4);
 	}
 	return TRUE;
 }
 
 gboolean
-ghb_validate_subtitles(signal_user_data_t *ud)
+ghb_validate_subtitles(GValue *settings)
 {
 	hb_list_t  * list;
 	hb_title_t * title;
@@ -4020,21 +4365,21 @@ ghb_validate_subtitles(signal_user_data_t *ud)
 
 	gint titleindex;
 
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	titleindex = ghb_settings_combo_int(settings, "title");
     title = hb_list_item( list, titleindex );
 	if (title == NULL) return FALSE;
 
-	const GValue *slist, *settings;
+	const GValue *slist, *subtitle;
 	gint count, ii, source;
 	gboolean burned, one_burned = FALSE;
 
-	slist = ghb_settings_get_value(ud->settings, "subtitle_list");
+	slist = ghb_settings_get_value(settings, "subtitle_list");
 	count = ghb_array_len(slist);
 	for (ii = 0; ii < count; ii++)
 	{
-		settings = ghb_array_get_nth(slist, ii);
-		source = ghb_settings_get_int(settings, "SubtitleSource");
-		burned = ghb_settings_get_boolean(settings, "SubtitleBurned");
+		subtitle = ghb_array_get_nth(slist, ii);
+		source = ghb_settings_get_int(subtitle, "SubtitleSource");
+		burned = ghb_settings_get_boolean(subtitle, "SubtitleBurned");
 		if (burned && one_burned)
 		{
 			// MP4 can only handle burned vobsubs.  make sure there isn't
@@ -4059,7 +4404,7 @@ ghb_validate_subtitles(signal_user_data_t *ud)
 		{
 			gchar *filename;
 
-			filename = ghb_settings_get_string(settings, "SrtFile");
+			filename = ghb_settings_get_string(subtitle, "SrtFile");
 			if (!g_file_test(filename, G_FILE_TEST_IS_REGULAR))
 			{
 				message = g_strdup_printf(
@@ -4080,66 +4425,8 @@ ghb_validate_subtitles(signal_user_data_t *ud)
 	return TRUE;
 }
 
-gint
-ghb_select_audio_codec(GValue *settings, hb_audio_config_t *aconfig, gint acodec)
-{
-	gint mux = ghb_settings_combo_int(settings, "FileFormat");
-
-	guint32 in_codec = aconfig ? aconfig->in.codec : HB_ACODEC_MASK;
-	if (mux == HB_MUX_MP4)
-	{
-		if ((acodec & in_codec & HB_ACODEC_AC3))
-		{
-			return acodec & (in_codec | HB_ACODEC_PASS_FLAG);
-		}
-		else if (acodec & HB_ACODEC_AC3)
-		{
-			return HB_ACODEC_AC3;
-		}
-		else if (acodec & HB_ACODEC_LAME)
-		{
-			return HB_ACODEC_LAME;
-		}
-		else if (acodec & HB_ACODEC_FAAC)
-		{
-			return HB_ACODEC_FAAC;
-		}
-		else
-		{
-			return HB_ACODEC_FAAC;
-		}
-	}
-	else
-	{
-		if ((acodec & in_codec & HB_ACODEC_PASS_MASK))
-		{
-			return acodec & (in_codec | HB_ACODEC_PASS_FLAG);
-		}
-		else if (acodec & HB_ACODEC_AC3)
-		{
-			return HB_ACODEC_AC3;
-		}
-		else if (acodec & HB_ACODEC_VORBIS)
-		{
-			return HB_ACODEC_VORBIS;
-		}
-		else if (acodec & HB_ACODEC_LAME)
-		{
-			return HB_ACODEC_LAME;
-		}
-		else if (acodec & HB_ACODEC_FAAC)
-		{
-			return HB_ACODEC_FAAC;
-		}
-		else
-		{
-			return HB_ACODEC_LAME;
-		}
-	}
-}
-
 gboolean
-ghb_validate_audio(signal_user_data_t *ud)
+ghb_validate_audio(GValue *settings)
 {
 	hb_list_t  * list;
 	hb_title_t * title;
@@ -4157,15 +4444,15 @@ ghb_validate_audio(signal_user_data_t *ud)
 
 	gint titleindex;
 
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	titleindex = ghb_settings_combo_int(settings, "title");
     title = hb_list_item( list, titleindex );
 	if (title == NULL) return FALSE;
-	gint mux = ghb_settings_combo_int(ud->settings, "FileFormat");
+	gint mux = ghb_settings_combo_int(settings, "FileFormat");
 
 	const GValue *audio_list;
 	gint count, ii;
 
-	audio_list = ghb_settings_get_value(ud->settings, "audio_list");
+	audio_list = ghb_settings_get_value(settings, "audio_list");
 	count = ghb_array_len(audio_list);
 	for (ii = 0; ii < count; ii++)
 	{
@@ -4175,7 +4462,7 @@ ghb_validate_audio(signal_user_data_t *ud)
 		asettings = ghb_array_get_nth(audio_list, ii);
 		gint track = ghb_settings_combo_int(asettings, "AudioTrack");
 		gint codec = ghb_settings_combo_int(asettings, "AudioEncoder");
-		if (codec == HB_ACODEC_ANY)
+		if (codec == HB_ACODEC_AUTO_PASS)
 			continue;
 
         aconfig = (hb_audio_config_t *) hb_list_audio_config_item(
@@ -4196,7 +4483,7 @@ ghb_validate_audio(signal_user_data_t *ud)
 			}
 			g_free(message);
 			if ((codec & HB_ACODEC_AC3) ||
-				aconfig->in.codec == HB_ACODEC_DCA)
+				(aconfig->in.codec & HB_ACODEC_MASK) == HB_ACODEC_DCA)
 			{
 				codec = HB_ACODEC_AC3;
 			}
@@ -4221,11 +4508,6 @@ ghb_validate_audio(signal_user_data_t *ud)
 			{
 				a_unsup = "Vorbis";
 				codec = HB_ACODEC_FAAC;
-			}
-			if (codec == HB_ACODEC_DCA)
-			{
-				a_unsup = "DTS";
-				codec = HB_ACODEC_AC3;
 			}
 		}
 		if (a_unsup)
@@ -4321,7 +4603,8 @@ ghb_validate_vquality(GValue *settings)
 				max = 30;
 			} break;
 
-			case HB_VCODEC_FFMPEG:
+			case HB_VCODEC_FFMPEG_MPEG2:
+			case HB_VCODEC_FFMPEG_MPEG4:
 			{
 				min = 1;
 				max = 8;
@@ -4346,8 +4629,7 @@ ghb_validate_vquality(GValue *settings)
 						"Lossless h.264 is not well supported by\n"
 						"many players and editors.\n\n"
                         "It will produce enormous output files.\n\n"
-						"Are you sure you wish to use this setting?",
-						(gint)vquality, min, max);
+						"Are you sure you wish to use this setting?");
 			if (!ghb_message_dialog(GTK_MESSAGE_QUESTION, message, 
 									"Cancel", "Continue"))
 			{
@@ -4381,7 +4663,7 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 	hb_list_t  * list;
 	hb_title_t * title;
 	hb_job_t   * job;
-	static gchar *x264opts;
+	static gchar *advanced_opts;
 	gint sub_id = 0;
 	gboolean tweaks = FALSE;
 	gchar *detel_str = NULL;
@@ -4432,6 +4714,7 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 		gint start, end;
 		gint num_chapters = hb_list_count(title->list_chapter);
 		gint duration = title->duration / 90000;
+		job->chapter_markers = FALSE;
 		job->chapter_start = 1;
 		job->chapter_end = num_chapters;
 
@@ -4445,8 +4728,6 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 		}
 		if (ghb_settings_combo_int(js, "PtoPType") == 1)
 		{
-			job->chapter_start = 1;
-			job->chapter_end = num_chapters;
 			start = ghb_settings_get_int(js, "start_point");
 			end = ghb_settings_get_int(js, "end_point");
 			job->pts_to_start = (int64_t)MIN(duration-1, start) * 90000;
@@ -4455,8 +4736,6 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 		}
 		if (ghb_settings_combo_int(js, "PtoPType") == 2)
 		{
-			job->chapter_start = 1;
-			job->chapter_end = num_chapters;
 			start = ghb_settings_get_int(js, "start_point");
 			end = ghb_settings_get_int(js, "end_point");
 			gint64 max_frames;
@@ -4465,7 +4744,10 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 			job->frame_to_stop = (int64_t)MAX(start, end-1) - 
 								 job->frame_to_start;
 		}
-		job->chapter_markers = ghb_settings_get_boolean(js, "ChapterMarkers");
+		if (job->chapter_start != job->chapter_end)
+		{
+			job->chapter_markers = ghb_settings_get_boolean(js, "ChapterMarkers");
+		}
 		if (job->chapter_start == job->chapter_end)
 			job->chapter_markers = 0;
 		if ( job->chapter_markers )
@@ -4602,7 +4884,7 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 	if ((job->mux == HB_MUX_MP4 ) && (job->vcodec == HB_VCODEC_THEORA))
 	{
 		// mp4/theora combination is not supported.
-		job->vcodec = HB_VCODEC_FFMPEG;
+		job->vcodec = HB_VCODEC_FFMPEG_MPEG4;
 	}
 	if ((job->vcodec == HB_VCODEC_X264) && (job->mux == HB_MUX_MP4))
 	{
@@ -4626,18 +4908,18 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 	{
 		job->vrate = title->rate;
 		job->vrate_base = title->rate_base;
-		job->cfr = 0;
 	}
 	else
 	{
 		job->vrate = 27000000;
 		job->vrate_base = vrate;
-		gboolean pfr = ghb_settings_get_boolean(js, "VideoFrameratePFR");
-		if (pfr)
-			job->cfr = 2;
-		else
-			job->cfr = 1;
 	}
+	if (ghb_settings_get_boolean(js, "VideoFrameratePFR"))
+		job->cfr = 2;
+	else if (ghb_settings_get_boolean(js, "VideoFramerateCFR"))
+		job->cfr = 1;
+	else
+		job->cfr = 0;
 
 	const GValue *audio_list;
 	gint count, ii;
@@ -4650,18 +4932,36 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 		GValue *asettings;
 	    hb_audio_config_t audio;
 	    hb_audio_config_t *aconfig;
-		gint acodec;
+		gint acodec, fallback;
 
 		hb_audio_config_init(&audio);
 		asettings = ghb_array_get_nth(audio_list, ii);
 		audio.in.track = ghb_settings_get_int(asettings, "AudioTrack");
 		audio.out.track = tcount;
 
+		char * aname = ghb_settings_get_string(asettings, "AudioTrackName");
+		if (aname && *aname)
+		{
+			// This leaks, but there is no easy way to clean up 
+			// presently
+			audio.out.name = aname;
+		}
+		else
+		{
+			g_free(aname);
+		}
+
         aconfig = (hb_audio_config_t *) hb_list_audio_config_item(
 									title->list_audio, audio.in.track );
 
 		acodec = ghb_settings_combo_int(asettings, "AudioEncoder");
-		audio.out.codec = ghb_select_audio_codec(js, aconfig, acodec);
+
+		fallback = ghb_settings_combo_int(js, "AudioEncoderFallback");
+		gint copy_mask = ghb_get_copy_mask(js);
+		audio.out.codec = ghb_select_audio_codec(job->mux, aconfig, acodec, fallback, copy_mask);
+
+		audio.out.gain = 
+			ghb_settings_get_double(asettings, "AudioTrackGain");
 
         audio.out.dynamic_range_compression = 
 			ghb_settings_get_double(asettings, "AudioTrackDRCSlider");
@@ -4679,33 +4979,33 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 			// Make sure the mixdown is valid and pick a new one if not.
 			audio.out.mixdown = ghb_get_best_mix(aconfig, audio.out.codec, 
 													audio.out.mixdown);
-			audio.out.bitrate = 
-				ghb_settings_combo_int(asettings, "AudioBitrate");
 			gint srate = ghb_settings_combo_int(asettings, "AudioSamplerate");
 			if (srate == 0)	// 0 is same as source
 				audio.out.samplerate = aconfig->in.samplerate;
 			else
 				audio.out.samplerate = srate;
+			double quality = ghb_settings_get_double(asettings, "AudioTrackQuality");
+			if (ghb_settings_get_boolean(asettings, "AudioTrackQualityEnable") &&
+				quality != HB_INVALID_AUDIO_QUALITY)
+			{
+				audio.out.quality = quality;
+				audio.out.bitrate = -1;
+			}
+			else
+			{
+				audio.out.quality = HB_INVALID_AUDIO_QUALITY;
+				audio.out.bitrate = 
+					ghb_settings_combo_int(asettings, "AudioBitrate");
 
-			audio.out.bitrate = hb_get_best_audio_bitrate(
-				audio.out.codec, audio.out.bitrate, 
-				audio.out.samplerate, audio.out.mixdown);
+				audio.out.bitrate = hb_get_best_audio_bitrate(
+					audio.out.codec, audio.out.bitrate, 
+					audio.out.samplerate, audio.out.mixdown);
+			}
 		}
 
 		// Add it to the jobs audio list
         hb_audio_add( job, &audio );
 		tcount++;
-	}
-	// I was tempted to move this up with the reset of the video quality
-	// settings, but I suspect the settings above need to be made
-	// first in order for hb_calc_bitrate to be accurate.
-	if (ghb_settings_get_boolean(js, "vquality_type_target"))
-	{
-		gint size;
-		
-		size = ghb_settings_get_int(js, "VideoTargetSize");
-        job->vbitrate = hb_calc_bitrate( job, size );
-		job->vquality = -1.0;
 	}
 
 	dest_str = ghb_settings_get_string(js, "destination");
@@ -4807,17 +5107,17 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 		}
 	}
 
-	// TODO: libhb holds onto a reference to the x264opts and is not
+	// TODO: libhb holds onto a reference to the advanced_opts and is not
 	// finished with it until encoding the job is done.  But I can't
 	// find a way to get at the job before it is removed in order to
 	// free up the memory I am allocating here.
 	// The short story is THIS LEAKS.
-	x264opts = ghb_build_x264opts_string(js);
+	advanced_opts = ghb_build_advanced_opts_string(js);
 	
-	if( *x264opts == '\0' )
+	if( advanced_opts && *advanced_opts == '\0' )
 	{
-		g_free(x264opts);
-		x264opts = NULL;
+		g_free(advanced_opts);
+		advanced_opts = NULL;
 	}
 
 	if (job->indepth_scan == 1)
@@ -4830,7 +5130,7 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 		 */
 		job->pass = -1;
 		job->indepth_scan = 1;
-		job->x264opts = NULL;
+		job->advanced_opts = NULL;
 
 		/*
 		 * Add the pre-scan job
@@ -4852,48 +5152,60 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 
 		/*
 		 * If turbo options have been selected then append them
-		 * to the x264opts now (size includes one ':' and the '\0')
+		 * to the advanced_opts now (size includes one ':' and the '\0')
 		 */
 		if( ghb_settings_get_boolean(js, "VideoTurboTwoPass") )
 		{
-			gchar *tmp_x264opts;
+			gchar *tmp_advanced_opts;
 			gchar *extra_opts;
-			gint badapt;
 
-			badapt = ghb_lookup_badapt(x264opts);
-			if (badapt == 2)
+			if (job->vcodec == HB_VCODEC_X264)
 			{
-				extra_opts = g_strdup_printf("%s", turbo_opts);
+				gint badapt;
+
+				badapt = ghb_lookup_badapt(advanced_opts);
+				if (badapt == 2)
+				{
+					extra_opts = g_strdup_printf("%s", turbo_x264_opts);
+				}
+				else
+				{
+					extra_opts = g_strdup_printf("%s:weightb=0", turbo_x264_opts);
+				}
+			}
+			else if (job->vcodec == HB_VCODEC_FFMPEG_MPEG4)
+			{
+				extra_opts = g_strdup_printf("%s", turbo_lavc_opts);
 			}
 			else
 			{
-				extra_opts = g_strdup_printf("%s:weightb=0", turbo_opts);
+				extra_opts = g_strdup("");
 			}
-	
-			if ( x264opts )
+
+			if ( advanced_opts )
 			{
-				tmp_x264opts = g_strdup_printf("%s:%s", x264opts, extra_opts);
+				tmp_advanced_opts = g_strdup_printf("%s:%s", advanced_opts, extra_opts);
 			} 
 			else 
 			{
 				/*
-				 * No x264opts to modify, but apply the turbo options
+				 * No advanced_opts to modify, but apply the turbo options
 				 * anyway as they may be modifying defaults
 				 */
-				tmp_x264opts = g_strdup_printf("%s", extra_opts);
+				tmp_advanced_opts = g_strdup_printf("%s", extra_opts);
 			}
 			g_free(extra_opts);
 
-			job->x264opts = tmp_x264opts;
+			job->advanced_opts = tmp_advanced_opts;
 		}
 		else
 		{
-			job->x264opts = x264opts;
+			job->advanced_opts = advanced_opts;
 		}
 		job->sequence_id = (unique_id & 0xFFFFFF) | (sub_id++ << 24);
 		hb_add( h, job );
-		//if (job->x264opts != NULL)
-		//	g_free(job->x264opts);
+		//if (job->advanced_opts != NULL)
+		//	g_free(job->advanced_opts);
 
 		job->pass = 2;
 		/*
@@ -4903,21 +5215,21 @@ add_job(hb_handle_t *h, GValue *js, gint unique_id, gint titleindex)
 		 * attribute of the job).
 		 */
 		job->indepth_scan = 0;
-		job->x264opts = x264opts;
+		job->advanced_opts = advanced_opts;
 		job->sequence_id = (unique_id & 0xFFFFFF) | (sub_id++ << 24);
 		hb_add( h, job );
-		//if (job->x264opts != NULL)
-		//	g_free(job->x264opts);
+		//if (job->advanced_opts != NULL)
+		//	g_free(job->advanced_opts);
 	}
 	else
 	{
-		job->x264opts = x264opts;
+		job->advanced_opts = advanced_opts;
 		job->indepth_scan = 0;
 		job->pass = 0;
 		job->sequence_id = (unique_id & 0xFFFFFF) | (sub_id++ << 24);
 		hb_add( h, job );
-		//if (job->x264opts != NULL)
-		//	g_free(job->x264opts);
+		//if (job->advanced_opts != NULL)
+		//	g_free(job->advanced_opts);
 	}
 
 	// clean up audio list
@@ -5241,7 +5553,7 @@ ghb_get_preview_image(
 		if (dstHeight > s_h * factor / 100)
 		{
 			dstHeight = s_h * factor / 100;
-			dstWidth = dstWidth * dstHeight / orig_h;
+			dstWidth = orig_w * dstHeight / orig_h;
 		}
 		xscale *= (gdouble)dstWidth / orig_w;
 		yscale *= (gdouble)dstHeight / orig_h;

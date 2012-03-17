@@ -1,43 +1,19 @@
 #!/usr/bin/make -f
 # -*- makefile -*-
 
-# Uncomment this to turn on verbose mode.
-#export DH_VERBOSE=1
-
-include /usr/share/quilt/quilt.make
-
-DEB_HOST_GNU_TYPE   ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
-DEB_BUILD_GNU_TYPE  ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
-
-DEBIAN_ARCH = $(shell dpkg-architecture -qDEB_BUILD_ARCH)
-
-NCPUS := $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
-
-ifeq ($(NCPUS),-1)
-	NCPUS:=1
-endif
-
-ifeq ($(NCPUS),0)
-	NCPUS:=1
-endif
-
-ifneq ($(DEB_HOST_GNU_TYPE),$(DEB_BUILD_GNU_TYPE))
-	CROSS= --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE)
-else
-	CROSS= $(DEB_BUILD_GNU_TYPE)
-endif
-
 CC:=ccache $(CC)
 CXX:=ccache $(CXX)
 
-configure: configure-stamp
-configure-stamp: debian/stamp-patched
-	dh_testdir
+%:
+	dh $@ --parallel --with quilt --builddirectory=build
 
-	cp make/variant/freebsd.defs make/variant/kfreebsd.defs
+override_dh_auto_configure:
+	cp make/variant/linux.defs make/variant/kfreebsd.defs
+	cp debian/A01-gcc4.6.patch contrib/mpeg2dec
 
-	./configure --gcc=/usr/lib/ccache/gcc CXX="$(CXX)" CFLAGS="$(CFLAGS)" \
-	--build build --prefix=/usr
+	./configure --prefix=/usr --build build \
+	--gcc=/usr/lib/ccache/gcc \
+	CC="$(CC)" CXX="$(CXX)"
 
 #	perl -i -pe 's,rev0,rev3506,' build/libhb/project.h
 #	perl -i -pe 's,rev0,rev3506,' build/GNUmakefile
@@ -45,58 +21,9 @@ configure-stamp: debian/stamp-patched
 
 #	exit 1
 
-	touch $@
-
-build: build-stamp
-build-stamp: configure-stamp
-	dh_testdir
-
-	cd build && $(MAKE) -j $(NCPUS)
-
-	touch $@
-
-clean: unpatch
-	dh_testdir
-	dh_testroot
-	rm -f build-stamp configure-stamp
-
-	rm -rf build
-
-	dh_clean download/*tar* make/variant/kfreebsd.defs
-
-install: build
-	dh_testdir
-	dh_testroot
-	dh_prep
-	dh_installdirs
-
-	cd build && $(MAKE) install PREFIX/=$(CURDIR)/debian/tmp/usr/ \
-	PREFIX=$(CURDIR)/debian/tmp/usr
-
-	find debian/tmp -name icon-theme.cache | xargs -r rm
-
-	dh_install --fail-missing
-
-# Build architecture-independent files here.
-binary-indep: install
-# We have nothing to do by default.
-
-# Build architecture-dependent files here.
-binary-arch: install
-	dh_testdir
-	dh_testroot
-	dh_installchangelogs 
-	dh_installdocs
-	dh_icons -phandbrake-gtk
-	dh_link
-	dh_strip
-	dh_compress
-	dh_fixperms
-	dh_installdeb
-	dh_shlibdeps
-	dh_gencontrol
-	dh_md5sums
+override_dh_builddeb:
 	dh_builddeb -- -Zbzip2
 
-binary: binary-indep binary-arch
-.PHONY: build clean binary-indep binary-arch binary install 
+override_dh_clean:
+	dh_clean download/*tar* make/variant/kfreebsd.defs \
+	contrib/mpeg2dec/A01-gcc4.6.patch	

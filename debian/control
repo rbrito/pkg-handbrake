@@ -4,17 +4,17 @@ Priority: extra
 Maintainer: Christian Marillat <marillat@debian.org>
 Bugs: mailto:marillat@debian.org
 Homepage: http://www.handbrake.fr/
-Standards-Version: 3.9.1
-Build-Depends: debhelper (>= 7), libhal-storage-dev, wget, quilt, libfaac-dev,
- libfaad-dev (>= 2.7), libxvidcore4-dev, libtheora-dev, libmp3lame-dev, python,
- automake, intltool, libtool, yasm [amd64 i386], libbz2-dev, ccache,
- libmkv-dev (>= 0.6.4), libsamplerate0-dev, libvorbis-dev, libnotify-dev,
- libwebkit-dev, libx264-dev (>= 1:0.svn20110115), libgstreamer0.10-dev,
- libgstreamer-plugins-base0.10-dev, libass-dev,
- libgudev-1.0-dev [!hurd-i386 !kfreebsd-i386 !kfreebsd-amd64]
+Standards-Version: 3.9.3
+Build-Depends: debhelper (>= 9), wget, quilt, libfaac-dev, python,
+ libxvidcore-dev, libtheora-dev, libmp3lame-dev, automake, intltool,
+ libtool, yasm, libbz2-dev, ccache, libmkv-dev (>= 0.6.5.1), libass-dev,
+ libsamplerate0-dev, libvorbis-dev, libnotify-dev (>= 0.7.3),
+ libwebkit-dev, libgstreamer0.10-dev, libgstreamer-plugins-base0.10-dev,
+ libgudev-1.0-dev [linux-any], libmp4v2-dev (>= 2:1.9.1-0.7),
+ libx264-dev (>= 3:0.122.2184+git5c85e0a)
 
 Package: handbrake-cli
-Architecture: amd64 i386 kfreebsd-i386 powerpc
+Architecture: amd64 i386 kfreebsd-i386 kfreebsd-amd64 powerpc
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: versatile DVD ripper and video transcoder (command line)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
@@ -24,7 +24,7 @@ Description: versatile DVD ripper and video transcoder (command line)
  variant, HandBrakeCLI
 
 Package: handbrake-gtk
-Architecture: amd64 i386 kfreebsd-i386 powerpc
+Architecture: amd64 i386 kfreebsd-i386 kfreebsd-amd64 powerpc
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Recommends: gstreamer0.10-ffmpeg, gstreamer0.10-x
 Description: versatile DVD ripper and video transcoder (GTK GUI)

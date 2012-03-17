@@ -10,6 +10,7 @@
 #include <ogg/ogg.h>
 
 #include "hb.h"
+#include "lang.h"
 
 /* Scale factor to apply to timecodes to convert from HandBrake's
  * 1/90000s to nanoseconds as expected by libmkv */
@@ -34,6 +35,19 @@ struct hb_mux_data_s
     int       sub_format;
 };
 
+static uint8_t * create_flac_header( uint8_t *data, int size )
+{
+    uint8_t * out;
+    uint8_t header[8] = {
+        0x66, 0x4C, 0x61, 0x43, 0x80, 0x00, 0x00, 0x22
+    };
+
+    out = malloc( size + 8 );
+    memcpy( out, header, 8 );
+    memcpy( out + 8, data, size );
+    return out;
+}
+
 /**********************************************************************
  * MKVInit
  **********************************************************************
@@ -48,9 +62,11 @@ static int MKVInit( hb_mux_object_t * m )
 
     uint8_t         *avcC = NULL;
     uint8_t         default_track_flag = 1;
+    uint8_t         need_fonts = 0;
     int             avcC_len, i, j;
     ogg_packet      *ogg_headers[3];
-    mk_TrackConfig *track;
+    mk_TrackConfig  *track;
+    iso639_lang_t   *lang;
 
     track = calloc(1, sizeof(mk_TrackConfig));
 
@@ -103,10 +119,19 @@ static int MKVInit( hb_mux_object_t * m )
             if (job->areBframes)
                 track->minCache = 1;
             break;
-        case HB_VCODEC_FFMPEG:
+        case HB_VCODEC_FFMPEG_MPEG4:
             track->codecID = MK_VCODEC_MP4ASP;
             track->codecPrivate = job->config.mpeg4.bytes;
             track->codecPrivateSize = job->config.mpeg4.length;
+            if (job->areBframes)
+                track->minCache = 1;
+            break;
+        case HB_VCODEC_FFMPEG_MPEG2:
+            track->codecID = MK_VCODEC_MPEG2;
+            track->codecPrivate = job->config.mpeg4.bytes;
+            track->codecPrivateSize = job->config.mpeg4.length;
+            if (job->areBframes)
+                track->minCache = 1;
             break;
         case HB_VCODEC_THEORA:
             {
@@ -148,8 +173,19 @@ static int MKVInit( hb_mux_object_t * m )
         track->extra.video.displayWidth = job->width;
     }
 
-
-    track->defaultDuration = (int64_t)(((float)job->vrate_base / (float)job->vrate) * 1000000000);
+    int vrate_base, vrate;
+    if( job->pass == 2 )
+    {
+        hb_interjob_t * interjob = hb_interjob_get( job->h );
+        vrate_base = interjob->vrate_base;
+        vrate = interjob->vrate;
+    }
+    else
+    {
+        vrate_base = job->vrate_base;
+        vrate = job->vrate;
+    }
+    track->defaultDuration = (int64_t)(((float)vrate_base / (float)vrate) * 1000000000);
 
     mux_data->track = mk_createTrack(m->file, track);
 
@@ -164,21 +200,21 @@ static int MKVInit( hb_mux_object_t * m )
 
         mux_data->codec = audio->config.out.codec;
 
-        switch (audio->config.out.codec)
+        switch (audio->config.out.codec & HB_ACODEC_MASK)
         {
             case HB_ACODEC_DCA:
-            case HB_ACODEC_DCA_PASS:
+            case HB_ACODEC_DCA_HD:
                 track->codecPrivate = NULL;
                 track->codecPrivateSize = 0;
                 track->codecID = MK_ACODEC_DTS;
                 break;
             case HB_ACODEC_AC3:
-            case HB_ACODEC_AC3_PASS:
                 track->codecPrivate = NULL;
                 track->codecPrivateSize = 0;
                 track->codecID = MK_ACODEC_AC3;
                 break;
             case HB_ACODEC_LAME:
+            case HB_ACODEC_MP3:
                 track->codecPrivate = NULL;
                 track->codecPrivateSize = 0;
                 track->codecID = MK_ACODEC_MP3;
@@ -205,10 +241,22 @@ static int MKVInit( hb_mux_object_t * m )
                     track->codecPrivateSize = cp_size;
                 }
                 break;
+            case HB_ACODEC_FFFLAC:
+                if( audio->priv.config.extradata.bytes )
+                {
+                    track->codecPrivate = create_flac_header( 
+                            audio->priv.config.extradata.bytes,
+                            audio->priv.config.extradata.length );
+                    track->codecPrivateSize = audio->priv.config.extradata.length + 8;
+                }
+                track->codecID = MK_ACODEC_FLAC;
+                break;
             case HB_ACODEC_FAAC:
+            case HB_ACODEC_FFAAC:
             case HB_ACODEC_CA_AAC:
-                track->codecPrivate = audio->priv.config.aac.bytes;
-                track->codecPrivateSize = audio->priv.config.aac.length;
+            case HB_ACODEC_CA_HAAC:
+                track->codecPrivate = audio->priv.config.extradata.bytes;
+                track->codecPrivateSize = audio->priv.config.extradata.length;
                 track->codecID = MK_ACODEC_AAC;
                 break;
             default:
@@ -228,10 +276,11 @@ static int MKVInit( hb_mux_object_t * m )
         }
         track->flagEnabled = 1;
         track->trackType = MK_TRACK_AUDIO;
-        track->language = audio->config.lang.iso639_2;
+        // MKV lang codes should be ISO-639-2/B
+        lang =  lang_for_code2( audio->config.lang.iso639_2 );
+        track->language = lang->iso639_2b ? lang->iso639_2b : lang->iso639_2;
         track->extra.audio.samplingFreq = (float)audio->config.out.samplerate;
-        if (audio->config.out.codec == HB_ACODEC_AC3_PASS ||
-            audio->config.out.codec == HB_ACODEC_DCA_PASS)
+        if (audio->config.out.codec & HB_ACODEC_PASS_FLAG)
         {
             track->extra.audio.channels = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT(audio->config.in.channel_layout);
         }
@@ -241,7 +290,8 @@ static int MKVInit( hb_mux_object_t * m )
         }
 //        track->defaultDuration = job->arate * 1000;
         mux_data->track = mk_createTrack(m->file, track);
-        if (audio->config.out.codec == HB_ACODEC_VORBIS && track->codecPrivate != NULL)
+        if ( audio->config.out.codec == HB_ACODEC_VORBIS ||
+             audio->config.out.codec == HB_ACODEC_FFFLAC )
           free(track->codecPrivate);
     }
 
@@ -289,7 +339,15 @@ static int MKVInit( hb_mux_object_t * m )
                 track->codecPrivateSize = len + 1;
                 break;
             case TEXTSUB:
-                track->codecID = MK_SUBTITLE_UTF8;
+                if (subtitle->source == SSASUB)
+                {
+                    track->codecID = MK_SUBTITLE_SSA;
+                    need_fonts = 1;
+                    track->codecPrivate = subtitle->extradata;
+                    track->codecPrivateSize = subtitle->extradata_size;
+                }
+                else
+                    track->codecID = MK_SUBTITLE_UTF8;
                 break;
             default:
                 continue;
@@ -303,12 +361,35 @@ static int MKVInit( hb_mux_object_t * m )
         subtitle->mux_data = mux_data;
         mux_data->subtitle = 1;
         mux_data->sub_format = subtitle->format;
-        
+
         track->flagEnabled = 1;
         track->trackType = MK_TRACK_SUBTITLE;
-        track->language = subtitle->iso639_2;
+        // MKV lang codes should be ISO-639-2/B
+        lang =  lang_for_code2( subtitle->iso639_2 );
+        track->language = lang->iso639_2b ? lang->iso639_2b : lang->iso639_2;
 
         mux_data->track = mk_createTrack(m->file, track);
+    }
+
+    if (need_fonts)
+    {
+        hb_list_t * list_attachment = job->title->list_attachment;
+        int i;
+        for ( i = 0; i < hb_list_count(list_attachment); i++ )
+        {
+            hb_attachment_t * attachment = hb_list_item( list_attachment, i );
+
+            if ( attachment->type == FONT_TTF_ATTACH )
+            {
+                mk_createAttachment(
+                    m->file,
+                    attachment->name,
+                    NULL,
+                    "application/x-truetype-font",
+                    attachment->data,
+                    attachment->size);
+            }
+        }
     }
 
     if( mk_writeHeader( m->file, "HandBrake " HB_PROJECT_VERSION) < 0 )
@@ -395,16 +476,8 @@ static int MKVMux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
         }
 
         duration = buf->stop * TIMECODE_SCALE - timecode;
-        if( mux_data->sub_format == TEXTSUB )
-        {
-            mk_addFrameData(m->file, mux_data->track, buf->data, buf->size);
-            mk_setFrameFlags(m->file, mux_data->track, timecode, 1, duration);
-        }
-        else
-        {
-            mk_addFrameData(m->file, mux_data->track, buf->data, buf->size);
-            mk_setFrameFlags(m->file, mux_data->track, timecode, 1, duration);
-        }
+        mk_addFrameData(m->file, mux_data->track, buf->data, buf->size);
+        mk_setFrameFlags(m->file, mux_data->track, timecode, 1, duration);
         mk_flushFrame(m->file, mux_data->track);
         hb_buffer_close( &buf );
         return 0;
@@ -437,7 +510,8 @@ static int MKVMux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
     }
     mk_addFrameData(m->file, mux_data->track, buf->data, buf->size);
     mk_setFrameFlags(m->file, mux_data->track, timecode,
-                     ((job->vcodec == HB_VCODEC_X264 && 
+                     (((job->vcodec == HB_VCODEC_X264 || 
+                        (job->vcodec & HB_VCODEC_FFMPEG_MASK)) && 
                        mux_data == job->mux_data) ? 
                             (buf->frametype == HB_FRAME_IDR) : 
                             ((buf->frametype & HB_FRAME_KEY) != 0)), 0 );
@@ -493,6 +567,37 @@ static int MKVEnd( hb_mux_object_t * m )
         mk_createTagSimple( m->file, "DATE_RELEASED", md->release_date );
         // mk_createTagSimple( m->file, "", md->album );
         mk_createTagSimple( m->file, MK_TAG_GENRE, md->genre );
+    }
+
+    // Update and track private data that can change during
+    // encode.
+    int i;
+    for( i = 0; i < hb_list_count( title->list_audio ); i++ )
+    {
+        mk_Track  * track;
+        hb_audio_t    * audio;
+
+        audio = hb_list_item( title->list_audio, i );
+        track = audio->priv.mux_data->track;
+
+        switch (audio->config.out.codec & HB_ACODEC_MASK)
+        {
+            case HB_ACODEC_FFFLAC:
+                if( audio->priv.config.extradata.bytes )
+                {
+                    uint8_t *header;
+                    header = create_flac_header( 
+                            audio->priv.config.extradata.bytes,
+                            audio->priv.config.extradata.length );
+                    mk_updateTrackPrivateData( m->file, track,
+                        header,
+                        audio->priv.config.extradata.length + 8 );
+                    free( header );
+                }
+                break;
+            default:
+                break;
+        }
     }
 
     if( mk_close(m->file) < 0 )
