@@ -27,7 +27,7 @@ Upstream Author: See AUTHORS file for details
     Van Jacobson <vanj.hb@gmail.com> (van)
 
 Copyright:
-  
+
     Copyright © 2007-2008 by the HandBrake team (See AUTHORS)
 
 License:
@@ -174,7 +174,7 @@ The debian/libfaad directory contains header from the libfaad-dev package.
  | Copyright:   2002-2005   M. Bakker
  |      2003-2005   Ahead Software AG
  |      2003-2005   Nero AG
- | 
+ |
  | Other Authors:   John Edwards
  |      Bill May    <wmay@cisco.com>
  |      Quinnware
@@ -183,22 +183,22 @@ The debian/libfaad directory contains header from the libfaad-dev package.
  |      2003      Bill May
  |      1997-2002   Quinnware
  |      2004      VideoLAN
- | 
+ |
  | License Declaration:
- | 
+ |
  | The GPL may be found in the file /usr/share/common-licenses/GPL-2.
- | 
+ |
  | The upstream source has the follwing license declaration:
  | ---
  | This program is free software; you can redistribute it and/or modify it under
  | the terms of the GNU General Public License as published by the Free Software
  | Foundation; either version 2 of the License, or (at your option) any later
  | version.
- | 
+ |
  | This program is distributed in the hope that it will be useful, but WITHOUT ANY
  | WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
  | PARTICULAR PURPOSE.  See the GNU General Public License for more details.
- | 
+ |
  | You should have received a copy of the GNU General Public License along with
  | this program; if not, write to the Free Software Foundation, Inc., 51
  | Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
@@ -207,20 +207,20 @@ The debian/liba52 directory contains a copy of the header file from the
 liba52-0.7.4-dev package.
 
  | License:
- | 
+ |
  |  Copyright (C) 2000-2002 Michel Lespinasse <walken@zoy.org>
  |  Copyright (C) 1999-2000 Aaron Holtzman <aholtzma@ess.engr.uvic.ca>
- | 
+ |
  |  This program is free software; you can redistribute it and/or modify
  |  it under the terms of the GNU General Public License as published by
  |  the Free Software Foundation; either version 2 of the License, or
  |  (at your option) any later version.
- | 
+ |
  |  This program is distributed in the hope that it will be useful,
  |  but WITHOUT ANY WARRANTY; without even the implied warranty of
  |  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  |  GNU General Public License for more details.
- | 
+ |
  |  You should have received a copy of the GNU General Public License
  |  along with this program; if not, write to the Free Software
  |  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA

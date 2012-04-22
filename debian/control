@@ -5,17 +5,38 @@ Maintainer: Christian Marillat <marillat@debian.org>
 Bugs: mailto:marillat@debian.org
 Homepage: http://www.handbrake.fr/
 Standards-Version: 3.9.3
-Build-Depends: debhelper (>= 9), wget, quilt, libfaac-dev, python,
- libxvidcore-dev, libtheora-dev, libmp3lame-dev, automake, intltool,
- libtool, yasm, libbz2-dev, ccache, libmkv-dev (>= 0.6.5.1), libass-dev,
- libsamplerate0-dev, libvorbis-dev, libnotify-dev (>= 0.7.3),
- libwebkit-dev, libgstreamer0.10-dev, libgstreamer-plugins-base0.10-dev,
- libgudev-1.0-dev [linux-any], libmp4v2-dev (>= 2:1.9.1-0.7),
- libx264-dev (>= 3:0.122.2184+git5c85e0a)
+Build-Depends:
+ automake,
+ ccache,
+ debhelper (>= 9),
+ intltool,
+ libass-dev,
+ libbz2-dev,
+ libfaac-dev,
+ libgstreamer-plugins-base0.10-dev,
+ libgstreamer0.10-dev,
+ libgudev-1.0-dev [linux-any],
+ libmkv-dev (>= 0.6.5.1),
+ libmp3lame-dev,
+ libmp4v2-dev (>= 2:1.9.1-0.7),
+ libnotify-dev (>= 0.7.3),
+ libsamplerate0-dev,
+ libtheora-dev,
+ libtool,
+ libvorbis-dev,
+ libwebkit-dev,
+ libx264-dev (>= 3:0.122.2184+git5c85e0a),
+ libxvidcore-dev,
+ python,
+ quilt,
+ wget,
+ yasm
 
 Package: handbrake-cli
-Architecture: amd64 i386 kfreebsd-i386 kfreebsd-amd64 powerpc
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends}
 Description: versatile DVD ripper and video transcoder (command line)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media.  It's particularly useful
@@ -24,9 +45,13 @@ Description: versatile DVD ripper and video transcoder (command line)
  variant, HandBrakeCLI
 
 Package: handbrake-gtk
-Architecture: amd64 i386 kfreebsd-i386 kfreebsd-amd64 powerpc
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Recommends: gstreamer0.10-ffmpeg, gstreamer0.10-x
+Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends}
+Recommends:
+ gstreamer0.10-ffmpeg,
+ gstreamer0.10-x
 Description: versatile DVD ripper and video transcoder (GTK GUI)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media. It's particularly useful
