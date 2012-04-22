@@ -1,3 +1,21 @@
+handbrake (0.9.6-1~1.gbp6e95f7) UNRELEASED; urgency=low
+
+  ** SNAPSHOT build @6e95f75a81a1be4cb8bbad1320722d5f70710dcf **
+
+  * Run a first pass of `wrap-and-sort -s -a -v`.
+  * debian/control: Let the bug reporting to go Debian's BTS.
+  * debian/control: Allow compilation with Debian's libx264.
+  * debian/patches: Refresh them to be cleaner.
+  * debian/control: Loosen the build-dependency on libmp4v2.
+  * debian/rules: Don't allow building in parallel for the moment.
+  * debian/control: Add build-dependency on libdbus-glib-1-dev.
+  * debian/patches: Fix compilation with mp4v2 1.9.1.
+  * Convert the package to format 3.0 (quilt).
+  * debian/patches: Fix initial compilation with dirty deb source dir.
+  * More fixes for initial compilation.
+
+ -- Rogério Brito <rbrito@ime.usp.br>  Sun, 22 Apr 2012 07:22:31 -0300
+
 handbrake (0.9.6-0.1) unstable; urgency=low
 
   * Rebuild against libx264-122.
