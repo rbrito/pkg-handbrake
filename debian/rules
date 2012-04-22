@@ -8,7 +8,6 @@ CXX:=ccache $(CXX)
 
 override_dh_auto_configure:
 	cp make/variant/linux.defs make/variant/kfreebsd.defs
-	cp debian/A01-gcc4.6.patch contrib/mpeg2dec
 
 	./configure --prefix=/usr --build build \
 	--gcc=/usr/lib/ccache/gcc \
@@ -24,5 +23,6 @@ override_dh_builddeb:
 	dh_builddeb -- -Zbzip2
 
 override_dh_clean:
-	dh_clean download/*tar* make/variant/kfreebsd.defs \
-	contrib/mpeg2dec/A01-gcc4.6.patch	
+	dh_clean \
+		download/*tar* \
+		make/variant/kfreebsd.defs
