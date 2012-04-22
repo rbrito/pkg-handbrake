@@ -242,6 +242,9 @@ static void extract_mpeg2_captions( hb_libmpeg2_t *m )
 
 static void next_tag( hb_libmpeg2_t *m, hb_buffer_t *buf_es )
 {
+    if( m->tags[m->cur_tag].cc_buf == m->last_cc1_buf )
+        m->last_cc1_buf = NULL;
+
     m->cur_tag = ( m->cur_tag + 1 ) & (NTAGS-1);
     if ( m->tags[m->cur_tag].start >= 0 || m->tags[m->cur_tag].cc_buf )
     {
@@ -257,71 +260,54 @@ static void next_tag( hb_libmpeg2_t *m, hb_buffer_t *buf_es )
 }
 
 static hb_buffer_t *hb_copy_frame( hb_job_t *job, int width, int height,
-                                   enum PixelFormat pixfmt,
+                                   int *crop, enum PixelFormat pixfmt,
                                    uint8_t* y, uint8_t *u, uint8_t *v )
 {
-    int dst_w = width, dst_h = height;
+    int dst_w, dst_h;
+    int src_w, src_h;
+
+    src_w = width - (crop[2] + crop[3]);
+    src_h = height - (crop[0] + crop[1]);
     if ( job )
     {
         dst_w = job->title->width;
         dst_h = job->title->height;
     }
-    int dst_wh = dst_w * dst_h;
+    else
+    {
+        dst_w = src_w;
+        dst_h = src_h;
+    }
+
     hb_buffer_t *buf  = hb_video_buffer_init( dst_w, dst_h );
     buf->start = -1;
 
-    if ( dst_w != width || dst_h != height || pixfmt == PIX_FMT_YUV422P )
+    AVPicture in, out, pic_crop;
+
+    in.data[0] = y;
+    in.data[1] = u;
+    in.data[2] = v;
+    in.linesize[0] = width;
+    in.linesize[1] = width>>1;
+    in.linesize[2] = width>>1;
+    avpicture_fill( &out, buf->data, PIX_FMT_YUV420P, dst_w, dst_h );
+
+    av_picture_crop( &pic_crop, &in, pixfmt, crop[0], crop[2] );
+
+    // Source and Dest dimensions may be the same.  There is no speed
+    // cost to using sws_scale to simply copy the data.
+    struct SwsContext *context = hb_sws_get_context( src_w, src_h, pixfmt,
+                                                 dst_w, dst_h, PIX_FMT_YUV420P,
+                                                 SWS_LANCZOS|SWS_ACCURATE_RND);
+    if ( context == NULL )
     {
-        // we're encoding and the frame dimensions don't match the title dimensions -
-        // rescale & matte Y, U, V into our output buf.
-        AVPicture in, out;
-        avpicture_alloc(&in,  pixfmt, width, height );
-        avpicture_alloc(&out, PIX_FMT_YUV420P, dst_w, dst_h );
-
-        int src_wh = width * height;
-        if ( pixfmt == PIX_FMT_YUV422P )
-        {
-            memcpy( in.data[0], y, src_wh );
-            memcpy( in.data[1], u, src_wh >> 1 );
-            memcpy( in.data[2], v, src_wh >> 1 );
-        }
-        else
-        {
-            memcpy( in.data[0], y, src_wh );
-            memcpy( in.data[1], u, src_wh >> 2 );
-            memcpy( in.data[2], v, src_wh >> 2 );
-        }
-        struct SwsContext *context = hb_sws_get_context( width, height, pixfmt,
-                                                     dst_w, dst_h, PIX_FMT_YUV420P,
-                                                     SWS_LANCZOS|SWS_ACCURATE_RND);
-        sws_scale( context, in.data, in.linesize, 0, height, out.data, out.linesize );
-        sws_freeContext( context );
-
-        uint8_t *data = buf->data;
-        memcpy( data, out.data[0], dst_wh );
-        data += dst_wh;
-        // U & V planes are 1/4 the size of Y plane.
-        dst_wh >>= 2;
-        memcpy( data, out.data[1], dst_wh );
-        data += dst_wh;
-        memcpy( data, out.data[2], dst_wh );
-
-        avpicture_free( &out );
-        avpicture_free( &in );
+        hb_buffer_close( &buf );
+        return NULL;
     }
-    else
-    {
-        // we're scanning or the frame dimensions match the title's dimensions
-        // so we can do a straight copy.
-        uint8_t *data = buf->data;
-        memcpy( data, y, dst_wh );
-        data += dst_wh;
-        // U & V planes are 1/4 the size of Y plane.
-        dst_wh >>= 2;
-        memcpy( data, u, dst_wh );
-        data += dst_wh;
-        memcpy( data, v, dst_wh );
-    }
+
+    sws_scale( context, (const uint8_t* const *)pic_crop.data, pic_crop.linesize, 0, src_h, out.data, out.linesize );
+    sws_freeContext( context );
+
     return buf;
 }
 
@@ -383,8 +369,8 @@ static int hb_libmpeg2_decode( hb_libmpeg2_t * m, hb_buffer_t * buf_es,
         {
             if( !( m->width && m->height && m->rate ) )
             {
-                m->width  = m->info->sequence->width;
-                m->height = m->info->sequence->height;
+                m->width  = m->info->sequence->picture_width;
+                m->height = m->info->sequence->picture_height;
                 m->rate   = m->info->sequence->frame_period;
                 if ( m->aspect_ratio <= 0 && m->height &&
                      m->info->sequence->pixel_height )
@@ -430,12 +416,26 @@ static int hb_libmpeg2_decode( hb_libmpeg2_t * m, hb_buffer_t * buf_es,
 
             if( m->got_iframe )
             {
-                buf  = hb_copy_frame( m->job, m->info->sequence->width,
+                int crop[4] = {0};
+                if ( m->info->sequence->picture_width < m->info->sequence->width )
+                {
+                    crop[3] = m->info->sequence->width - m->info->sequence->picture_width;
+                }
+                if ( m->info->sequence->picture_height < m->info->sequence->height )
+                {
+                    crop[1] = m->info->sequence->height - m->info->sequence->picture_height;
+                }
+                buf  = hb_copy_frame( m->job, 
+                                      m->info->sequence->width,
                                       m->info->sequence->height,
+                                      crop,
                                       m->pixfmt,
                                       m->info->display_fbuf->buf[0],
                                       m->info->display_fbuf->buf[1],
                                       m->info->display_fbuf->buf[2] );
+                if ( buf == NULL )
+                    continue;
+
                 buf->sequence = buf_es->sequence;
 
                 hb_buffer_t *cc_buf = NULL;
@@ -671,7 +671,15 @@ static void hb_libmpeg2_close( hb_libmpeg2_t ** _m )
     for ( i = 0; i < NTAGS; ++i )
     {
         if ( m->tags[i].cc_buf )
+        {
+            if ( m->tags[i].cc_buf == m->last_cc1_buf )
+                m->last_cc1_buf = NULL;
             hb_buffer_close( &m->tags[i].cc_buf );
+        }
+    }
+    if ( m->last_cc1_buf )
+    {
+        hb_buffer_close( &m->last_cc1_buf );
     }
 
     free( m );
@@ -782,6 +790,11 @@ static int decmpeg2Work( hb_work_object_t * w, hb_buffer_t ** buf_in,
             if ( pv->libmpeg2->last_cc1_buf )
             {
                 cc_send_to_decoder( pv->libmpeg2, pv->libmpeg2->last_cc1_buf );
+                if ( pv->libmpeg2->tags[pv->libmpeg2->cur_tag].cc_buf == 
+                     pv->libmpeg2->last_cc1_buf )
+                {
+                    pv->libmpeg2->tags[pv->libmpeg2->cur_tag].cc_buf = NULL;
+                }
                 pv->libmpeg2->last_cc1_buf = NULL;
             }
             cc_send_to_decoder( pv->libmpeg2, hb_buffer_init( 0 ) );
@@ -821,11 +834,7 @@ static void decmpeg2Close( hb_work_object_t * w )
     {
         hb_log( "mpeg2 done: %d frames", pv->libmpeg2->nframes );
     }
-    if ( pv->libmpeg2->last_cc1_buf )
-    {
-        hb_buffer_close( &pv->libmpeg2->last_cc1_buf );
-    }
-    hb_list_close( &pv->list );
+    hb_list_empty( &pv->list );
     if ( pv->libmpeg2->list_subtitle )
     {
         hb_list_close( &pv->libmpeg2->list_subtitle );
@@ -848,7 +857,6 @@ static int decmpeg2Info( hb_work_object_t *w, hb_work_info_t *info )
         info->height = m->height;
         info->pixel_aspect_width = m->info->sequence->pixel_width;
         info->pixel_aspect_height = m->info->sequence->pixel_height;
-        info->aspect = m->aspect_ratio;
 
         // if the frame is progressive & NTSC DVD height report it as 23.976 FPS
         // so that scan can autodetect NTSC film
@@ -866,13 +874,22 @@ static int decmpeg2Info( hb_work_object_t *w, hb_work_info_t *info )
     return 0;
 }
 
+static void decmpeg2Flush( hb_work_object_t *w )
+{
+    hb_work_private_t * pv = w->private_data;
+
+    mpeg2_reset( pv->libmpeg2->libmpeg2, 0 );
+    pv->libmpeg2->got_iframe = 0;
+}
+
 hb_work_object_t hb_decmpeg2 =
 {
-    WORK_DECMPEG2,
-    "MPEG-2 decoder (libmpeg2)",
-    decmpeg2Init,
-    decmpeg2Work,
-    decmpeg2Close,
-    decmpeg2Info
+    .id = WORK_DECMPEG2,
+    .name = "MPEG-2 decoder (libmpeg2)",
+    .init = decmpeg2Init,
+    .work = decmpeg2Work,
+    .close = decmpeg2Close,
+    .flush = decmpeg2Flush,
+    .info = decmpeg2Info
 };
 

@@ -20,6 +20,7 @@
 #endif
 
 #include "hb.h"
+#include "lang.h"
 #include "parsecsv.h"
 
 #if defined( __APPLE_CC__ )
@@ -61,17 +62,22 @@ static char * decomb_opt            = 0;
 static int    rotate                = 0;
 static char * rotate_opt            = 0;
 static int    grayscale   = 0;
-static int    vcodec      = HB_VCODEC_FFMPEG;
+static int    vcodec      = HB_VCODEC_FFMPEG_MPEG4;
 static hb_list_t * audios = NULL;
 static hb_audio_config_t * audio = NULL;
 static int    num_audio_tracks = 0;
+static int    allowed_audio_copy = HB_ACODEC_PASS_MASK;
 static char * mixdowns    = NULL;
 static char * dynamic_range_compression = NULL;
+static char * audio_gain  = NULL;
 static char * atracks     = NULL;
 static char * arates      = NULL;
-static char * abitrates   = NULL;
+static char ** abitrates  = NULL;
+static char ** aqualities  = NULL;
+static char ** acompressions  = NULL;
+static char * acodec_fallback = NULL;
 static char * acodecs     = NULL;
-static char * anames      = NULL;
+static char ** anames      = NULL;
 #ifdef __APPLE_CC__
 static int    default_acodec = HB_ACODEC_CA_AAC;
 #else
@@ -91,11 +97,10 @@ static int    subtitle_scan = 0;
 static int    width       = 0;
 static int    height      = 0;
 static int    crop[4]     = { -1,-1,-1,-1 };
-static int    cpu         = 0;
+static int    loose_crop  = -1;
 static int    vrate       = 0;
 static float  vquality    = -1.0;
 static int    vbitrate    = 0;
-static int    size        = 0;
 static int    mux         = 0;
 static int    anamorphic_mode  = 0;
 static int    modulus       = 0;
@@ -109,8 +114,11 @@ static int    chapter_start = 0;
 static int    chapter_end   = 0;
 static int    chapter_markers = 0;
 static char * marker_file   = NULL;
-static char	  *x264opts		= NULL;
-static char	  *x264opts2 	= NULL;
+static char	  *advanced_opts = NULL;
+static char	  *advanced_opts2 = NULL;
+static char       *x264_profile = NULL;
+static char       *x264_preset = NULL;
+static char       *x264_tune = NULL;
 static int	  maxHeight		= 0;
 static int	  maxWidth		= 0;
 static int    turbo_opts_enabled = 0;
@@ -121,7 +129,7 @@ static char * preset_name   = 0;
 static int    cfr           = 0;
 static int    mp4_optimize  = 0;
 static int    ipod_atom     = 0;
-static int    color_matrix  = 0;
+static int    color_matrix_code = 0;
 static int    preview_count = 10;
 static int    store_previews = 0;
 static int    start_at_preview = 0;
@@ -133,7 +141,7 @@ static int64_t stop_at_pts    = 0;
 static int    stop_at_frame = 0;
 static char * stop_at_string = NULL;
 static char * stop_at_token = NULL;
-static uint64_t min_title_duration = 900000LL;
+static uint64_t min_title_duration = 10;
 
 /* Exit cleanly on Ctrl-C */
 static volatile int die = 0;
@@ -150,6 +158,8 @@ static int  HandleEvents( hb_handle_t * h );
 
 static int get_acodec_for_string( char *codec );
 static int is_sample_rate_valid(int rate);
+static void str_vfree( char **strv );
+static char** str_split( char *str, char delem );
 
 #ifdef __APPLE_CC__
 static char* bsd_name_for_path(char *path);
@@ -229,12 +239,6 @@ int main( int argc, char ** argv )
     /* Geeky */
     fprintf( stderr, "%d CPU%s detected\n", hb_get_cpu_count(),
              hb_get_cpu_count( h ) > 1 ? "s" : "" );
-    if( cpu )
-    {
-        fprintf( stderr, "Forcing %d CPU%s\n", cpu,
-                 cpu > 1 ? "s" : "" );
-        hb_set_cpu_count( h, cpu );
-    }
 
     /* Exit ASAP on Ctrl-C */
     signal( SIGINT, SigHandler );
@@ -249,7 +253,7 @@ int main( int argc, char ** argv )
         titleindex = 0;
     }
 
-    hb_scan( h, input, titleindex, preview_count, store_previews, min_title_duration );
+    hb_scan( h, input, titleindex, preview_count, store_previews, min_title_duration * 90000LL );
 
     /* Wait... */
     while( !die )
@@ -353,18 +357,25 @@ int main( int argc, char ** argv )
     }
     if( mixdowns ) free( mixdowns );
     if( dynamic_range_compression ) free( dynamic_range_compression );
+    if( audio_gain ) free( audio_gain );
     if( atracks ) free( atracks );
     if( arates ) free( arates );
-    if( abitrates ) free( abitrates );
+    str_vfree( abitrates );
+    str_vfree( aqualities );
+    str_vfree( acompressions );
     if( acodecs ) free( acodecs );
-    if( anames ) free( anames );
     if (native_language ) free (native_language );
-	if( x264opts ) free (x264opts );
-	if( x264opts2 ) free (x264opts2 );
+	if( advanced_opts ) free (advanced_opts );
+	if( advanced_opts2 ) free (advanced_opts2 );
     if (preset_name) free (preset_name);
     if( stop_at_string ) free( stop_at_string );
     if( start_at_string ) free( start_at_string );
+    free( x264_profile );
+    free( x264_preset );
+    free( x264_tune );
 
+    // write a carriage return to stdout - avoids overlap / line wrapping when stderr is redirected
+    fprintf( stdout, "\n" );
     fprintf( stderr, "HandBrake has exited.\n" );
 
     return 0;
@@ -390,7 +401,7 @@ static void PrintTitleInfo( hb_title_t * title )
     {
         fprintf( stderr, "  + Main Feature\n" );
     }
-    if ( title->type == HB_STREAM_TYPE )
+    if ( title->type == HB_STREAM_TYPE || title->type == HB_FF_STREAM_TYPE )
     {
         fprintf( stderr, "  + stream: %s\n", title->path );
     }
@@ -399,6 +410,10 @@ static void PrintTitleInfo( hb_title_t * title )
         fprintf( stderr, "  + vts %d, ttn %d, cells %d->%d (%"PRIu64" blocks)\n",
                 title->vts, title->ttn, title->cell_start, title->cell_end,
                 title->block_count );
+    }
+    else if( title->type == HB_BD_TYPE )
+    {
+        fprintf( stderr, "  + playlist: %05d.MPLS\n", title->playlist );
     }
     if (title->angle_count > 1)
         fprintf( stderr, "  + angle(s) %d\n", title->angle_count );
@@ -481,6 +496,73 @@ static int test_sub_list( char ** list, int pos )
     return 0;
 }
 
+static int cmp_lang( char * lang, const char * code )
+{
+    iso639_lang_t * iso639;
+
+    iso639 = lang_for_code2( code );
+
+    if ( iso639 == NULL )
+        return 0;
+    if ( iso639->eng_name && !strcasecmp( lang, iso639->eng_name ) )
+        return 1;
+    if ( iso639->native_name && !strcasecmp( lang, iso639->native_name ) )
+        return 1;
+    if ( iso639->iso639_1 && !strcasecmp( lang, iso639->iso639_1 ) )
+        return 1;
+    if ( iso639->iso639_2 && !strcasecmp( lang, iso639->iso639_2 ) )
+        return 1;
+    if ( iso639->iso639_2b && !strcasecmp( lang, iso639->iso639_2b ) )
+        return 1;
+    return 0;
+}
+
+static void apply_loose_crop(int total, int * v1, int * v2, int mod, int max)
+{
+    /* number of extra pixels which must be cropped to reach next modulus */
+    int add = (total - *v1 - *v2) % mod;
+
+    if (add)
+    {
+        /* number of pixels which must be uncropped to reach previous modulus */
+        int sub = mod - add;
+
+        /* less than maximum (or can't reduce), increase the crop size */
+        if (add <= max || sub > (*v1 + *v2))
+        {
+            int add1 = add / 2;
+            if ((*v1 + add1) & 1) // avoid odd crop if possible
+                ++add1;
+            int add2 = (add - add1);
+
+            *v1 += add1;
+            *v2 += add2;
+        }
+
+        /* more than maximum, reduce the crop size instead */
+        else
+        {
+            int sub1 = sub / 2;
+            if (sub1 > *v1)
+                sub1 = *v1;
+            else if ((*v1 - sub1) & 1) // avoid odd crop if possible
+                ++sub1;
+
+            int sub2 = sub - sub1;
+            if (sub2 > *v2)
+            {
+                sub1 += (sub2 - *v2);
+                if ((*v1 - sub1) & 1) // avoid odd crop if possible
+                    ++sub1;
+                sub2 = sub - sub1;
+            }
+
+            *v1 -= sub1;
+            *v2 -= sub2;
+        }
+    }
+}
+
 static int HandleEvents( hb_handle_t * h )
 {
     hb_state_t s;
@@ -514,9 +596,12 @@ static int HandleEvents( hb_handle_t * h )
             /* Audio argument string parsing variables */
             int acodec = 0;
             int abitrate = 0;
+            float aquality = 0;
+            float acompression = 0;
             int arate = 0;
             int mixdown = HB_AMIXDOWN_DOLBYPLII;
             double d_r_c = 0;
+            double gain = 0;
             /* Audio argument string parsing variables */
 
             list = hb_get_titles( h );
@@ -608,567 +693,569 @@ static int HandleEvents( hb_handle_t * h )
 
             if (preset)
             {
-                fprintf( stderr, "+ Using preset: %s", preset_name);
+                fprintf( stderr, "+ Using preset: %s\n", preset_name);
 
                 if (!strcmp(preset_name, "Universal"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					if( !atracks )
-					{
-						atracks = strdup("1,1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac,copy:ac3");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160,160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2,auto");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto,Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0,0.0");
-					}
-					maxWidth = 720;
-					if( !x264opts )
-					{
-						x264opts = strdup("cabac=0:ref=2:me=umh:bframes=0:weightp=0:8x8dct=0:trellis=0:subme=6");
-					}
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 2;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "iPod"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->ipod_atom = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vbitrate = 700;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					maxWidth = 320;
-					if( !x264opts )
-					{
-						x264opts = strdup("level=30:bframes=0:weightp=0:cabac=0:ref=1:vbv-maxrate=768:vbv-bufsize=2000:analyse=all:me=umh:no-fast-pskip=1:subme=6:8x8dct=0:trellis=0");
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "iPhone & iPod Touch"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("128");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					maxWidth = 480;
-					if( !x264opts )
-					{
-						x264opts = strdup("cabac=0:ref=2:me=umh:bframes=0:weightp=0:subme=6:8x8dct=0:trellis=0");
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "iPhone 4"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->largeFileSize = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					job->vrate_base = 900900;
-					job->cfr = 2;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					maxWidth = 960;
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 2;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "iPad"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->largeFileSize = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					job->vrate_base = 900900;
-					job->cfr = 2;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					maxWidth = 1024;
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 2;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "AppleTV"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->largeFileSize = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					if( !atracks )
-					{
-						atracks = strdup("1,1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac,copy:ac3");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160,160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2,auto");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto,Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0,0.0");
-					}
-					maxWidth = 960;
-					if( !x264opts )
-					{
-						x264opts = strdup("cabac=0:ref=2:me=umh:b-pyramid=none:b-adapt=2:weightb=0:trellis=0:weightp=0:vbv-maxrate=9500:vbv-bufsize=9500");
-					}
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 2;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "AppleTV 2"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->largeFileSize = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					job->vrate_base = 900900;
-					job->cfr = 2;
-					if( !atracks )
-					{
-						atracks = strdup("1,1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac,copy:ac3");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160,160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2,auto");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto,Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0,0.0");
-					}
-					maxWidth = 1280;
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 2;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "Normal"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					if( !x264opts )
-					{
-						x264opts = strdup("ref=2:bframes=2:subme=6:mixed-refs=0:weightb=0:8x8dct=0:trellis=0");
-					}
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 1;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "High Profile"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					vcodec = HB_VCODEC_X264;
-					job->vquality = 20.0;
-					if( !atracks )
-					{
-						atracks = strdup("1,1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac,copy:ac3");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160,160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2,auto");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto,Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0,0.0");
-					}
-					if( !x264opts )
-					{
-						x264opts = strdup("b-adapt=2:rc-lookahead=50");
-					}
-					detelecine = 1;
-					decomb = 1;
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 2;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "Classic"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->vbitrate = 1000;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					
-				}
-				
-				if (!strcmp(preset_name, "AppleTV Legacy"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->largeFileSize = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vbitrate = 2500;
-					if( !atracks )
-					{
-						atracks = strdup("1,1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac,copy:ac3");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160,160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2,auto");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto,Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0,0.0");
-					}
-					if( !x264opts )
-					{
-						x264opts = strdup("ref=1:b-pyramid=none:weightp=0:subme=5:me=umh:no-fast-pskip=1:cabac=0:weightb=0:8x8dct=0:trellis=0");
-					}
-					if( !anamorphic_mode )
-					{
-						anamorphic_mode = 1;
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "iPhone Legacy"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->ipod_atom = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vbitrate = 960;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("128");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					maxWidth = 480;
-					if( !x264opts )
-					{
-						x264opts = strdup("level=30:cabac=0:ref=1:analyse=all:me=umh:no-fast-pskip=1:psy-rd=0,0:bframes=0:weightp=0:subme=6:8x8dct=0:trellis=0");
-					}
-					job->chapter_markers = 1;
-					
-				}
-				
-				if (!strcmp(preset_name, "iPod Legacy"))
-				{
-					if( !mux )
-					{
-						mux = HB_MUX_MP4;
-					}
-					job->ipod_atom = 1;
-					vcodec = HB_VCODEC_X264;
-					job->vbitrate = 1500;
-					if( !atracks )
-					{
-						atracks = strdup("1");
-					}
-					if( !acodecs )
-					{
-						acodecs = strdup("faac");
-					}
-					if( !abitrates )
-					{
-						abitrates = strdup("160");
-					}
-					if( !mixdowns )
-					{
-						mixdowns = strdup("dpl2");
-					}
-					if( !arates )
-					{
-						arates = strdup("Auto");
-					}
-					if( !dynamic_range_compression )
-					{
-						dynamic_range_compression = strdup("0.0");
-					}
-					maxWidth = 640;
-					if( !x264opts )
-					{
-						x264opts = strdup("level=30:bframes=0:weightp=0:cabac=0:ref=1:vbv-maxrate=1500:vbv-bufsize=2000:analyse=all:me=umh:no-fast-pskip=1:psy-rd=0,0:subme=6:8x8dct=0:trellis=0");
-					}
-					job->chapter_markers = 1;
-					
-				}
-						
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1,1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac,copy:ac3");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160,160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2,auto");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto,Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0,0.0");
+                    }
+                    maxWidth = 720;
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("cabac=0:ref=2:me=umh:bframes=0:weightp=0:8x8dct=0:trellis=0:subme=6");
+                    }
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 2;
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "iPod"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->ipod_atom = 1;
+                    vcodec = HB_VCODEC_X264;
+                    job->vbitrate = 700;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    maxWidth = 320;
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("level=30:bframes=0:weightp=0:cabac=0:ref=1:vbv-maxrate=768:vbv-bufsize=2000:analyse=all:me=umh:no-fast-pskip=1:subme=6:8x8dct=0:trellis=0");
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "iPhone & iPod Touch"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("128", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    maxWidth = 480;
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("cabac=0:ref=2:me=umh:bframes=0:weightp=0:subme=6:8x8dct=0:trellis=0");
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "iPhone 4"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->largeFileSize = 1;
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    job->vrate_base = 900900;
+                    job->cfr = 2;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    maxWidth = 960;
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 2;
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "iPad"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->largeFileSize = 1;
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    job->vrate_base = 900900;
+                    job->cfr = 2;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    maxWidth = 1024;
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 2;
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "AppleTV"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->largeFileSize = 1;
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1,1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac,copy:ac3");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160,160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2,auto");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto,Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0,0.0");
+                    }
+                    maxWidth = 960;
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("cabac=0:ref=2:me=umh:b-pyramid=none:b-adapt=2:weightb=0:trellis=0:weightp=0:vbv-maxrate=9500:vbv-bufsize=9500");
+                    }
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 2;
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "AppleTV 2"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->largeFileSize = 1;
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    job->vrate_base = 900900;
+                    job->cfr = 2;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1,1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac,copy:ac3");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160,160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2,auto");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto,Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0,0.0");
+                    }
+                    maxWidth = 1280;
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 2;
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "Android Mid"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 22.0;
+                    job->vrate_base = 900900;
+                    job->cfr = 2;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("128", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    maxWidth = 480;
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("cabac=0:ref=2:me=umh:bframes=0:weightp=0:subme=6:8x8dct=0:trellis=0");
+                    }
+                    
+                }
+
+                if (!strcmp(preset_name, "Android High"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 22.0;
+                    job->vrate_base = 900900;
+                    job->cfr = 2;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("128", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    maxWidth = 720;
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("weightp=0:cabac=0");
+                    }
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 2;
+                    }
+                    
+                }
+
+                if (!strcmp(preset_name, "Normal"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("ref=1:weightp=1:subq=2:rc-lookahead=10:trellis=0:8x8dct=0");
+                    }
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 1;
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "High Profile"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->largeFileSize = 1;
+                    vcodec = HB_VCODEC_X264;
+                    job->vquality = 20.0;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1,1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac,copy:ac3");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160,160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2,auto");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto,Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0,0.0");
+                    }
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("b-adapt=2:rc-lookahead=50");
+                    }
+                    detelecine = 1;
+                    decomb = 1;
+                    if( !anamorphic_mode )
+                    {
+                        anamorphic_mode = 2;
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
+                if (!strcmp(preset_name, "Classic"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->vbitrate = 1000;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    
+                }
+
+                if (!strcmp(preset_name, "iPod Legacy"))
+                {
+                    if( !mux )
+                    {
+                        mux = HB_MUX_MP4;
+                    }
+                    job->ipod_atom = 1;
+                    vcodec = HB_VCODEC_X264;
+                    job->vbitrate = 1500;
+                    if( !atracks )
+                    {
+                        atracks = strdup("1");
+                    }
+                    if( !acodecs )
+                    {
+                        acodecs = strdup("faac");
+                    }
+                    if( !abitrates )
+                    {
+                        abitrates = str_split("160", ',');
+                    }
+                    if( !mixdowns )
+                    {
+                        mixdowns = strdup("dpl2");
+                    }
+                    if( !arates )
+                    {
+                        arates = strdup("Auto");
+                    }
+                    if( !dynamic_range_compression )
+                    {
+                        dynamic_range_compression = strdup("0.0");
+                    }
+                    maxWidth = 640;
+                    if( !advanced_opts )
+                    {
+                        advanced_opts = strdup("level=30:bframes=0:weightp=0:cabac=0:ref=1:vbv-maxrate=1500:vbv-bufsize=2000:analyse=all:me=umh:no-fast-pskip=1:psy-rd=0,0:subme=6:8x8dct=0:trellis=0");
+                    }
+                    job->chapter_markers = 1;
+                    
+                }
+
             }
 
 			if ( chapter_markers )
@@ -1242,6 +1329,13 @@ static int HandleEvents( hb_handle_t * h )
                 crop[2] >= 0 && crop[3] >= 0 )
             {
                 memcpy( job->crop, crop, 4 * sizeof( int ) );
+            }
+
+            if( loose_crop >= 0 )
+            {
+                int mod = modulus > 0 ? modulus : 16;
+                apply_loose_crop(title->height, &job->crop[0], &job->crop[1], mod, loose_crop);
+                apply_loose_crop(title->width, &job->crop[2], &job->crop[3], mod, loose_crop);
             }
 
             job->deinterlace = deinterlace;
@@ -1511,7 +1605,7 @@ static int HandleEvents( hb_handle_t * h )
                         }
                         else
                         {
-                            fprintf(stderr, "ERROR: Unable to parse audio input \"%s\", skipping.",
+                            fprintf(stderr, "ERROR: Unable to parse audio input \"%s\", skipping.\n",
                                     token);
                             free(audio);
                         }
@@ -1533,15 +1627,11 @@ static int HandleEvents( hb_handle_t * h )
                 {
                     for( i = 0; i < hb_list_count( title->list_audio ); i++ )
                     {
-                        char audio_lang[4];
                         int track = i;
                         
                         audio = hb_list_audio_config_item( title->list_audio, i );
                         
-                        strncpy( audio_lang, audio->lang.iso639_2, sizeof( audio_lang ) );
-                        
-                        if( strncasecmp( native_language, audio_lang, 
-                                         sizeof( audio_lang ) ) == 0 &&
+                        if( cmp_lang( native_language, audio->lang.iso639_2 ) &&
                             audio->lang.type != 3 && // Directors 1
                             audio->lang.type != 4)   // Directors 2
                         {
@@ -1675,6 +1765,7 @@ static int HandleEvents( hb_handle_t * h )
             /* Audio Codecs */
 
             /* Sample Rate */
+            int auto_sample_rate = 0;
             i = 0;
             if( arates )
             {
@@ -1701,6 +1792,7 @@ static int HandleEvents( hb_handle_t * h )
                         if ( !strcasecmp( token, "auto" ) )
                         {
                             arate = audio->in.samplerate;
+                            auto_sample_rate = 1;
                         }
                         if (!is_sample_rate_valid(arate))
                         {
@@ -1724,11 +1816,15 @@ static int HandleEvents( hb_handle_t * h )
                 /* We have fewer inputs than audio tracks, use default sample rate.
                  * Unless we only have one input, then use that for all tracks.
                  */
-                if (i != 1)
-                    arate = audio->in.samplerate;
+                int use_default = 0;
+                if( i != 1 || auto_sample_rate )
+                    use_default = 1;
+
                 for ( ; i < num_audio_tracks; i++)
                 {
                     audio = hb_list_audio_config_item(job->list_audio, i);
+                    if( use_default )
+                        arate = audio->in.samplerate;
                     audio->out.samplerate = arate;
                 }
             }
@@ -1758,23 +1854,14 @@ static int HandleEvents( hb_handle_t * h )
                     token = strtok(NULL, ",");
                 }
             }
-            if (i < num_audio_tracks)
+            if (i < num_audio_tracks && i == 1)
             {
-                /* We have fewer inputs than audio tracks, use the default mixdown for the rest. Unless
-                 * we only have one input, then use that.
+                /* We have fewer inputs than audio tracks
+                 * and we only have one input, then use that.
                  */
-                int use_default = 0;
-                if (i != 1)
-                    use_default = 1;
-
                 for (; i < num_audio_tracks; i++)
                 {
                     audio = hb_list_audio_config_item(job->list_audio, i);
-                    if (use_default)
-                    {
-                        // Get default for this tracks codec and layout
-                        mixdown = hb_get_default_mixdown( audio->out.codec, audio->in.channel_layout );
-                    }
                     audio->out.mixdown = mixdown;
                 }
             }
@@ -1784,50 +1871,95 @@ static int HandleEvents( hb_handle_t * h )
             i = 0;
             if( abitrates )
             {
-                char * token = strtok(abitrates, ",");
-                if (token == NULL)
-                    token = abitrates;
-                while ( token != NULL )
+                for ( i = 0; abitrates[i] != NULL && i < num_audio_tracks; i++ )
                 {
+                    char * token = abitrates[i];
                     abitrate = atoi(token);
                     audio = hb_list_audio_config_item(job->list_audio, i);
 
                     if( audio != NULL )
                     {
                         audio->out.bitrate = abitrate;
-                        if( (++i) >= num_audio_tracks )
-                            break;  /* We have more inputs than audio tracks, oops */
                     }
                     else 
                     {
                         fprintf(stderr, "Ignoring bitrate %d, no audio tracks\n", abitrate);
                     }
-                    token = strtok(NULL, ",");
                 }
             }
-            if (i < num_audio_tracks)
+            if (i < num_audio_tracks && i == 1)
             {
-                /* We have fewer inputs than audio tracks, use the default bitrate
-                 * for the remaining tracks. Unless we only have one input, then use
+                /* We have fewer inputs than audio tracks,
+                 * and we only have one input, use
                  * that for all tracks.
                  */
-                int use_default = 0;
-                if (i != 1)
-                    use_default = 1;
-
                 for (; i < num_audio_tracks; i++)
                 {
                     audio = hb_list_audio_config_item(job->list_audio, i);
-                    if (use_default)
-                    {
-                        abitrate = hb_get_default_audio_bitrate( 
-                                        audio->out.codec, audio->out.samplerate,
-                                        audio->out.mixdown );
-                    }
                     audio->out.bitrate = abitrate;
                 }
             }
             /* Audio Bitrate */
+
+            /* Audio Quality */
+            i = 0;
+            if( aqualities )
+            {
+                for ( i = 0; aqualities[i] != NULL && i < num_audio_tracks; i++ )
+                {
+                    char * token = aqualities[i];
+                    audio = hb_list_audio_config_item(job->list_audio, i);
+                    if( audio == NULL )
+                    {
+                        fprintf(stderr, "Ignoring quality %.3f, no audio tracks\n", aquality);
+                    }
+                    else if( *token != 0 )
+                    {
+                        aquality = atof(token);
+
+                        audio->out.quality = aquality;
+                        audio->out.bitrate = -1;
+                    }
+                }
+            }
+            if (i < num_audio_tracks && i == 1)
+            {
+                /* We have fewer inputs than audio tracks,
+                 * and we only have one input, use
+                 * that for all tracks.
+                 */
+                for (; i < num_audio_tracks; i++)
+                {
+                    audio = hb_list_audio_config_item(job->list_audio, i);
+                    if( audio->out.bitrate <= 0 )
+                        audio->out.quality = aquality;
+                }
+            }
+            /* Audio Quality */
+
+            /* Audio Compression Level */
+            i = 0;
+            if( acompressions )
+            {
+                for ( i = 0; acompressions[i] != NULL && i < num_audio_tracks; i++ )
+                {
+                    char * token = acompressions[i];
+                    audio = hb_list_audio_config_item(job->list_audio, i);
+                    if( audio == NULL )
+                    {
+                        fprintf(stderr, "Ignoring compression level %.2f, no audio tracks\n", acompression);
+                    }
+                    else if( *token != 0 )
+                    {
+                        acompression = atof(token);
+
+                        audio->out.compression_level = acompression;
+                    }
+                }
+            }
+            // Compression levels are codec specific values.  So don't
+            // try to apply to other tracks.
+            /* Audio Compression Level */
 
             /* Audio DRC */
             i = 0;
@@ -1869,28 +2001,66 @@ static int HandleEvents( hb_handle_t * h )
             }
             /* Audio DRC */
 
-            /* Audio Track Names */
+            /* Audio Gain */
             i = 0;
-            if ( anames )
+            if ( audio_gain )
             {
-                char * token = strtok(anames, ",");
+                char * token = strtok(audio_gain, ",");
                 if (token == NULL)
-                    token = anames;
+                    token = audio_gain;
                 while ( token != NULL )
                 {
+                    gain = atof(token);
                     audio = hb_list_audio_config_item(job->list_audio, i);
                     if( audio != NULL )
                     {
-                        audio->out.name = strdup(token);
+                        audio->out.gain = gain;
                         if( (++i) >= num_audio_tracks )
-                            break;  /* We have more names than audio tracks, oops */
-                    }
+                            break;  /* We have more inputs than audio tracks, oops */
+                    } 
                     else
                     {
-                        fprintf(stderr, "Ignoring aname '%s', no audio track\n",
-                                token);
+                        fprintf(stderr, "Ignoring gain, no audio tracks\n");
                     }
                     token = strtok(NULL, ",");
+                }
+            }
+            if (i < num_audio_tracks)
+            {
+                /* We have fewer inputs than audio tracks, use no gain for the remaining
+                 * tracks. Unless we only have one input, then use the same gain for all
+                 * tracks.
+                 */
+                if (i != 1)
+                    gain = 0;
+                for (; i < num_audio_tracks; i++)
+                {
+                    audio = hb_list_audio_config_item(job->list_audio, i);
+                    audio->out.gain = gain;
+                }
+            }
+            /* Audio Gain */
+
+            /* Audio Track Names */
+            if ( anames )
+            {
+                char * token;
+                for ( i = 0; anames[i] != NULL && i < num_audio_tracks; i++ )
+                {
+                    token = anames[i];
+                    if ( *token )
+                    {
+                        audio = hb_list_audio_config_item(job->list_audio, i);
+                        if( audio != NULL )
+                        {
+                            audio->out.name = strdup(token);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "Ignoring aname '%s', no audio track\n",
+                                    token);
+                        }
+                    }
                 }
             }
             if( i < num_audio_tracks && i == 1 )
@@ -1900,49 +2070,65 @@ static int HandleEvents( hb_handle_t * h )
                 for ( ; i < num_audio_tracks; i++)
                 {
                     audio = hb_list_audio_config_item(job->list_audio, i);
-                    audio->out.name = strdup(anames);
+                    audio->out.name = strdup(anames[0]);
                 }
             }
             /* Audio Track Names */
 
-            /* Fix up passthru that needs to fallback to ac3 encode */
+            /* Sanitize passthru (drop/fallback if necessary) */
             for( i = 0; i < hb_list_count( job->list_audio ); )
             {
                 audio = hb_list_audio_config_item( job->list_audio, i );
-                if ( ( audio->out.codec & HB_ACODEC_AC3 ) &&
-                     ( audio->out.codec & HB_ACODEC_PASS_FLAG ) &&
-                    !( audio->out.codec & audio->in.codec ) )
+                if( audio->out.codec == HB_ACODEC_AUTO_PASS )
                 {
-                    // AC3 passthru not possible, fallback to AC3 encoder.
-                    fprintf( stderr, "AC3 passthru requested and input codec is not AC3 for track %d, using AC3 encoder\n",
-                        audio->out.track );
-                    audio->out.codec = HB_ACODEC_AC3;
-                    audio->out.mixdown = hb_get_default_mixdown( audio->out.codec, audio->in.channel_layout );
-                    audio->out.bitrate = hb_get_default_audio_bitrate( audio->out.codec, audio->out.samplerate,
-                        audio->out.mixdown );
+                    // Auto Passthru
+                    job->acodec_copy_mask = allowed_audio_copy;
+                    job->acodec_fallback = acodec_fallback ? get_acodec_for_string( acodec_fallback ) : 0;
+                    // sanitize the fallback; -1 isn't a valid HB_ACODEC_* value
+                    if( job->acodec_fallback == -1 )
+                        job->acodec_fallback = 0;
                 }
-                // fix 'copy' to select a specific codec
-                if ( audio->out.codec & HB_ACODEC_PASS_FLAG )
+                else if( ( audio->out.codec & HB_ACODEC_PASS_FLAG ) &&
+                        !( audio->out.codec & audio->in.codec & HB_ACODEC_PASS_MASK ) )
                 {
-                    audio->out.codec &= (audio->in.codec | HB_ACODEC_PASS_FLAG);
-                    if ( !( audio->out.codec & HB_ACODEC_MASK ) )
+                    if( audio->out.codec == HB_ACODEC_AAC_PASS )
+                    {
+                        fprintf( stderr, "AAC Passthru requested and input codec is not AAC for track %d, using AAC encoder\n",
+                                 audio->out.track );
+#ifdef __APPLE_CC__
+                        audio->out.codec = HB_ACODEC_CA_AAC;
+#else
+                        audio->out.codec = HB_ACODEC_FAAC;
+#endif
+                    }
+                    else if( audio->out.codec == HB_ACODEC_AC3_PASS )
+                    {
+                        fprintf( stderr, "AC3 Passthru requested and input codec is not AC3 for track %d, using AC3 encoder\n",
+                                 audio->out.track );
+                        audio->out.codec = HB_ACODEC_AC3;
+                    }
+                    else if( audio->out.codec == HB_ACODEC_MP3_PASS )
+                    {
+                        fprintf( stderr, "MP3 Passthru requested and input codec is not MP3 for track %d, using MP3 encoder\n",
+                                 audio->out.track );
+                        audio->out.codec = HB_ACODEC_LAME;
+                    }
+                    else
                     {
                         // Passthru not possible, drop audio.
                         fprintf( stderr, "Passthru requested and input codec is not the same as output codec for track %d, dropping track\n",
-                            audio->out.track );
+                                 audio->out.track );
                         hb_audio_t * item = hb_list_item( job->list_audio, i );
                         hb_list_rem( job->list_audio, item );
                         continue;
                     }
+                    // we didn't drop the track, set the mixdown and bitrate from libhb defaults
+                    audio->out.mixdown = hb_get_default_mixdown( audio->out.codec, audio->in.channel_layout );
+                    audio->out.bitrate = hb_get_default_audio_bitrate( audio->out.codec, audio->out.samplerate,
+                                                                       audio->out.mixdown );
                 }
+                // we didn't drop the track
                 i++;
-            }
-
-            if( size )
-            {
-                job->vbitrate = hb_calc_bitrate( job, size );
-                fprintf( stderr, "Calculated bitrate: %d kbps\n",
-                         job->vbitrate );
             }
 
             if( subtracks )
@@ -2087,16 +2273,11 @@ static int HandleEvents( hb_handle_t * h )
 
             if( native_language )
             {
-                char audio_lang[4];
-                
                 audio = hb_list_audio_config_item(job->list_audio, 0);
                 
                 if( audio ) 
                 {
-                    strncpy( audio_lang, audio->lang.iso639_2, sizeof( audio_lang ) );
-                    
-                    if( strncasecmp( native_language, audio_lang, 
-                                     sizeof( audio_lang ) ) != 0 )
+                    if( !cmp_lang( native_language, audio->lang.iso639_2 ) )
                     {
                         /*
                          * Audio language is not the same as our native language. 
@@ -2110,7 +2291,7 @@ static int HandleEvents( hb_handle_t * h )
                         {
                             subtitle = hb_list_item( title->list_subtitle, i );
                             matched_track = i;
-                            if( strcmp( subtitle->iso639_2, native_language ) == 0 )
+                            if (cmp_lang(native_language, subtitle->iso639_2))
                             {  
                                 /*
                                  * Found the first matching subtitle in our
@@ -2181,19 +2362,22 @@ static int HandleEvents( hb_handle_t * h )
 
             job->file = strdup( output );
 
-            if( color_matrix )
+            if( color_matrix_code )
             {
-                job->color_matrix = color_matrix;
+                job->color_matrix_code = color_matrix_code;
             }
 
-            if( x264opts != NULL && *x264opts != '\0' )
+            if( advanced_opts != NULL && *advanced_opts != '\0' )
             {
-                job->x264opts = x264opts;
+                job->advanced_opts = advanced_opts;
             }
             else /*avoids a bus error crash when options aren't specified*/
             {
-                job->x264opts =  NULL;
+                job->advanced_opts =  NULL;
             }
+            job->x264_profile = x264_profile;
+            job->x264_preset = x264_preset;
+            job->x264_tune = x264_tune;
             if (maxWidth)
                 job->maxWidth = maxWidth;
             if (maxHeight)
@@ -2231,7 +2415,7 @@ static int HandleEvents( hb_handle_t * h )
             
             if( subtitle_scan )
             {
-                char *x264opts_tmp;
+                char *advanced_opts_tmp;
 
                 /*
                  * When subtitle scan is enabled do a fast pre-scan job
@@ -2239,9 +2423,9 @@ static int HandleEvents( hb_handle_t * h )
                  */
                 job->pass = -1;
 
-                x264opts_tmp = job->x264opts;
+                advanced_opts_tmp = job->advanced_opts;
 
-                job->x264opts = NULL;
+                job->advanced_opts = NULL;
 
                 job->indepth_scan = subtitle_scan;
                 fprintf( stderr, "Subtitle Scan Enabled - enabling "
@@ -2252,7 +2436,7 @@ static int HandleEvents( hb_handle_t * h )
                  */
                 hb_add( h, job );
 
-                job->x264opts = x264opts_tmp;
+                job->advanced_opts = advanced_opts_tmp;
             }
 
             if( twoPass )
@@ -2266,40 +2450,40 @@ static int HandleEvents( hb_handle_t * h )
 
                 job->indepth_scan = 0;
 
-                if (x264opts)
+                if (advanced_opts)
                 {
-                    x264opts2 = strdup(x264opts);
+                    advanced_opts2 = strdup(advanced_opts);
                 }
 
                 /*
                  * If turbo options have been selected then append them
-                 * to the x264opts now (size includes one ':' and the '\0')
+                 * to the advanced_opts now (size includes one ':' and the '\0')
                  */
                 if( turbo_opts_enabled )
                 {
-                    int size = (x264opts ? strlen(x264opts) : 0) + strlen(turbo_opts) + 2;
-                    char *tmp_x264opts;
+                    int size = (advanced_opts ? strlen(advanced_opts) : 0) + strlen(turbo_opts) + 2;
+                    char *tmp_advanced_opts;
 
-                    tmp_x264opts = malloc(size * sizeof(char));
-                    if( x264opts )
+                    tmp_advanced_opts = malloc(size * sizeof(char));
+                    if( advanced_opts )
                     {
-                        snprintf( tmp_x264opts, size, "%s:%s",
-                                  x264opts, turbo_opts );
-                        free( x264opts );
+                        snprintf( tmp_advanced_opts, size, "%s:%s",
+                                  advanced_opts, turbo_opts );
+                        free( advanced_opts );
                     } else {
                         /*
-                         * No x264opts to modify, but apply the turbo options
+                         * No advanced_opts to modify, but apply the turbo options
                          * anyway as they may be modifying defaults
                          */
-                        snprintf( tmp_x264opts, size, "%s",
+                        snprintf( tmp_advanced_opts, size, "%s",
                                   turbo_opts );
                     }
-                    x264opts = tmp_x264opts;
+                    advanced_opts = tmp_advanced_opts;
 
                     fprintf( stderr, "Modified x264 options for pass 1 to append turbo options: %s\n",
-                             x264opts );
+                             advanced_opts );
 
-                    job->x264opts = x264opts;
+                    job->advanced_opts = advanced_opts;
                 }
                 hb_add( h, job );
 
@@ -2312,7 +2496,7 @@ static int HandleEvents( hb_handle_t * h )
                  */
                 job->indepth_scan = 0;
 
-                job->x264opts = x264opts2;
+                job->advanced_opts = advanced_opts2;
 
                 hb_add( h, job );
             }
@@ -2375,13 +2559,13 @@ static int HandleEvents( hb_handle_t * h )
             switch( p.error )
             {
                 case HB_ERROR_NONE:
-                    fprintf( stderr, "\nRip done!\n" );
+                    fprintf( stderr, "\nEncode done!\n" );
                     break;
                 case HB_ERROR_CANCELED:
-                    fprintf( stderr, "\nRip canceled.\n" );
+                    fprintf( stderr, "\nEncode canceled.\n" );
                     break;
                 default:
-                    fprintf( stderr, "\nRip failed (error %x).\n",
+                    fprintf( stderr, "\nEncode failed (error %x).\n",
                              p.error );
             }
             die = 1;
@@ -2416,8 +2600,10 @@ void SigHandler( int i_signal )
  ****************************************************************************/
 static void ShowHelp()
 {
-    int i;
+    int i, j, len;
     FILE* const out = stdout;
+    const char * const *x264_opts;
+    char tmp[80];
 
     fprintf( out,
     "Syntax: HandBrakeCLI [options] -i <device> -o <file>\n"
@@ -2426,7 +2612,6 @@ static void ShowHelp()
     "    -h, --help              Print help\n"
     "    -u, --update            Check for updates and exit\n"
     "    -v, --verbose <#>       Be verbose (optional argument: logging level)\n"
-    "    -C, --cpu               Set CPU count (default: autodetected)\n"
     "    -Z. --preset <string>   Use a built-in preset. Capitalization matters, and\n"
     "                            if the preset name has spaces, surround it with\n"
     "                            double quotation marks\n"
@@ -2439,6 +2624,8 @@ static void ShowHelp()
     "    -i, --input <string>    Set input device\n"
     "    -t, --title <number>    Select a title to encode (0 to scan all titles only,\n"
     "                            default: 1)\n"
+    "        --min-duration      Set the minimum title duration (in seconds). Shorter\n"
+    "                            titles will not be scanned (default: 10).\n"
     "        --scan              Scan selected title only.\n"
     "        --main-feature      Detect and select the main feature title.\n"
     "    -c, --chapters <string> Select chapters (e.g. \"1-3\" for chapters\n"
@@ -2468,13 +2655,94 @@ static void ShowHelp()
 
 
     "### Video Options------------------------------------------------------------\n\n"
-    "    -e, --encoder <string>  Set video library encoder (ffmpeg,x264,theora)\n"
-    "                            (default: ffmpeg)\n"
-    "    -x, --x264opts <string> Specify advanced x264 options in the\n"
-    "                            same style as mencoder:\n"
+    "    -e, --encoder <string>  Set video library encoder\n"
+    "                            Options: " );
+    for( i = 0; i < hb_video_encoders_count; i++ )
+    {
+        fprintf( out, "%s", hb_video_encoders[i].short_name );
+        if( i != hb_video_encoders_count - 1 )
+            fprintf( out, "/" );
+        else
+            fprintf( out, "\n" );
+    }
+    for( i = 0; i < hb_video_encoders_count; i++ )
+    {
+        if( hb_video_encoders[i].encoder == vcodec )
+        {
+            fprintf( out, "                            (default: %s)\n",
+                     hb_video_encoders[i].short_name );
+            break;
+        }
+    }
+    fprintf( out,
+    "        --x264-preset       When using x264, selects the x264 preset:\n"
+    "          <string>          ");
+    x264_opts = hb_x264_presets();
+    tmp[0] = 0;
+    len = 0;
+    while( x264_opts && *x264_opts )
+    {
+        strncat( tmp, *x264_opts++, 79 - len );
+        if( *x264_opts )
+            strcat( tmp, "/" );
+        len = strlen( tmp );
+        if( len > 40 && *x264_opts )
+        {
+            fprintf( out, "%s\n                            ", tmp );
+            len = 0;
+            tmp[0] = 0;
+        }
+    }
+    if( len )
+        fprintf( out, "%s\n", tmp );
+    fprintf( out,
+    "        --x264-tune         When using x264, selects the x264 tuning:\n"
+    "          <string>          ");
+    x264_opts = hb_x264_tunes();
+    tmp[0] = 0;
+    len = 0;
+    while( x264_opts && *x264_opts )
+    {
+        strncat( tmp, *x264_opts++, 79 - len );
+        if( *x264_opts )
+            strcat( tmp, "/" );
+        len = strlen( tmp );
+        if( len > 40 && *x264_opts )
+        {
+            fprintf( out, "%s\n                            ", tmp );
+            len = 0;
+            tmp[0] = 0;
+        }
+    }
+    if( len )
+        fprintf( out, "%s\n", tmp );
+    fprintf( out,
+    "    -x, --encopts <string>  Specify advanced encoder options in the\n"
+    "                            same style as mencoder (x264 and ffmpeg only):\n"
     "                            option1=value1:option2=value2\n"
+    "        --x264-profile      When using x264, ensures compliance with the\n"
+    "          <string>          specified h.264 profile:\n"
+    "                            ");
+    x264_opts = hb_x264_profiles();
+    tmp[0] = 0;
+    len = 0;
+    while( x264_opts && *x264_opts )
+    {
+        strncat( tmp, *x264_opts++, 79 - len );
+        if( *x264_opts )
+            strcat( tmp, "/" );
+        len = strlen( tmp );
+        if( len > 40 && *x264_opts )
+        {
+            fprintf( out, "%s\n                            ", tmp );
+            len = 0;
+            tmp[0] = 0;
+        }
+    }
+    if( len )
+        fprintf( out, "%s\n", tmp );
+    fprintf( out,
     "    -q, --quality <number>  Set video quality\n"
-    "    -S, --size <MB>         Set target size\n"
     "    -b, --vb <kb/s>         Set video bitrate (default: 1000)\n"
     "    -2, --two-pass          Use two-pass mode\n"
     "    -T, --turbo             When using 2-pass use the turbo options\n"
@@ -2484,7 +2752,7 @@ static void ShowHelp()
     "    -r, --rate              Set video framerate (" );
     for( i = 0; i < hb_video_rates_count; i++ )
     {
-        fprintf( out, hb_video_rates[i].string );
+        fprintf( out, "%s", hb_video_rates[i].string );
         if( i != hb_video_rates_count - 1 )
             fprintf( out, "/" );
     }
@@ -2506,31 +2774,50 @@ static void ShowHelp()
     "\n"
     "### Audio Options-----------------------------------------------------------\n\n"
     "    -a, --audio <string>    Select audio track(s), separated by commas\n"
-    "                            More than one output track can be used for one\n"
-    "                            input.\n"
     "                            (\"none\" for no audio, \"1,2,3\" for multiple\n"
-    "                             tracks, default: first one)\n" );
-
+    "                             tracks, default: first one).\n"
+    "                            Multiple output tracks can be used for one input.\n"
+    "    -E, --aencoder <string> Audio encoder(s):\n" );
+    for( i = 0; i < hb_audio_encoders_count; i++ )
+    {
+        fprintf( out, "                               %s\n",
+                 hb_audio_encoders[i].short_name );
+    }
+    fprintf( out,
+    "                            copy:* will passthrough the corresponding\n"
+    "                            audio unmodified to the muxer if it is a\n"
+    "                            supported passthrough audio type.\n"
+    "                            Separated by commas for more than one audio track.\n"
 #ifdef __APPLE_CC__
-    fprintf( out,
-    "    -E, --aencoder <string> Audio encoder(s)\n"
-    "                                (ca_aac/faac/lame/vorbis/ac3/copy/copy:ac3/copy:dts)\n"
-    "                            copy, copy:ac3 and copy:dts meaning passthrough.\n"
-    "                            copy will passthrough either ac3 or dts.\n"
-    "                            Separated by commas for more than one audio track.\n"
-    "                            (default: ca_aac)\n" );
+    "                            (default: ca_aac)\n"
 #else
-    fprintf( out,
-    "    -E, --aencoder <string> Audio encoder(s):\n"
-    "                                (faac/lame/vorbis/ac3/copy/copy:ac3/copy:dts)\n"
-    "                            copy, copy:ac3 and copy:dts meaning passthrough.\n"
-    "                            copy will passthrough either ac3 or dts.\n"
-    "                            Separated by commas for more than one audio track.\n"
-    "                            (default: faac for mp4, lame for mkv)\n" );
+    "                            (default: faac for mp4, lame for mkv)\n"
 #endif
-    fprintf( out,
+    "        --audio-copy-mask   Set audio codecs that are permitted when the\n"
+    "                <string>    \"copy\" audio encoder option is specified\n"
+    "                            (" );
+    for( i = 0, j = 0; i < hb_audio_encoders_count; i++ )
+    {
+        if( !strncmp( hb_audio_encoders[i].short_name, "copy:", 5 ) )
+        {
+            if( j != 0 )
+                fprintf( out, "/" );
+            fprintf( out, "%s", hb_audio_encoders[i].short_name + 5 );
+            j = 1;
+        }
+    }
+    fprintf( out, ", default: all).\n"
+    "                            Separated by commas for multiple allowed options.\n"
+    "        --audio-fallback    Set audio codec to use when it is not possible\n"
+    "                <string>    to copy an audio track without re-encoding.\n"
     "    -B, --ab <kb/s>         Set audio bitrate(s) (default: depends on the\n"
     "                            selected codec, mixdown and samplerate)\n"
+    "                            Separated by commas for more than one audio track.\n"
+    "    -Q, --aq <quality>      Set audio quality metric (default: depends on the\n"
+    "                            selected codec)\n"
+    "                            Separated by commas for more than one audio track.\n"
+    "    -C, --ac <compression>  Set audio compression metric (default: depends on the\n"
+    "                            selected codec)\n"
     "                            Separated by commas for more than one audio track.\n"
     "    -6, --mixdown <string>  Format(s) for surround sound downmixing\n"
     "                            Separated by commas for more than one audio track.\n"
@@ -2539,7 +2826,7 @@ static void ShowHelp()
     "    -R, --arate             Set audio samplerate(s) (" );
     for( i = 0; i < hb_audio_rates_count; i++ )
     {
-        fprintf( out, hb_audio_rates[i].string );
+        fprintf( out, "%s", hb_audio_rates[i].string );
         if( i != hb_audio_rates_count - 1 )
             fprintf( out, "/" );
     }
@@ -2549,6 +2836,10 @@ static void ShowHelp()
     "                            making soft sounds louder. Range is 1.0 to 4.0\n"
     "                            (too loud), with 1.5 - 2.5 being a useful range.\n"
     "                            Separated by commas for more than one audio track.\n"
+    "        --gain <float>      Amplify or attenuate audio before encoding.  Does\n"
+    "                            NOT work with audio passthru (copy). Values are in\n"
+    "                            dB.  Negative values attenuate, positive values\n"
+    "                            amplify. A 1 dB difference is barely audible.\n"
     "    -A, --aname <string>    Audio track name(s),\n"
     "                            Separated by commas for more than one audio track.\n"
     "\n"
@@ -2557,6 +2848,9 @@ static void ShowHelp()
     "    -w, --width <number>    Set picture width\n"
     "    -l, --height <number>   Set picture height\n"
     "        --crop <T:B:L:R>    Set cropping values (default: autocrop)\n"
+    "        --loose-crop        Always crop to a multiple of the modulus\n"
+    "          <#>               Specifies the maximum number of extra pixels\n"
+    "                            which may be cropped (default: 15)\n"
     "    -Y, --maxHeight <#>     Set maximum height\n"
     "    -X, --maxWidth <#>      Set maximum width\n"
     "    --strict-anamorphic     Store pixel aspect ratio in video stream\n"
@@ -2623,7 +2917,7 @@ static void ShowHelp()
     "          <string>          the subtitle has the forced flag set. The values in\n"
     "                            \"string\" are indexes into the subtitle list\n"
     "                            specified with '--subtitle'.\n"
-    "                            Separated by commas for more than one audio track.\n"
+    "                            Separated by commas for more than one subtitle track.\n"
     "                            Example: \"1,2,3\" for multiple tracks.\n"
     "                            If \"string\" is omitted, the first track is forced.\n"
     "        --subtitle-burn     \"Burn\" the selected subtitle into the video track\n"
@@ -2636,7 +2930,7 @@ static void ShowHelp()
     "                            If \"number\" is omitted, the first track is default.\n"
     "                            \"number\" is an index into the subtitle list\n"
     "                            specified with '--subtitle'.\n"
-    "    -N, --native-language   Specifiy the your language preference. When the first\n"
+    "    -N, --native-language   Specifiy your language preference. When the first\n"
     "          <string>          audio track does not match your native language then\n"
     "                            select the first subtitle that does. When used in\n"
     "                            conjunction with --native-dub the audio track is\n"
@@ -2675,44 +2969,44 @@ static void ShowHelp()
  ****************************************************************************/
 static void ShowPresets()
 {
-	fprintf( stderr, "%s - %s - %s\n", HB_PROJECT_TITLE, HB_PROJECT_BUILD_TITLE, HB_PROJECT_URL_WEBSITE );
-	
-	printf("\n< Apple\n");
-	
+    fprintf( stderr, "%s - %s - %s\n", HB_PROJECT_TITLE, HB_PROJECT_BUILD_TITLE, HB_PROJECT_URL_WEBSITE );
+
+    printf("\n< Devices\n");
+
     printf("\n   + Universal:  -e x264  -q 20.0 -a 1,1 -E faac,copy:ac3 -B 160,160 -6 dpl2,auto -R Auto,Auto -D 0.0,0.0 -f mp4 -X 720 --loose-anamorphic -m -x cabac=0:ref=2:me=umh:bframes=0:weightp=0:8x8dct=0:trellis=0:subme=6\n");
-	
+
     printf("\n   + iPod:  -e x264  -b 700 -a 1 -E faac -B 160 -6 dpl2 -R Auto -D 0.0 -f mp4 -I -X 320 -m -x level=30:bframes=0:weightp=0:cabac=0:ref=1:vbv-maxrate=768:vbv-bufsize=2000:analyse=all:me=umh:no-fast-pskip=1:subme=6:8x8dct=0:trellis=0\n");
-	
+
     printf("\n   + iPhone & iPod Touch:  -e x264  -q 20.0 -a 1 -E faac -B 128 -6 dpl2 -R Auto -D 0.0 -f mp4 -X 480 -m -x cabac=0:ref=2:me=umh:bframes=0:weightp=0:subme=6:8x8dct=0:trellis=0\n");
-	
+
     printf("\n   + iPhone 4:  -e x264  -q 20.0 -r 29.97 --pfr  -a 1 -E faac -B 160 -6 dpl2 -R Auto -D 0.0 -f mp4 -4 -X 960 --loose-anamorphic -m\n");
-	
+
     printf("\n   + iPad:  -e x264  -q 20.0 -r 29.97 --pfr  -a 1 -E faac -B 160 -6 dpl2 -R Auto -D 0.0 -f mp4 -4 -X 1024 --loose-anamorphic -m\n");
-	
+
     printf("\n   + AppleTV:  -e x264  -q 20.0 -a 1,1 -E faac,copy:ac3 -B 160,160 -6 dpl2,auto -R Auto,Auto -D 0.0,0.0 -f mp4 -4 -X 960 --loose-anamorphic -m -x cabac=0:ref=2:me=umh:b-pyramid=none:b-adapt=2:weightb=0:trellis=0:weightp=0:vbv-maxrate=9500:vbv-bufsize=9500\n");
-	
+
     printf("\n   + AppleTV 2:  -e x264  -q 20.0 -r 29.97 --pfr  -a 1,1 -E faac,copy:ac3 -B 160,160 -6 dpl2,auto -R Auto,Auto -D 0.0,0.0 -f mp4 -4 -X 1280 --loose-anamorphic -m\n");
-	
+
+    printf("\n   + Android Mid:  -e x264  -q 22.0 -r 29.97 --pfr  -a 1 -E faac -B 128 -6 dpl2 -R Auto -D 0.0 -f mp4 -X 480 -x cabac=0:ref=2:me=umh:bframes=0:weightp=0:subme=6:8x8dct=0:trellis=0\n");
+
+    printf("\n   + Android High:  -e x264  -q 22.0 -r 29.97 --pfr  -a 1 -E faac -B 128 -6 dpl2 -R Auto -D 0.0 -f mp4 -X 720 --loose-anamorphic -x weightp=0:cabac=0\n");
+
     printf("\n>\n");
-	
+
     printf("\n< Regular\n");
-	
-    printf("\n   + Normal:  -e x264  -q 20.0 -a 1 -E faac -B 160 -6 dpl2 -R Auto -D 0.0 -f mp4 --strict-anamorphic -m -x ref=2:bframes=2:subme=6:mixed-refs=0:weightb=0:8x8dct=0:trellis=0\n");
-	
-    printf("\n   + High Profile:  -e x264  -q 20.0 -a 1,1 -E faac,copy:ac3 -B 160,160 -6 dpl2,auto -R Auto,Auto -D 0.0,0.0 -f mp4 --detelecine --decomb --loose-anamorphic -m -x b-adapt=2:rc-lookahead=50\n");
-	
+
+    printf("\n   + Normal:  -e x264  -q 20.0 -a 1 -E faac -B 160 -6 dpl2 -R Auto -D 0.0 -f mp4 --strict-anamorphic -m -x ref=1:weightp=1:subq=2:rc-lookahead=10:trellis=0:8x8dct=0\n");
+
+    printf("\n   + High Profile:  -e x264  -q 20.0 -a 1,1 -E faac,copy:ac3 -B 160,160 -6 dpl2,auto -R Auto,Auto -D 0.0,0.0 -f mp4 -4 --detelecine --decomb --loose-anamorphic -m -x b-adapt=2:rc-lookahead=50\n");
+
     printf("\n>\n");
-	
+
     printf("\n< Legacy\n");
-	
+
     printf("\n   + Classic:  -b 1000 -a 1 -E faac -B 160 -6 dpl2 -R Auto -D 0.0 -f mp4\n");
-	
-    printf("\n   + AppleTV Legacy:  -e x264  -b 2500 -a 1,1 -E faac,copy:ac3 -B 160,160 -6 dpl2,auto -R Auto,Auto -D 0.0,0.0 -f mp4 -4 --strict-anamorphic -m -x ref=1:b-pyramid=none:weightp=0:subme=5:me=umh:no-fast-pskip=1:cabac=0:weightb=0:8x8dct=0:trellis=0\n");
-	
-    printf("\n   + iPhone Legacy:  -e x264  -b 960 -a 1 -E faac -B 128 -6 dpl2 -R Auto -D 0.0 -f mp4 -I -X 480 -m -x level=30:cabac=0:ref=1:analyse=all:me=umh:no-fast-pskip=1:psy-rd=0,0:bframes=0:weightp=0:subme=6:8x8dct=0:trellis=0\n");
-	
+
     printf("\n   + iPod Legacy:  -e x264  -b 1500 -a 1 -E faac -B 160 -6 dpl2 -R Auto -D 0.0 -f mp4 -I -X 640 -m -x level=30:bframes=0:weightp=0:cabac=0:ref=1:vbv-maxrate=1500:vbv-bufsize=2000:analyse=all:me=umh:no-fast-pskip=1:psy-rd=0,0:subme=6:8x8dct=0:trellis=0\n");
-	
+
     printf("\n>\n");
 
 }
@@ -2765,6 +3059,20 @@ static char** str_split( char *str, char delem )
     return ret;
 }
 
+static void str_vfree( char **strv )
+{
+    int i;
+
+    if (strv == NULL)
+        return;
+
+    for ( i = 0; strv[i]; i++ )
+    {
+        free( strv[i] );
+    }
+    free( strv );
+}
+
 /****************************************************************************
  * ParseOptions:
  ****************************************************************************/
@@ -2793,6 +3101,13 @@ static int ParseOptions( int argc, char ** argv )
     #define SCAN_ONLY           276
     #define MAIN_FEATURE        277
     #define MIN_DURATION        278
+    #define AUDIO_GAIN          279
+    #define ALLOWED_AUDIO_COPY  280
+    #define AUDIO_FALLBACK      281
+    #define LOOSE_CROP          282
+    #define X264_PROFILE        283
+    #define X264_PRESET         284
+    #define X264_TUNE           285
     
     for( ;; )
     {
@@ -2801,7 +3116,6 @@ static int ParseOptions( int argc, char ** argv )
             { "help",        no_argument,       NULL,    'h' },
             { "update",      no_argument,       NULL,    'u' },
             { "verbose",     optional_argument, NULL,    'v' },
-            { "cpu",         required_argument, NULL,    'C' },
             { "no-dvdnav",      no_argument,       NULL,    DVDNAV },
 
             { "format",      required_argument, NULL,    'f' },
@@ -2821,6 +3135,7 @@ static int ParseOptions( int argc, char ** argv )
             { "audio",       required_argument, NULL,    'a' },
             { "mixdown",     required_argument, NULL,    '6' },
             { "drc",         required_argument, NULL,    'D' },
+            { "gain",        required_argument, NULL,    AUDIO_GAIN },
             { "subtitle",    required_argument, NULL,    's' },
             { "subtitle-forced", optional_argument,   NULL,    'F' },
             { "subtitle-burned", optional_argument,   NULL,    SUB_BURNED },
@@ -2853,14 +3168,19 @@ static int ParseOptions( int argc, char ** argv )
             { "width",       required_argument, NULL,    'w' },
             { "height",      required_argument, NULL,    'l' },
             { "crop",        required_argument, NULL,    'n' },
+            { "loose-crop",  optional_argument, NULL, LOOSE_CROP },
 
             { "vb",          required_argument, NULL,    'b' },
             { "quality",     required_argument, NULL,    'q' },
-            { "size",        required_argument, NULL,    'S' },
             { "ab",          required_argument, NULL,    'B' },
+            { "aq",          required_argument, NULL,    'Q' },
+            { "ac",          required_argument, NULL,    'C' },
             { "rate",        required_argument, NULL,    'r' },
             { "arate",       required_argument, NULL,    'R' },
-            { "x264opts",    required_argument, NULL,    'x' },
+            { "encopts",     required_argument, NULL,    'x' },
+            { "x264-profile", required_argument, NULL,   X264_PROFILE },
+            { "x264-preset", required_argument, NULL,    X264_PRESET },
+            { "x264-tune",   required_argument, NULL,    X264_TUNE },
             { "turbo",       no_argument,       NULL,    'T' },
             { "maxHeight",   required_argument, NULL,    'Y' },
             { "maxWidth",    required_argument, NULL,    'X' },
@@ -2879,6 +3199,8 @@ static int ParseOptions( int argc, char ** argv )
 #if defined( __APPLE_CC__ )
             { "no-vlc-dylib-path", no_argument, &no_vlc_dylib,    1 },
 #endif
+            { "audio-copy-mask", required_argument, NULL, ALLOWED_AUDIO_COPY },
+            { "audio-fallback",  required_argument, NULL, AUDIO_FALLBACK },
             { 0, 0, 0, 0 }
           };
 
@@ -2888,7 +3210,7 @@ static int ParseOptions( int argc, char ** argv )
 
         cur_optind = optind;
         c = getopt_long( argc, argv,
-                         "hv::uC:f:4i:Io:t:c:m::M:a:A:6:s:UF::N:e:E:"
+                         "hv::uC:f:4i:Io:t:c:m::M:a:A:6:s:UF::N:e:E:Q:C:"
                          "2dD:7895gOw:l:n:b:q:S:B:r:R:x:TY:X:Z:z",
                          long_options, &option_index );
         if( c < 0 )
@@ -2917,10 +3239,6 @@ static int ParseOptions( int argc, char ** argv )
                     debug = 1;
                 }
                 break;
-            case 'C':
-                cpu = atoi( optarg );
-                break;
-
             case 'Z':
                 preset = 1;
                 preset_name = strdup(optarg);
@@ -3025,6 +3343,12 @@ static int ParseOptions( int argc, char ** argv )
                 if( optarg != NULL )
                 {
                     dynamic_range_compression = strdup( optarg );
+                }
+                break;
+            case AUDIO_GAIN:
+                if( optarg != NULL )
+                {
+                    audio_gain = strdup( optarg );
                 }
                 break;
             case 's':
@@ -3178,24 +3502,23 @@ static int ParseOptions( int argc, char ** argv )
                 }
                 break;
             case 'e':
-                if( !strcasecmp( optarg, "ffmpeg" ) )
+            {
+                int i;
+                for( i = 0, vcodec = 0; i < hb_video_encoders_count; i++ )
                 {
-                    vcodec = HB_VCODEC_FFMPEG;
+                    if( !strcasecmp( hb_video_encoders[i].short_name, optarg ) )
+                    {
+                        vcodec = hb_video_encoders[i].encoder;
+                        break;
+                    }
                 }
-                else if( !strcasecmp( optarg, "x264" ) )
-                {
-                    vcodec = HB_VCODEC_X264;
-                }
-                else if( !strcasecmp( optarg, "theora" ) )
-                {
-                    vcodec = HB_VCODEC_THEORA;
-                }
-                else
+                if( !vcodec )
                 {
                     fprintf( stderr, "invalid codec (%s)\n", optarg );
                     return -1;
                 }
                 break;
+            }
             case 'E':
                 if( optarg != NULL )
                 {
@@ -3221,6 +3544,9 @@ static int ParseOptions( int argc, char ** argv )
                 }
                 break;
             }
+            case LOOSE_CROP:
+                loose_crop = optarg ? atoi(optarg) : 15;
+                break;
             case 'r':
             {
                 int i;
@@ -3255,17 +3581,26 @@ static int ParseOptions( int argc, char ** argv )
             case 'q':
                 vquality = atof( optarg );
                 break;
-            case 'S':
-                size = atoi( optarg );
-                break;
             case 'B':
-                if( optarg != NULL )
-                {
-                    abitrates = strdup( optarg );
-                }
+                abitrates = str_split( optarg, ',' );
+                break;
+            case 'Q':
+                aqualities = str_split( optarg, ',' );
+                break;
+            case 'C':
+                acompressions = str_split( optarg, ',' );
                 break;
             case 'x':
-                x264opts = strdup( optarg );
+                advanced_opts = strdup( optarg );
+                break;
+            case X264_PROFILE:
+                x264_profile = strdup( optarg );
+                break;
+            case X264_PRESET:
+                x264_preset = strdup( optarg );
+                break;
+            case X264_TUNE:
+                x264_tune = strdup( optarg );
                 break;
             case 'T':
                 turbo_opts_enabled = 1;
@@ -3279,7 +3614,7 @@ static int ParseOptions( int argc, char ** argv )
             case 'A':
                 if( optarg != NULL )
                 {
-                    anames = strdup( optarg );
+                    anames = str_split( optarg, ',' );
                 }
                 break;
             case PREVIEWS:
@@ -3328,11 +3663,38 @@ static int ParseOptions( int argc, char ** argv )
                     stop_at_pts *= 90000LL;
                 }
                 break;
+            case ALLOWED_AUDIO_COPY:
+            {
+                int i, j;
+                char **allowed = str_split( optarg, ',' );
+
+                allowed_audio_copy = 0;
+                for( i = 0; allowed[i]; i++ )
+                {
+                    for( j = 0; j < hb_audio_encoders_count; j++ )
+                    {
+                        char * encoder = hb_audio_encoders[j].short_name;
+                        // skip "copy:"
+                        if( strlen( encoder ) > 5 )
+                            encoder += 5;
+                        if( !strcmp( allowed[i], encoder ) )
+                        {
+                            allowed_audio_copy |= hb_audio_encoders[j].encoder;
+                            break;
+                        }
+                    }
+                }
+                allowed_audio_copy &= HB_ACODEC_PASS_MASK;
+                str_vfree( allowed );
+            } break;
+            case AUDIO_FALLBACK:
+                acodec_fallback = strdup( optarg );
+                break;
             case 'M':
                 if( atoi( optarg ) == 601 )
-                    color_matrix = 1;
+                    color_matrix_code = 1;
                 else if( atoi( optarg ) == 709 )
-                    color_matrix = 2;
+                    color_matrix_code = 2;
                 break;
             case MIN_DURATION:
                 min_title_duration = strtol( optarg, NULL, 0 );
@@ -3344,41 +3706,6 @@ static int ParseOptions( int argc, char ** argv )
     }
 
     return 0;
-}
-
-char * str_printf(const char *fmt, ...)
-{
-    /* Guess we need no more than 100 bytes. */
-    int len;
-    va_list ap;
-    int size = 100;
-    char *tmp, *str = NULL;
-
-    str = (char*)malloc(size);
-    while (1) 
-    {
-        /* Try to print in the allocated space. */
-        va_start(ap, fmt);
-        len = vsnprintf(str, size, fmt, ap);
-        va_end(ap);
-
-        /* If that worked, return the string. */
-        if (len > -1 && len < size) {
-            return str;
-        }
-
-        /* Else try again with more space. */
-        if (len > -1)    /* glibc 2.1 */
-            size = len+1; /* precisely what is needed */
-        else           /* glibc 2.0 */
-            size *= 2;  /* twice the old size */
-
-        tmp = (char*)realloc(str, size);
-        if (tmp == NULL) {
-            return str;
-        }
-        str = tmp;
-    }
 }
 
 static int CheckOptions( int argc, char ** argv )
@@ -3405,14 +3732,14 @@ static int CheckOptions( int argc, char ** argv )
                 // And add our extra path
                 if ( home != NULL )
                 {
-                    path = str_printf("%s/lib:%s:%s:%s%s", home, 
+                    path = hb_strdup_printf("%s/lib:%s:%s:%s%s", home, 
                                       DEFAULT_DYLD_PATH, 
                                       EXTRA_VLC_DYLD_PATH, 
                                       home, EXTRA_VLC_DYLD_PATH);
                 }
                 else
                 {
-                    path = str_printf("%s:%s", DEFAULT_DYLD_PATH, EXTRA_VLC_DYLD_PATH);
+                    path = hb_strdup_printf("%s:%s", DEFAULT_DYLD_PATH, EXTRA_VLC_DYLD_PATH);
                 }
                 if ( path != NULL )
                     result = setenv("DYLD_FALLBACK_LIBRARY_PATH", path, 1);
@@ -3422,12 +3749,12 @@ static int CheckOptions( int argc, char ** argv )
                 // add our extra path
                 if ( home != NULL )
                 {
-                    path = str_printf("%s:%s:%s%s", dylib_path, EXTRA_VLC_DYLD_PATH,
+                    path = hb_strdup_printf("%s:%s:%s%s", dylib_path, EXTRA_VLC_DYLD_PATH,
                                                         home, EXTRA_VLC_DYLD_PATH);
                 }
                 else
                 {
-                    path = str_printf("%s:%s", dylib_path, EXTRA_VLC_DYLD_PATH);
+                    path = hb_strdup_printf("%s:%s", dylib_path, EXTRA_VLC_DYLD_PATH);
                 }
                 if ( path != NULL )
                     result = setenv("DYLD_FALLBACK_LIBRARY_PATH", path, 1);
@@ -3522,44 +3849,16 @@ static int CheckOptions( int argc, char ** argv )
 
 static int get_acodec_for_string( char *codec )
 {
-    if( !strcasecmp( codec, "ac3" ) )
+    int i, acodec;
+    for( i = 0, acodec = 0; i < hb_audio_encoders_count; i++ )
     {
-        return HB_ACODEC_AC3;
+        if( !strcasecmp( hb_audio_encoders[i].short_name, codec ) )
+        {
+            acodec = hb_audio_encoders[i].encoder;
+            break;
+        }
     }
-    else if( !strcasecmp( codec, "copy" ) )
-    {
-        return HB_ACODEC_AC3_PASS | HB_ACODEC_DCA_PASS;
-    }
-    else if( !strcasecmp( codec, "copy:ac3" ) )
-    {
-        return HB_ACODEC_AC3_PASS;
-    }
-    else if( !strcasecmp( codec, "copy:dts" ) || !strcasecmp( codec, "copy:dca" ) )
-    {
-        return HB_ACODEC_DCA_PASS;
-    }
-    else if( !strcasecmp( codec, "lame" ) )
-    {
-        return HB_ACODEC_LAME;
-    }
-    else if( !strcasecmp( codec, "faac" ) )
-    {
-        return HB_ACODEC_FAAC;
-    }
-    else if( !strcasecmp( codec, "vorbis") )
-    {
-        return HB_ACODEC_VORBIS;
-    }
-#ifdef __APPLE__
-    else if( !strcasecmp( codec, "ca_aac") )
-    {
-        return HB_ACODEC_CA_AAC;
-    }
-#endif
-    else
-    {
-        return -1;
-    }
+    return acodec ? acodec : -1;
 }
 
 static int is_sample_rate_valid(int rate)

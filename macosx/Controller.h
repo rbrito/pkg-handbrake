@@ -117,8 +117,14 @@ BOOL                        fIsDragging;
     IBOutlet NSButton            * fDstMp4iPodFileCheck;
 	
     /* Video box */
-    IBOutlet NSButton            * fFrameratePfrCheck;
     
+    /* Framerate */
+    /* Radio Button Framerate Controls */
+    IBOutlet NSMatrix            * fFramerateMatrix;
+    IBOutlet NSButtonCell        * fFramerateVfrPfrCell;
+    IBOutlet NSButtonCell        * fFramerateCfrCell;
+    
+    /* Video Encoder */
     IBOutlet NSTextField         * fVidRateField;
     IBOutlet NSPopUpButton       * fVidRatePopUp;
     IBOutlet NSTextField         * fVidEncoderField;
@@ -127,8 +133,6 @@ BOOL                        fIsDragging;
     IBOutlet NSTextField         * fVidQualityRFLabel;
     IBOutlet NSTextField         * fVidQualityRFField;
     IBOutlet NSMatrix            * fVidQualityMatrix;
-    IBOutlet NSButtonCell        * fVidTargetCell;
-    IBOutlet NSTextField         * fVidTargetSizeField;
     IBOutlet NSButtonCell        * fVidBitrateCell;
     IBOutlet NSTextField         * fVidBitrateField;
     IBOutlet NSButtonCell        * fVidConstantCell;
@@ -162,7 +166,17 @@ BOOL                        fIsDragging;
     
 	/* New Audio box */
 	IBOutlet HBAudioController   * fAudioDelegate;
-	    
+    
+    /* New Audio Auto Passthru box */
+    IBOutlet NSBox               * fAudioAutoPassthruBox;
+    IBOutlet NSButton            * fAudioAllowAACPassCheck;
+    IBOutlet NSButton            * fAudioAllowAC3PassCheck;
+    IBOutlet NSButton            * fAudioAllowDTSHDPassCheck;
+    IBOutlet NSButton            * fAudioAllowDTSPassCheck;
+    IBOutlet NSButton            * fAudioAllowMP3PassCheck;
+    IBOutlet NSButton            * fAudioFallbackPopUp;
+    
+    	    
     /* Chapters box */
     IBOutlet NSButton            * fCreateChapterMarkers;
     IBOutlet NSTableView         * fChapterTable;
@@ -200,7 +214,6 @@ BOOL                        fIsDragging;
 	NSMutableArray               * UserPresets;
 	NSMutableArray               * UserPresetssortedArray;
 	NSMutableDictionary          * chosenPreset;
-    int                            curUserPresetChosenNum;
 	 
 	NSMutableDictionary          *presetHbDefault; // this is 1 in "Default" preset key
 	NSMutableDictionary          *presetUserDefault;// this is 2 in "Default" preset key
@@ -263,6 +276,8 @@ BOOL                        fIsDragging;
 - (void)     updateUI: (NSTimer *) timer;
 - (void)     enableUI: (bool) enable;
 - (IBAction) encodeStartStopPopUpChanged: (id) sender;
+
+
 - (IBAction) titlePopUpChanged: (id) sender;
 - (IBAction) chapterPopUpChanged: (id) sender;
 - (IBAction) startEndSecValueChanged: (id) sender;
@@ -289,12 +304,17 @@ BOOL                        fIsDragging;
                      returnCode: (int) returnCode contextInfo: (void *) contextInfo;
 
 - (IBAction) showPicturePanel: (id) sender;
-- (void) picturePanelFullScreen;
 - (void) picturePanelWindowed;
 - (IBAction) showPreviewWindow: (id) sender;
 - (void)pictureSettingsDidChange;
 - (IBAction) calculatePictureSizing: (id) sender;
 - (IBAction) openMainWindow: (id) sender;
+
+/* Add All titles to the queue */
+- (IBAction) addAllTitlesToQueue: (id) sender;
+- (void) addAllTitlesToQueueAlertDone: (NSWindow *) sheet
+                           returnCode: (int) returnCode contextInfo: (void *) contextInfo;
+- (void) doAddAllTitlesToQueue;
 
 /* Queue File Stuff */
 - (void) loadQueueFile;
@@ -359,7 +379,10 @@ BOOL                        fIsDragging;
 - (NSString *)outlineView:(NSOutlineView *)fPresetsOutlineView toolTipForCell:(NSCell *)cell rect:(NSRectPointer)rect tableColumn:(NSTableColumn *)tc item:(id)item mouseLocation:(NSPoint)mouseLocation;
 - (void) checkBuiltInsForUpdates;
 /* We use this to actually select the preset and act accordingly */
-- (IBAction)selectPreset:(id)sender;    
+- (IBAction)selectPreset:(id)sender;
+
+@property (nonatomic, readonly) BOOL hasValidPresetSelected;
+- (id)selectedPreset;
 
 /* Export / Import Presets */
 - (IBAction) browseExportPresetFile: (id) sender;
@@ -416,7 +439,6 @@ BOOL                        fIsDragging;
                  returnCode: (int) returnCode contextInfo: (void *) contextInfo;
 
 + (unsigned int) maximumNumberOfAllowedAudioTracks;
-@property (nonatomic, readonly) BOOL hasValidPresetSelected; 
 - (IBAction) addAllAudioTracks: (id) sender;
 
 @end

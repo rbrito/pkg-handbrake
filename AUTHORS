@@ -63,7 +63,7 @@ Chris Lee <clee@kde.org>
 Chris Long <chris.long@mac.com> (chrislong)
  + iPod firmware 1.2+ 640x480 MPEG-4/H.264 support
 
-Brian Mario <Unknown> (brianmario)
+Brian Lopez <seniorlopez@gmail.com> (brianmario)
  + Windows GUI
 
 Maurj <handbrake@maurj.com> (maurj)
@@ -110,3 +110,9 @@ Mark Krenek <markkrenek@mac.com> (travistex)
 
 Kona 'mike' Blend <Kona8lend@gmail.com> (KonaBlend)
  + Build System and related guides
+ 
+David Rickard <unknown> (RandomEngy)
+ + HandBrake Interop Library
+ 
+Tim Walker <unknown> (Rodeo)
+ + Miscellaneous fixes and enhancements

@@ -11,6 +11,7 @@
 #endif
 
 #define FIFO_TIMEOUT 200
+//#define HB_FIFO_DEBUG 1
 
 /* Fifo */
 struct hb_fifo_s
@@ -26,7 +27,19 @@ struct hb_fifo_s
     uint32_t       buffer_size;
     hb_buffer_t  * first;
     hb_buffer_t  * last;
+
+#if defined(HB_FIFO_DEBUG)
+    // Fifo list for debugging
+    hb_fifo_t    * next;
+#endif
 };
+
+#if defined(HB_FIFO_DEBUG)
+static hb_fifo_t fifo_list = 
+{
+    .next = NULL
+};
+#endif
 
 /* we round the requested buffer size up to the next power of 2 so there can
  * be at most 32 possible pools when the size is a 32 bit int. To avoid a lot
@@ -67,6 +80,147 @@ void hb_buffer_pool_init( void )
         buffers.pool[i] = buffers.pool[10];
     }
 }
+
+#if defined(HB_FIFO_DEBUG)
+
+static void dump_fifo(hb_fifo_t * f)
+{
+    hb_buffer_t * b = f->first;
+
+    if (b)
+    {
+        while (b)
+        {
+            fprintf(stderr, "%p:%d:%d\n", b, b->size, b->alloc);
+            b = b->next;
+        }
+        fprintf(stderr, "\n");
+    }
+}
+
+static void fifo_list_add( hb_fifo_t * f )
+{
+    hb_fifo_t *next = fifo_list.next;
+
+    fifo_list.next = f;
+    f->next = next;
+}
+
+static void fifo_list_rem( hb_fifo_t * f )
+{
+    hb_fifo_t *next, *prev;
+
+    prev = &fifo_list;
+    next = fifo_list.next;
+
+    while ( next && next != f )
+    {
+        prev = next;
+        next = next->next;
+    }
+    if ( next == f )
+    {
+        prev->next = f->next;
+    }
+}
+
+// These routines are useful for finding and debugging problems
+// with the fifos and buffer pools
+static void buffer_pool_validate( hb_fifo_t * f )
+{
+    hb_buffer_t *b;
+
+    hb_lock( f->lock );
+    b = f->first;
+    while (b)
+    {
+        if (b->alloc != f->buffer_size)
+        {
+            fprintf(stderr, "Invalid buffer pool size! buf %p size %d pool size %d\n", b, b->alloc, f->buffer_size);
+            dump_fifo( f );
+            *(char*)0 = 1;
+        }
+        b = b->next;
+    }
+
+    hb_unlock( f->lock );
+}
+
+static void buffer_pools_validate( void )
+{
+    int ii;
+    for ( ii = 10; ii < 26; ++ii )
+    {
+        buffer_pool_validate( buffers.pool[ii] );
+    }
+}
+
+void fifo_list_validate( void )
+{
+    hb_fifo_t *next = fifo_list.next;
+    hb_fifo_t *m;
+    hb_buffer_t *b, *c;
+    int count;
+
+    buffer_pools_validate();
+    while ( next )
+    {
+        count = 0;
+        hb_lock( next->lock );
+        b = next->first;
+
+        // Count the number of entries in this fifo
+        while (b)
+        {
+            c = b->next;
+            // check that the current buffer is not duplicated in this fifo
+            while (c)
+            {
+                if (c == b)
+                {
+                    fprintf(stderr, "Duplicate buffer in fifo!\n");
+                    dump_fifo(next);
+                    *(char*)0 = 1;
+                }
+                c = c->next;
+            }
+
+            // check that the current buffer is not duplicated in another fifo
+            m = next->next;
+            while (m)
+            {
+                hb_lock( m->lock );
+                c = m->first;
+                while (c)
+                {
+                    if (c == b)
+                    {
+                        fprintf(stderr, "Duplicate buffer in another fifo!\n");
+                        dump_fifo(next);
+                        *(char*)0 = 1;
+                    }
+                    c = c->next;
+                }
+                hb_unlock( m->lock );
+                m = m->next;
+            }
+
+            count++;
+            b = b->next;
+        }
+
+        if ( count != next->size )
+        {
+            fprintf(stderr, "Invalid fifo size! count %d size %d\n", count, next->size);
+            dump_fifo(next);
+            *(char*)0 = 1;
+        }
+        hb_unlock( next->lock );
+
+        next = next->next;
+    }
+}
+#endif
 
 void hb_buffer_pool_free( void )
 {
@@ -119,7 +273,13 @@ static hb_fifo_t *size_to_pool( int size )
 hb_buffer_t * hb_buffer_init( int size )
 {
     hb_buffer_t * b;
-    hb_fifo_t *buffer_pool = size_to_pool( size );
+    // Certain libraries (hrm ffmpeg) expect buffers passed to them to
+    // end on certain alignments (ffmpeg is 8). So allocate some extra bytes.
+    // Note that we can't simply align the end of our buffer because
+    // sometimes we feed data to these libraries starting from arbitrary
+    // points within the buffer.
+    int alloc = size + 16;
+    hb_fifo_t *buffer_pool = size_to_pool( alloc );
 
     if( buffer_pool )
     {
@@ -150,7 +310,7 @@ hb_buffer_t * hb_buffer_init( int size )
     }
 
     b->size  = size;
-    b->alloc  = buffer_pool? buffer_pool->buffer_size : size;
+    b->alloc  = buffer_pool ? buffer_pool->buffer_size : alloc;
 
     if (size)
     {
@@ -177,7 +337,7 @@ hb_buffer_t * hb_buffer_init( int size )
 
 void hb_buffer_realloc( hb_buffer_t * b, int size )
 {
-    if ( size > b->alloc )
+    if ( size > b->alloc || b->data == NULL )
     {
         uint32_t orig = b->alloc;
         size = size_to_pool( size )->buffer_size;
@@ -190,21 +350,39 @@ void hb_buffer_realloc( hb_buffer_t * b, int size )
     }
 }
 
+void hb_buffer_reduce( hb_buffer_t * b, int size )
+{
+    if ( size < b->alloc / 8 || b->data == NULL )
+    {
+        hb_buffer_t * tmp = hb_buffer_init( size );
+
+        hb_buffer_swap_copy( b, tmp );
+        memcpy( b->data, tmp->data, size );
+        tmp->next = NULL;
+        hb_buffer_close( &tmp );
+    }
+}
+
+// Frees the specified buffer list.
 void hb_buffer_close( hb_buffer_t ** _b )
 {
     hb_buffer_t * b = *_b;
-    hb_fifo_t *buffer_pool = size_to_pool( b->alloc );
 
-    if( buffer_pool && b->data && !hb_fifo_is_full( buffer_pool ) )
-    {
-        hb_fifo_push_head( buffer_pool, b );
-        *_b = NULL;
-        return;
-    }
-    /* either the pool is full or this size doesn't use a pool - free the buf */
     while( b )
     {
         hb_buffer_t * next = b->next;
+        hb_fifo_t *buffer_pool = size_to_pool( b->alloc );
+
+        b->next = NULL;
+
+        if( buffer_pool && b->data && !hb_fifo_is_full( buffer_pool ) )
+        {
+            hb_fifo_push_head( buffer_pool, b );
+            b = next;
+            continue;
+        }
+        // either the pool is full or this size doesn't use a pool
+        // free the buf 
         if( b->data )
         {
             free( b->data );
@@ -237,6 +415,11 @@ hb_fifo_t * hb_fifo_init( int capacity, int thresh )
     f->capacity   = capacity;
     f->thresh     = thresh;
     f->buffer_size = 0;
+
+#if defined(HB_FIFO_DEBUG)
+    // Add the fifo to the global fifo list
+    fifo_list_add( f );
+#endif
     return f;
 }
 
@@ -290,6 +473,8 @@ float hb_fifo_percent_full( hb_fifo_t * f )
     return ret;
 }
 
+// Pulls the first packet out of this FIFO, blocking until such a packet is available.
+// Returns NULL if this FIFO has been closed or flushed.
 hb_buffer_t * hb_fifo_get_wait( hb_fifo_t * f )
 {
     hb_buffer_t * b;
@@ -319,6 +504,7 @@ hb_buffer_t * hb_fifo_get_wait( hb_fifo_t * f )
     return b;
 }
 
+// Pulls a packet out of this FIFO, or returns NULL if no packet is available.
 hb_buffer_t * hb_fifo_get( hb_fifo_t * f )
 {
     hb_buffer_t * b;
@@ -364,6 +550,8 @@ hb_buffer_t * hb_fifo_see_wait( hb_fifo_t * f )
     return b;
 }
 
+// Returns the first packet in the specified FIFO.
+// If the FIFO is empty, returns NULL.
 hb_buffer_t * hb_fifo_see( hb_fifo_t * f )
 {
     hb_buffer_t * b;
@@ -396,6 +584,8 @@ hb_buffer_t * hb_fifo_see2( hb_fifo_t * f )
     return b;
 }
 
+// Waits until the specified FIFO is no longer full or until FIFO_TIMEOUT milliseconds have elapsed.
+// Returns whether the FIFO is non-full upon return.
 int hb_fifo_full_wait( hb_fifo_t * f )
 {
     int result;
@@ -411,6 +601,8 @@ int hb_fifo_full_wait( hb_fifo_t * f )
     return result;
 }
 
+// Pushes the specified buffer onto the specified FIFO,
+// blocking until the FIFO has space available.
 void hb_fifo_push_wait( hb_fifo_t * f, hb_buffer_t * b )
 {
     if( !b )
@@ -439,7 +631,7 @@ void hb_fifo_push_wait( hb_fifo_t * f, hb_buffer_t * b )
         f->size += 1;
         f->last  = f->last->next;
     }
-    if( f->wait_empty && f->size >= f->thresh )
+    if( f->wait_empty && f->size >= 1 )
     {
         f->wait_empty = 0;
         hb_cond_signal( f->cond_empty );
@@ -447,6 +639,7 @@ void hb_fifo_push_wait( hb_fifo_t * f, hb_buffer_t * b )
     hb_unlock( f->lock );
 }
 
+// Appends the specified packet list to the end of the specified FIFO.
 void hb_fifo_push( hb_fifo_t * f, hb_buffer_t * b )
 {
     if( !b )
@@ -470,7 +663,7 @@ void hb_fifo_push( hb_fifo_t * f, hb_buffer_t * b )
         f->size += 1;
         f->last  = f->last->next;
     }
-    if( f->wait_empty && f->size >= f->thresh )
+    if( f->wait_empty && f->size >= 1 )
     {
         f->wait_empty = 0;
         hb_cond_signal( f->cond_empty );
@@ -478,6 +671,7 @@ void hb_fifo_push( hb_fifo_t * f, hb_buffer_t * b )
     hb_unlock( f->lock );
 }
 
+// Prepends the specified packet list to the start of the specified FIFO.
 void hb_fifo_push_head( hb_fifo_t * f, hb_buffer_t * b )
 {
     hb_buffer_t * tmp;
@@ -515,6 +709,29 @@ void hb_fifo_push_head( hb_fifo_t * f, hb_buffer_t * b )
     hb_unlock( f->lock );
 }
 
+// Pushes a list of packets onto the specified FIFO as a single element.
+void hb_fifo_push_list_element( hb_fifo_t *fifo, hb_buffer_t *buffer_list )
+{
+    hb_buffer_t *container = hb_buffer_init( 0 );
+    // XXX: Using an arbitrary hb_buffer_t pointer (other than 'next')
+    //      to carry the list inside a single "container" buffer
+    container->sub = buffer_list;
+    
+    hb_fifo_push( fifo, container );
+}
+
+// Removes a list of packets from the specified FIFO that were stored as a single element.
+hb_buffer_t *hb_fifo_get_list_element( hb_fifo_t *fifo )
+{
+    hb_buffer_t *container = hb_fifo_get( fifo );
+    // XXX: Using an arbitrary hb_buffer_t pointer (other than 'next')
+    //      to carry the list inside a single "container" buffer
+    hb_buffer_t *buffer_list = container->sub;
+    hb_buffer_close( &container );
+    
+    return buffer_list;
+}
+
 void hb_fifo_close( hb_fifo_t ** _f )
 {
     hb_fifo_t   * f = *_f;
@@ -529,6 +746,12 @@ void hb_fifo_close( hb_fifo_t ** _f )
     hb_lock_close( &f->lock );
     hb_cond_close( &f->cond_empty );
     hb_cond_close( &f->cond_full );
+
+#if defined(HB_FIFO_DEBUG)
+    // Remove the fifo from the global fifo list
+    fifo_list_rem( f );
+#endif
+
     free( f );
 
     *_f = NULL;

@@ -6,8 +6,23 @@
 
 #include "hb.h"
 
+static int  hb_reader_init( hb_work_object_t * w, hb_job_t * job );
+static void hb_reader_close( hb_work_object_t * w );
+
+hb_work_object_t hb_reader =
+{
+    WORK_READER,
+    "Reader",
+    hb_reader_init,
+    NULL,
+    hb_reader_close,
+    NULL,
+    NULL
+};
+
 typedef struct
 {
+    int    startup;
     double average; // average time between packets
     int64_t last;   // last timestamp seen on this stream
     int id;         // stream id
@@ -15,7 +30,7 @@ typedef struct
     int valid;      // Stream timing is not valid until next scr.
 } stream_timing_t;
 
-typedef struct
+struct hb_work_private_s
 {
     hb_job_t     * job;
     hb_title_t   * title;
@@ -35,26 +50,53 @@ typedef struct
     uint8_t        saw_audio;       // != 0 if we've seen audio
 
     int            start_found;     // found pts_to_start point
+    int64_t        pts_to_start;
     uint64_t       st_first;
-} hb_reader_t;
+};
 
 /***********************************************************************
  * Local prototypes
  **********************************************************************/
-static void        ReaderFunc( void * );
 static hb_fifo_t ** GetFifoForId( hb_job_t * job, int id );
-static void UpdateState( hb_reader_t  * r, int64_t start);
+static void UpdateState( hb_work_private_t  * r, int64_t start);
 
 /***********************************************************************
  * hb_reader_init
  ***********************************************************************
  *
  **********************************************************************/
-hb_thread_t * hb_reader_init( hb_job_t * job )
+static int hb_reader_open( hb_work_private_t * r )
 {
-    hb_reader_t * r;
+    if ( r->title->type == HB_BD_TYPE )
+    {
+        if ( !( r->bd = hb_bd_init( r->title->path ) ) )
+            return 1;
+    }
+    else if ( r->title->type == HB_DVD_TYPE )
+    {
+        if ( !( r->dvd = hb_dvd_init( r->title->path ) ) )
+            return 1;
+    }
+    else if ( r->title->type == HB_STREAM_TYPE ||
+              r->title->type == HB_FF_STREAM_TYPE )
+    {
+        if ( !( r->stream = hb_stream_open( r->title->path, r->title, 0 ) ) )
+            return 1;
+    }
+    else
+    {
+        // Unknown type, should never happen
+        return 1;
+    }
+    return 0;
+}
 
-    r = calloc( sizeof( hb_reader_t ), 1 );
+static int hb_reader_init( hb_work_object_t * w, hb_job_t * job )
+{
+    hb_work_private_t * r;
+
+    r = calloc( sizeof( hb_work_private_t ), 1 );
+    w->private_data = r;
 
     r->job   = job;
     r->title = job->title;
@@ -68,28 +110,79 @@ hb_thread_t * hb_reader_init( hb_job_t * job )
                                            (double)job->vrate;
     r->stream_timing[0].last = -r->stream_timing[0].average;
     r->stream_timing[0].valid = 1;
+    r->stream_timing[0].startup = 10;
     r->stream_timing[1].id = -1;
+
+    r->demux.last_scr = -1;
 
     if ( !job->pts_to_start )
         r->start_found = 1;
+    else
+    {
+        // The frame at the actual start time may not be an i-frame
+        // so can't be decoded without starting a little early.
+        // sync.c will drop early frames.
+        r->pts_to_start = MAX(0, job->pts_to_start - 180000);
+    }
 
-    return hb_thread_init( "reader", ReaderFunc, r,
-                           HB_NORMAL_PRIORITY );
+    // The stream needs to be open before starting the reader thead
+    // to prevent a race with decoders that may share information
+    // with the reader. Specifically avcodec needs this.
+    if ( hb_reader_open( r ) )
+    {
+        free( r->stream_timing );
+        free( r );
+        return 1;
+    }
+    return 0;
 }
 
-static void push_buf( const hb_reader_t *r, hb_fifo_t *fifo, hb_buffer_t *buf )
+
+static void hb_reader_close( hb_work_object_t * w )
+{
+    hb_work_private_t * r = w->private_data;
+
+    if (r->bd)
+    {
+        hb_bd_stop( r->bd );
+        hb_bd_close( &r->bd );
+    }
+    else if (r->dvd)
+    {
+        hb_dvd_stop( r->dvd );
+        hb_dvd_close( &r->dvd );
+    }
+    else if (r->stream)
+    {
+        hb_stream_close(&r->stream);
+    }
+
+    if ( r->stream_timing )
+    {
+        free( r->stream_timing );
+    }
+
+    free( r );
+}
+
+static void push_buf( const hb_work_private_t *r, hb_fifo_t *fifo, hb_buffer_t *buf )
 {
     while ( !*r->die && !r->job->done )
     {
         if ( hb_fifo_full_wait( fifo ) )
         {
             hb_fifo_push( fifo, buf );
+            buf = NULL;
             break;
         }
     }
+    if ( buf )
+    {
+        hb_buffer_close( &buf );
+    }
 }
 
-static int is_audio( hb_reader_t *r, int id )
+static int is_audio( hb_work_private_t *r, int id )
 {
     int i;
     hb_audio_t *audio;
@@ -112,22 +205,9 @@ static int is_audio( hb_reader_t *r, int id )
 // of the previous packet). The next four routines keep track of this
 // per-stream timing.
 
-// find the per-stream timing state for 'buf'
-
-static stream_timing_t *find_st( hb_reader_t *r, const hb_buffer_t *buf )
-{
-    stream_timing_t *st = r->stream_timing;
-    for ( ; st->id != -1; ++st )
-    {
-        if ( st->id == buf->id )
-            return st;
-    }
-    return NULL;
-}
-
 // find or create the per-stream timing state for 'buf'
 
-static stream_timing_t *id_to_st( hb_reader_t *r, const hb_buffer_t *buf, int valid )
+static stream_timing_t *id_to_st( hb_work_private_t *r, const hb_buffer_t *buf, int valid )
 {
     stream_timing_t *st = r->stream_timing;
     while ( st->id != buf->id && st->id != -1)
@@ -150,6 +230,7 @@ static stream_timing_t *id_to_st( hb_reader_t *r, const hb_buffer_t *buf, int va
         }
         st->id = buf->id;
         st->average = 30.*90.;
+        st->startup = 10;
         st->last = -st->average;
         if ( ( st->is_audio = is_audio( r, buf->id ) ) != 0 )
         {
@@ -164,14 +245,29 @@ static stream_timing_t *id_to_st( hb_reader_t *r, const hb_buffer_t *buf, int va
 // update the average inter-packet time of the stream associated with 'buf'
 // using a recursive low-pass filter with a 16 packet time constant.
 
-static void update_ipt( hb_reader_t *r, const hb_buffer_t *buf )
+static void update_ipt( hb_work_private_t *r, const hb_buffer_t *buf )
 {
     stream_timing_t *st = id_to_st( r, buf, 1 );
+
+    if( buf->renderOffset < 0 )
+    {
+        st->last += st->average;
+        return;
+    }
+
     double dt = buf->renderOffset - st->last;
     // Protect against spurious bad timestamps
     if ( dt > -5 * 90000LL && dt < 5 * 90000LL )
     {
-        st->average += ( dt - st->average ) * (1./32.);
+        if( st->startup )
+        {
+            st->average += ( dt - st->average ) * (1./2.);
+            st->startup--;
+        }
+        else
+        {
+            st->average += ( dt - st->average ) * (1./32.);
+        }
         st->last = buf->renderOffset;
     }
     st->valid = 1;
@@ -181,7 +277,7 @@ static void update_ipt( hb_reader_t *r, const hb_buffer_t *buf )
 // such that 'buf' will follow the previous packet of this stream separated
 // by the average packet time of the stream.
 
-static void new_scr_offset( hb_reader_t *r, hb_buffer_t *buf )
+static void new_scr_offset( hb_work_private_t *r, hb_buffer_t *buf )
 {
     stream_timing_t *st = id_to_st( r, buf, 1 );
     int64_t last;
@@ -203,7 +299,6 @@ static void new_scr_offset( hb_reader_t *r, hb_buffer_t *buf )
     //hb_log("id %x last %ld avg %g nxt %ld renderOffset %ld scr_offset %ld",
     //    buf->id, last, st->average, nxt, buf->renderOffset, r->scr_offset);
     r->scr_changes = r->demux.scr_changes;
-    st->last = nxt;
 }
 
 /***********************************************************************
@@ -211,9 +306,10 @@ static void new_scr_offset( hb_reader_t *r, hb_buffer_t *buf )
  ***********************************************************************
  *
  **********************************************************************/
-static void ReaderFunc( void * _r )
+void ReadLoop( void * _w )
 {
-    hb_reader_t  * r = _r;
+    hb_work_object_t * w = _w;
+    hb_work_private_t  * r = w->private_data;
     hb_fifo_t   ** fifos;
     hb_buffer_t  * buf;
     hb_list_t    * list;
@@ -221,34 +317,11 @@ static void ReaderFunc( void * _r )
     int            chapter = -1;
     int            chapter_end = r->job->chapter_end;
 
-    if ( r->title->type == HB_BD_TYPE )
-    {
-        if ( !( r->bd = hb_bd_init( r->title->path ) ) )
-            return;
-    }
-    else if ( r->title->type == HB_DVD_TYPE )
-    {
-        if ( !( r->dvd = hb_dvd_init( r->title->path ) ) )
-            return;
-    }
-    else if ( r->title->type == HB_STREAM_TYPE )
-    {
-        if ( !( r->stream = hb_stream_open( r->title->path, r->title ) ) )
-            return;
-    }
-    else
-    {
-        // Unknown type, should never happen
-        return;
-    }
-
-    hb_buffer_t *ps = hb_buffer_init( HB_DVD_READ_BUFFER_SIZE );
     if (r->bd)
     {
         if( !hb_bd_start( r->bd, r->title ) )
         {
             hb_bd_close( &r->bd );
-            hb_buffer_close( &ps );
             return;
         }
         if ( r->job->start_at_preview )
@@ -259,6 +332,8 @@ static void ReaderFunc( void * _r )
         }
         else if ( r->job->pts_to_start )
         {
+            // Note, bd seeks always put us to an i-frame.  no need
+            // to start decoding early using r->pts_to_start
             hb_bd_seek_pts( r->bd, r->job->pts_to_start );
             r->job->pts_to_start = 0;
             r->start_found = 1;
@@ -296,7 +371,6 @@ static void ReaderFunc( void * _r )
         if( !hb_dvd_start( r->dvd, r->title, start ) )
         {
             hb_dvd_close( &r->dvd );
-            hb_buffer_close( &ps );
             return;
         }
         if (r->job->angle)
@@ -325,10 +399,14 @@ static void ReaderFunc( void * _r )
         
         // Find out what the first timestamp of the stream is
         // and then seek to the appropriate offset from it
-        if ( hb_stream_read( r->stream, ps ) )
+        if ( ( buf = hb_stream_read( r->stream ) ) )
         {
-            if ( ps->start > 0 )
-                pts_to_start += ps->start;
+            if ( buf->start > 0 )
+            {
+                pts_to_start += buf->start;
+                r->pts_to_start += buf->start;
+                r->job->pts_to_start += buf->start;
+            }
         }
         
         if ( hb_stream_seek_ts( r->stream, pts_to_start ) >= 0 )
@@ -388,21 +466,21 @@ static void ReaderFunc( void * _r )
 
         if (r->bd)
         {
-          if( !hb_bd_read( r->bd, ps ) )
+          if( (buf = hb_bd_read( r->bd )) == NULL )
           {
               break;
           }
         }
         else if (r->dvd)
         {
-          if( !hb_dvd_read( r->dvd, ps ) )
+          if( (buf = hb_dvd_read( r->dvd )) == NULL )
           {
               break;
           }
         }
         else if (r->stream)
         {
-          if ( !hb_stream_read( r->stream, ps ) )
+          if ( (buf = hb_stream_read( r->stream )) == NULL )
           {
             break;
           }
@@ -411,11 +489,11 @@ static void ReaderFunc( void * _r )
             // We will inspect the timestamps of each frame in sync
             // to skip from this seek point to the timestamp we
             // want to start at.
-            if ( ps->start > 0 && ps->start < r->job->pts_to_start )
+            if ( buf->start > 0 && buf->start < r->job->pts_to_start )
             {
-                r->job->pts_to_start -= ps->start;
+                r->job->pts_to_start -= buf->start;
             }
-            else if ( ps->start >= r->job->pts_to_start )
+            else if ( buf->start >= r->job->pts_to_start )
             {
                 r->job->pts_to_start = 0;
                 r->start_found = 1;
@@ -445,7 +523,7 @@ static void ReaderFunc( void * _r )
             hb_set_state( r->job->h, &state );
         }
 
-        (hb_demux[r->title->demuxer])( ps, list, &r->demux );
+        (hb_demux[r->title->demuxer])( buf, list, &r->demux );
 
         while( ( buf = hb_list_item( list, 0 ) ) )
         {
@@ -466,7 +544,7 @@ static void ReaderFunc( void * _r )
                     // offset will get computed correctly.
                     id_to_st( r, buf, 1 );
                     r->saw_video = 1;
-                    hb_log( "reader: first SCR %"PRId64" id %d DTS %"PRId64,
+                    hb_log( "reader: first SCR %"PRId64" id 0x%x DTS %"PRId64,
                             r->demux.last_scr, buf->id, buf->renderOffset );
                 }
                 else
@@ -513,7 +591,7 @@ static void ReaderFunc( void * _r )
                         UpdateState( r, start );
 
                     if ( !r->start_found &&
-                        start >= r->job->pts_to_start )
+                        start >= r->pts_to_start )
                     {
                         // pts_to_start point found
                         r->start_found = 1;
@@ -526,15 +604,16 @@ static void ReaderFunc( void * _r )
                 }
                 if ( buf->renderOffset != -1 )
                 {
-                    if ( r->scr_changes == r->demux.scr_changes )
-                    {
-                        // This packet is referenced to the same SCR as the last.
-                        // Adjust timestamp to remove the System Clock Reference
-                        // offset then update the average inter-packet time
-                        // for this stream.
-                        buf->renderOffset -= r->scr_offset;
-                        update_ipt( r, buf );
-                    }
+                    // This packet is referenced to the same SCR as the last.
+                    // Adjust timestamp to remove the System Clock Reference
+                    // offset then update the average inter-packet time
+                    // for this stream.
+                    buf->renderOffset -= r->scr_offset;
+                    update_ipt( r, buf );
+                }
+                else
+                {
+                    update_ipt( r, buf );
                 }
                 if ( !r->start_found )
                 {
@@ -584,38 +663,15 @@ static void ReaderFunc( void * _r )
     }
 
     hb_list_empty( &list );
-    hb_buffer_close( &ps );
-    if (r->bd)
-    {
-        hb_bd_stop( r->bd );
-        hb_bd_close( &r->bd );
-    }
-    else if (r->dvd)
-    {
-        hb_dvd_stop( r->dvd );
-        hb_dvd_close( &r->dvd );
-    }
-    else if (r->stream)
-    {
-        hb_stream_close(&r->stream);
-    }
-
-    if ( r->stream_timing )
-    {
-        free( r->stream_timing );
-    }
 
     hb_log( "reader: done. %d scr changes", r->demux.scr_changes );
     if ( r->demux.dts_drops )
     {
         hb_log( "reader: %d drops because DTS out of range", r->demux.dts_drops );
     }
-
-    free( r );
-    _r = NULL;
 }
 
-static void UpdateState( hb_reader_t  * r, int64_t start)
+static void UpdateState( hb_work_private_t  * r, int64_t start)
 {
     hb_state_t state;
     uint64_t now;

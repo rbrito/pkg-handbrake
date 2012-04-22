@@ -3,10 +3,15 @@
  It may be used under the terms of the GNU General Public License. */
 
 #include "hb.h"
+#include "downmix.h"
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
 
-int     encCoreAudioInit( hb_work_object_t *, hb_job_t * );
+enum AAC_MODE { AAC_MODE_LC, AAC_MODE_HE };
+
+int     encCoreAudioInitLC( hb_work_object_t *, hb_job_t * );
+int     encCoreAudioInitHE( hb_work_object_t *, hb_job_t * );
+int     encCoreAudioInit( hb_work_object_t *, hb_job_t *, enum AAC_MODE mode );
 int     encCoreAudioWork( hb_work_object_t *, hb_buffer_t **, hb_buffer_t ** );
 void    encCoreAudioClose( hb_work_object_t * );
 
@@ -14,7 +19,16 @@ hb_work_object_t hb_encca_aac =
 {
     WORK_ENC_CA_AAC,
     "AAC encoder (Apple)",
-    encCoreAudioInit,
+    encCoreAudioInitLC,
+    encCoreAudioWork,
+    encCoreAudioClose
+};
+
+hb_work_object_t hb_encca_haac =
+{
+    WORK_ENC_CA_HAAC,
+    "HE-AAC encoder (Apple)",
+    encCoreAudioInitHE,
     encCoreAudioWork,
     encCoreAudioClose
 };
@@ -22,7 +36,7 @@ hb_work_object_t hb_encca_aac =
 struct hb_work_private_s
 {
     hb_job_t *job;
-    
+
     AudioConverterRef converter;
     uint8_t  *obuf;
     uint8_t  *buf;
@@ -30,6 +44,8 @@ struct hb_work_private_s
     unsigned long isamples, isamplesiz, omaxpacket, nchannels;
     uint64_t pts, ibytes;
     Float64 osamplerate;
+    int layout;
+    hb_chan_map_t *ichanmap;
 };
 
 #define MP4ESDescrTag                   0x03
@@ -93,11 +109,26 @@ static long ReadESDSDescExt(void* descExt, UInt8 **buffer, UInt32 *size, int ver
 }
 
 /***********************************************************************
+ * hb_work_encCoreAudio_init switches
+ ***********************************************************************
+ *
+ **********************************************************************/
+int encCoreAudioInitLC( hb_work_object_t * w, hb_job_t * job )
+{
+    return encCoreAudioInit( w, job, AAC_MODE_LC );
+}
+
+int encCoreAudioInitHE( hb_work_object_t * w, hb_job_t * job )
+{
+    return encCoreAudioInit( w, job, AAC_MODE_HE );
+}
+
+/***********************************************************************
  * hb_work_encCoreAudio_init
  ***********************************************************************
  *
  **********************************************************************/
-int encCoreAudioInit( hb_work_object_t * w, hb_job_t * job )
+int encCoreAudioInit( hb_work_object_t * w, hb_job_t * job, enum AAC_MODE mode )
 {
     hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
     hb_audio_t * audio = w->audio;
@@ -122,7 +153,16 @@ int encCoreAudioInit( hb_work_object_t * w, hb_job_t * job )
     input.mBitsPerChannel = 32;
 
     bzero( &output, sizeof( AudioStreamBasicDescription ) );
-    output.mFormatID = kAudioFormatMPEG4AAC;
+    switch ( mode ) 
+    {
+        case AAC_MODE_HE:
+            output.mFormatID = kAudioFormatMPEG4AAC_HE;
+            break;
+        case AAC_MODE_LC:
+        default:
+            output.mFormatID = kAudioFormatMPEG4AAC;
+            break;
+    }
     output.mSampleRate = ( Float64 ) audio->config.out.samplerate;
     output.mChannelsPerFrame = pv->nchannels;
     // let CoreAudio decide the rest...
@@ -133,7 +173,16 @@ int encCoreAudioInit( hb_work_object_t * w, hb_job_t * job )
     {
         // Retry without the samplerate
         bzero( &output, sizeof( AudioStreamBasicDescription ) );
-        output.mFormatID = kAudioFormatMPEG4AAC;
+        switch ( mode )
+        {
+            case AAC_MODE_HE:
+                output.mFormatID = kAudioFormatMPEG4AAC_HE;
+                break;
+            case AAC_MODE_LC:
+            default:
+                output.mFormatID = kAudioFormatMPEG4AAC;
+                break;
+        }
         output.mChannelsPerFrame = pv->nchannels;
 
         err = AudioConverterNew( &input, &output, &pv->converter );
@@ -146,42 +195,63 @@ int encCoreAudioInit( hb_work_object_t * w, hb_job_t * job )
         }
     }
 
-    if( ( audio->config.out.mixdown == HB_AMIXDOWN_6CH ) && ( audio->config.in.codec == HB_ACODEC_AC3) )
-    {
-        SInt32 channelMap[6] = { 2, 1, 3, 4, 5, 0 };
-        AudioConverterSetProperty( pv->converter, kAudioConverterChannelMap,
-                                   sizeof( channelMap ), channelMap );
-    }
-
     // set encoder quality to maximum
     tmp = kAudioConverterQuality_Max;
     AudioConverterSetProperty( pv->converter, kAudioConverterCodecQuality,
                                sizeof( tmp ), &tmp );
 
-    // set encoder bitrate control mode to constrained variable
-    tmp = kAudioCodecBitRateControlMode_VariableConstrained;
-    AudioConverterSetProperty( pv->converter, kAudioCodecPropertyBitRateControlMode,
-                              sizeof( tmp ), &tmp );
+    if( audio->config.out.bitrate > 0 )
+    {
+        // set encoder bitrate control mode to constrained variable
+        tmp = kAudioCodecBitRateControlMode_VariableConstrained;
+        AudioConverterSetProperty( pv->converter, kAudioCodecPropertyBitRateControlMode,
+                                   sizeof( tmp ), &tmp );
 
-    // get available bitrates
-    AudioValueRange *bitrates;
-    ssize_t bitrateCounts;
-    err = AudioConverterGetPropertyInfo( pv->converter, kAudioConverterApplicableEncodeBitRates,
-                                         &tmpsiz, NULL);
-    bitrates = malloc( tmpsiz );
-    err = AudioConverterGetProperty( pv->converter, kAudioConverterApplicableEncodeBitRates,
-                                     &tmpsiz, bitrates);
-    bitrateCounts = tmpsiz / sizeof( AudioValueRange );
+        // get available bitrates
+        AudioValueRange *bitrates;
+        ssize_t bitrateCounts;
+        err = AudioConverterGetPropertyInfo( pv->converter, kAudioConverterApplicableEncodeBitRates,
+                                             &tmpsiz, NULL);
+        bitrates = malloc( tmpsiz );
+        err = AudioConverterGetProperty( pv->converter, kAudioConverterApplicableEncodeBitRates,
+                                         &tmpsiz, bitrates);
+        bitrateCounts = tmpsiz / sizeof( AudioValueRange );
 
-    // set bitrate
-    tmp = audio->config.out.bitrate * 1000;
-    if( tmp < bitrates[0].mMinimum )
-        tmp = bitrates[0].mMinimum;
-    if( tmp > bitrates[bitrateCounts-1].mMinimum )
-        tmp = bitrates[bitrateCounts-1].mMinimum;
-    free( bitrates );
-    AudioConverterSetProperty( pv->converter, kAudioConverterEncodeBitRate,
-                              sizeof( tmp ), &tmp );
+        // set bitrate
+        tmp = audio->config.out.bitrate * 1000;
+        if( tmp < bitrates[0].mMinimum )
+            tmp = bitrates[0].mMinimum;
+        if( tmp > bitrates[bitrateCounts-1].mMinimum )
+            tmp = bitrates[bitrateCounts-1].mMinimum;
+        free( bitrates );
+        if( tmp != audio->config.out.bitrate * 1000 )
+            hb_log( "encca_aac: sanitizing track %d audio bitrate %d to %"PRIu32"",
+                    audio->config.out.track, audio->config.out.bitrate, tmp/1000 );
+        AudioConverterSetProperty( pv->converter, kAudioConverterEncodeBitRate,
+                                   sizeof( tmp ), &tmp );
+    }
+    else if( audio->config.out.quality >= 0 )
+    {
+        if( mode != AAC_MODE_LC )
+        {
+            hb_log( "encCoreAudioInit: internal error, VBR set but not applicable" );
+            return 1;
+        }
+        // set encoder bitrate control mode to variable
+        tmp = kAudioCodecBitRateControlMode_Variable;
+        AudioConverterSetProperty( pv->converter, kAudioCodecPropertyBitRateControlMode,
+                                   sizeof( tmp ), &tmp );
+
+        // set quality
+        tmp = audio->config.out.quality;
+        AudioConverterSetProperty( pv->converter, kAudioCodecPropertySoundQualityForVBR,
+                                   sizeof( tmp ), &tmp );
+    }
+    else
+    {
+        hb_log( "encCoreAudioInit: internal error, bitrate/quality not set" );
+        return 1;
+    }
 
     // get real input
     tmpsiz = sizeof( input );
@@ -196,8 +266,26 @@ int encCoreAudioInit( hb_work_object_t * w, hb_job_t * job )
 
     // set sizes
     pv->isamplesiz  = input.mBytesPerPacket;
-    pv->isamples    = output.mFramesPerPacket;
+    pv->isamples    = audio->config.out.samples_per_frame = output.mFramesPerPacket;
     pv->osamplerate = output.mSampleRate;
+
+    // set channel map and layout (for remapping)
+    pv->ichanmap = audio->config.in.channel_map;
+    switch( audio->config.out.mixdown )
+    {
+        case HB_AMIXDOWN_MONO:
+            pv->layout = HB_INPUT_CH_LAYOUT_MONO;
+            break;
+        case HB_AMIXDOWN_STEREO:
+        case HB_AMIXDOWN_DOLBY:
+        case HB_AMIXDOWN_DOLBYPLII:
+            pv->layout = HB_INPUT_CH_LAYOUT_STEREO;
+            break;
+        case HB_AMIXDOWN_6CH:
+        default:
+            pv->layout = HB_INPUT_CH_LAYOUT_3F2R | HB_INPUT_CH_LAYOUT_HAS_LFE;
+            break;
+    }
 
     // get maximum output size
     AudioConverterGetProperty( pv->converter,
@@ -209,14 +297,14 @@ int encCoreAudioInit( hb_work_object_t * w, hb_job_t * job )
     tmp = HB_CONFIG_MAX_SIZE;
     AudioConverterGetProperty( pv->converter,
                                kAudioConverterCompressionMagicCookie,
-                               &tmp, w->config->aac.bytes );
+                               &tmp, w->config->extradata.bytes );
     // CoreAudio returns a complete ESDS, but we only need
     // the DecoderSpecific info.
     UInt8* buffer = NULL;
-    ReadESDSDescExt(w->config->aac.bytes, &buffer, &tmpsiz, 0);
-    w->config->aac.length = tmpsiz;
-    memmove( w->config->aac.bytes, buffer,
-             w->config->aac.length );
+    ReadESDSDescExt(w->config->extradata.bytes, &buffer, &tmpsiz, 0);
+    w->config->extradata.length = tmpsiz;
+    memmove( w->config->extradata.bytes, buffer,
+             w->config->extradata.length );
 
     pv->list = hb_list_init();
     pv->buf = NULL;
@@ -246,9 +334,9 @@ void encCoreAudioClose( hb_work_object_t * w )
 
 /* Called whenever necessary by AudioConverterFillComplexBuffer */
 static OSStatus inInputDataProc( AudioConverterRef converter, UInt32 *npackets,
-                          AudioBufferList *buffers,
-                          AudioStreamPacketDescription** ignored,
-                          void *userdata )
+                                 AudioBufferList *buffers,
+                                 AudioStreamPacketDescription** ignored,
+                                 void *userdata )
 {
     hb_work_private_t *pv = userdata;
 
@@ -256,7 +344,7 @@ static OSStatus inInputDataProc( AudioConverterRef converter, UInt32 *npackets,
     {
         *npackets = 0;
         hb_log( "CoreAudio: no data to use in inInputDataProc" );
-        return noErr;
+        return 1;
     }
 
     if( pv->buf != NULL )
@@ -264,7 +352,7 @@ static OSStatus inInputDataProc( AudioConverterRef converter, UInt32 *npackets,
 
     uint64_t pts, pos;
     buffers->mBuffers[0].mDataByteSize = MIN( *npackets * pv->isamplesiz, pv->ibytes );
-    buffers->mBuffers[0].mData = pv->buf = calloc(1 , buffers->mBuffers[0].mDataByteSize );
+    buffers->mBuffers[0].mData = pv->buf = calloc( 1, buffers->mBuffers[0].mDataByteSize );
 
     if( hb_list_bytes( pv->list ) >= buffers->mBuffers[0].mDataByteSize )
     {
@@ -273,20 +361,19 @@ static OSStatus inInputDataProc( AudioConverterRef converter, UInt32 *npackets,
     }
     else
     {
-        hb_log( "CoreAudio: Not enought data, exiting inInputDataProc" );
+        hb_log( "CoreAudio: Not enough data, exiting inInputDataProc" );
         *npackets = 0;
         return 1;
     }
 
-    *npackets = buffers->mBuffers[0].mDataByteSize / pv->isamplesiz;
-
-    /* transform data from [-32768,32767] to [-1.0,1.0] */
-    float *fdata = buffers->mBuffers[0].mData;
-    int i;
-
-    for( i = 0; i < *npackets * pv->nchannels; i++ ) {
-        fdata[i] = fdata[i] / 32768.f;
+    if( pv->ichanmap != &hb_qt_chan_map )
+    {
+        hb_layout_remap( pv->ichanmap, &hb_qt_chan_map, pv->layout,
+                         (float*)buffers->mBuffers[0].mData,
+                         buffers->mBuffers[0].mDataByteSize / pv->isamplesiz );
     }
+
+    *npackets = buffers->mBuffers[0].mDataByteSize / pv->isamplesiz;
 
     pv->ibytes -= buffers->mBuffers[0].mDataByteSize;
 
@@ -317,15 +404,15 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
     obuflist.mBuffers[0].mDataByteSize = obuf->size;
     obuflist.mBuffers[0].mData = obuf->data;
 
-    OSStatus err = AudioConverterFillComplexBuffer( pv->converter, inInputDataProc, pv, 
-                                     &npackets, &obuflist, &odesc );
+    OSStatus err = AudioConverterFillComplexBuffer( pv->converter, inInputDataProc, pv,
+                                                    &npackets, &obuflist, &odesc );
     if( err ) {
         hb_log( "CoreAudio: Not enough data" );
         return NULL;
     }
     if( odesc.mDataByteSize == 0 || npackets == 0 ) {
-        return NULL;
         hb_log( "CoreAudio: 0 packets returned " );
+        return NULL;
     }
 
     obuf->start = pv->pts;
@@ -382,7 +469,7 @@ static hb_buffer_t *Flush( hb_work_object_t *w, hb_buffer_t *bufin )
  *
  **********************************************************************/
 int encCoreAudioWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
-                  hb_buffer_t ** buf_out )
+                      hb_buffer_t ** buf_out )
 {
     hb_work_private_t * pv = w->private_data;
     hb_buffer_t * buf;

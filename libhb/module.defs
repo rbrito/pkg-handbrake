@@ -1,4 +1,4 @@
-__deps__ := A52DEC BZIP2 FAAC FAAD2 FFMPEG FONTCONFIG FREETYPE LAME LIBASS LIBDCA \
+__deps__ := A52DEC BZIP2 FAAC FFMPEG FONTCONFIG FREETYPE LAME LIBASS LIBDCA \
     LIBDVDREAD LIBDVDNAV LIBICONV LIBMKV LIBOGG LIBSAMPLERATE LIBTHEORA LIBVORBIS LIBXML2 \
     MP4V2 MPEG2DEC PTHREADW32 X264 ZLIB LIBBLURAY
 
@@ -92,7 +92,7 @@ LIBHB.dll = $(LIBHB.build/)hb.dll
 LIBHB.lib = $(LIBHB.build/)hb.lib
 
 LIBHB.dll.libs = $(foreach n, \
-        a52 ass avcore avcodec avformat avutil dca dvdnav dvdread faac faad fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
+        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
         ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
         $(CONTRIB.build/)lib/lib$(n).a )
 
@@ -100,6 +100,12 @@ ifneq ($(HAS.iconv),1)
 LIBHB.dll.libs += $(CONTRIB.build/)lib/libiconv.a
 else
     LIBHB.GCC.l += iconv
+endif
+
+ifeq (1,$(FRIBIDI.enabled))
+    LIBHB.dll.libs += $(CONTRIB.build/)lib/libfribidi.a
+else
+	LIBHB.GCC.l += fribidi
 endif
 
 ifneq ($(HAS.pthread),1)

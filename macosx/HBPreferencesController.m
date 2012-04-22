@@ -46,7 +46,7 @@
         @"Open Source",     @"LaunchSourceBehavior",
         @"English",         @"DefaultLanguage",
         @"YES",             @"UseCoreAudio",
-        @"YES",              @"DefaultMpegName",
+        @"Auto",            @"DefaultMpegExtension",
         @"YES",             @"UseDvdNav",
         @"",                @"DefAdvancedx264Flags",
         @"YES",             @"DefaultPresetsDrawerShow",
@@ -64,7 +64,7 @@
         @"0.25",            @"x264CqSliderFractional",
         @"YES",             @"AlertBuiltInPresetUpdate",
         @"MetaX",           @"SendCompletedEncodeToApp",
-		@"YES",				@"AC3PassthruDefaultsToAC3",
+        @"NO",              @"ShowAdvancedOptsForAutoPassthru",
         nil]];
 }
 

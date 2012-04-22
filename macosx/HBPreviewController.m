@@ -125,19 +125,19 @@
 
 - (void)windowWillClose:(NSNotification *)aNotification
 {
-    /* Upon Closing the picture window, we make sure we clean up any
-     * preview movie that might be playing
+    /* Upon closing the preview window, we make sure we clean up any
+     * preview movie that might be playing or encoding. However, first
+     * make sure we have a preview picture before calling pictureSliderChanged
+     * to go back to still previews .. just in case nothing is loaded up like in
+     * a Launch, cancel new scan then quit type scenario.
      */
-    hb_stop( fPreviewLibhb );
-    isEncoding = NO;
-    // Show the picture view
-    [fPictureView setHidden:NO];
-    [fMovieView pause:nil];
-    [fMovieTimer invalidate];
-    [fMovieTimer release];
-    [fMovieView setHidden:YES];
-	[fMovieView setMovie:nil];
-
+    if (fPicture)
+    {
+        [self pictureSliderChanged:nil];
+        [fMovieTimer invalidate];
+        [fMovieTimer release];
+    }
+    
     hudTimerSeconds = 0;
     [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"PreviewWindowIsOpen"];
 }
@@ -183,18 +183,13 @@
     
     /* we set the preview length popup in seconds */
     [fPreviewMovieLengthPopUp removeAllItems];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"5"];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"10"];
     [fPreviewMovieLengthPopUp addItemWithTitle: @"15"];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"20"];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"25"];
     [fPreviewMovieLengthPopUp addItemWithTitle: @"30"];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"35"];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"40"];
     [fPreviewMovieLengthPopUp addItemWithTitle: @"45"];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"50"];
-    [fPreviewMovieLengthPopUp addItemWithTitle: @"55"];
     [fPreviewMovieLengthPopUp addItemWithTitle: @"60"];
+    [fPreviewMovieLengthPopUp addItemWithTitle: @"90"];
+    [fPreviewMovieLengthPopUp addItemWithTitle: @"105"];
+    [fPreviewMovieLengthPopUp addItemWithTitle: @"120"];
     
     /* adjust the preview slider length */
     /* We use our advance pref to determine how many previews we scanned */
@@ -443,6 +438,9 @@
 
 - (IBAction) pictureSliderChanged: (id) sender
 {
+    /* Run cancelCreateMoviePreview in case a preview is being encoded and then cancel if so */
+    [self cancelCreateMoviePreview:nil];
+    
     // Show the picture view
     [fPictureView setHidden:NO];
     [fMovieView pause:nil];
@@ -893,15 +891,15 @@
          * which will determine which subtitles to enable, if any.
          */
         job->pass = -1;
-        x264opts_tmp = job->x264opts;
+        x264opts_tmp = job->advanced_opts;
         
-        job->x264opts = NULL;
+        job->advanced_opts = NULL;
         job->indepth_scan = 1;  
         /*
          * Add the pre-scan job
          */
         hb_add( fPreviewLibhb, job );
-        job->x264opts = x264opts_tmp;
+        job->advanced_opts = x264opts_tmp;
     }                  
     /* Go ahead and perform the actual encoding preview scan */
     job->indepth_scan = 0;
@@ -1202,6 +1200,26 @@
             [fMovieView setHidden:NO];
             [fMoviePlaybackControlBox setHidden: NO];
             [fPictureControlBox setHidden: YES];
+            
+            // get and enable subtitles
+            NSArray *subtitlesArray;
+            subtitlesArray = [aMovie tracksOfMediaType: @"sbtl"];
+            if( subtitlesArray && [subtitlesArray count] )
+            {
+                // enable the first TX3G subtitle track
+                [[subtitlesArray objectAtIndex: 0] setEnabled: YES];
+            }
+            else
+            {
+                // Perian subtitles
+                subtitlesArray = [aMovie tracksOfMediaType: QTMediaTypeVideo];
+                if( subtitlesArray && ( [subtitlesArray count] >= 2 ) )
+                {
+                    // track 0 should be video, other video tracks should
+                    // be subtitles; force-enable the first subs track
+                    [[subtitlesArray objectAtIndex: 1] setEnabled: YES];
+                }
+            }
             
             // to actually play the movie
             
@@ -1591,9 +1609,7 @@
 {   
     
     /* special case for scaleToScreen */
-    NSSize screenSize = [[[self window] screen] visibleFrame].size;
     NSSize areaSize = [fPictureViewArea frame].size;
-    NSSize pictureSize = [fPictureView frame].size;
     CGFloat viewSizeAspect = viewSize.width / viewSize.height;
     
     if (viewSize.width > areaSize.width || viewSize.height > areaSize.height)
@@ -1613,7 +1629,6 @@
     }
     
     [fPictureView setFrameSize:viewSize];
-    NSSize newAreaSize = [fPictureViewArea frame].size;
     
     
     // center it vertically and horizontally

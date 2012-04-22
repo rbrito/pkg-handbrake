@@ -10,7 +10,7 @@ TEST.c.o = $(patsubst $(SRC/)%.c,$(BUILD/)%.o,$(TEST.c))
 TEST.exe = $(BUILD/)$(call TARGET.exe,$(HB.name)CLI)
 
 TEST.libs = $(LIBHB.a) $(foreach n, \
-        a52 ass avcore avcodec avformat avutil dca dvdnav dvdread faac faad fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
+        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
         ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
         $(CONTRIB.build/)lib/lib$(n).a )
 
@@ -31,6 +31,11 @@ ifeq (1,$(ZLIB.enabled))
     TEST.libs += $(CONTRIB.build/)lib/libz.a
 else
 	TEST.GCC.l += z
+endif
+ifeq (1,$(FRIBIDI.enabled))
+    TEST.libs += $(CONTRIB.build/)lib/libfribidi.a
+else
+	TEST.GCC.l += fribidi
 endif
 
 ###############################################################################

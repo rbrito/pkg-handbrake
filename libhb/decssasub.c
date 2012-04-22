@@ -19,7 +19,6 @@
  * 
  * @author David Foster (davidfstr)
  */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include "hb.h"
@@ -33,6 +32,8 @@ struct hb_work_private_s
     ASS_Renderer *renderer;
     ASS_Track *ssaTrack;
     int readOrder;
+
+    hb_job_t *job;
 };
 
 typedef enum {
@@ -49,6 +50,8 @@ typedef enum {
               min   * 1000L * 60 +\
               sec   * 1000L +\
               centi * 10L ) )
+
+#define SSA_VERBOSE_PACKETS 0
 
 static StyleSet ssa_parse_style_override( uint8_t *pos, StyleSet prevStyles )
 {
@@ -214,7 +217,13 @@ static int parse_timing_from_ssa_packet( char *in_data, int64_t *in_start, int64
      */
     int start_hr, start_min, start_sec, start_centi;
     int   end_hr,   end_min,   end_sec,   end_centi;
-    int numPartsRead = sscanf( (char *) in_data, "Dialogue: %*128[^,],"
+    // SSA subtitles have an empty layer field (bare ',').  The scanf
+    // format specifier "%*128[^,]" will not match on a bare ','.  There
+    // must be at least one non ',' character in the match.  So the format
+    // specifier is placed directly next to the ':' so that the next
+    // expected ' ' after the ':' will be the character it matches on 
+    // when there is no layer field.
+    int numPartsRead = sscanf( (char *) in_data, "Dialogue:%*128[^,],"
         "%d:%d:%d.%d,"  // Start
         "%d:%d:%d.%d,", // End
         &start_hr, &start_min, &start_sec, &start_centi,
@@ -337,6 +346,92 @@ fail:
     return NULL;
 }
 
+static hb_buffer_t * ssa_to_mkv_ssa( hb_work_object_t * w,  hb_buffer_t * in )
+{
+    hb_work_private_t * pv = w->private_data;
+    hb_buffer_t * out_last = NULL;
+    hb_buffer_t * out_first = NULL;
+
+    hb_buffer_realloc( in, in->size + 1 );
+    in->data[in->size] = '\0';
+
+    const char *EOL = "\r\n";
+    char *curLine, *curLine_parserData;
+    for ( curLine = strtok_r( (char *) in->data, EOL, &curLine_parserData );
+          curLine;
+          curLine = strtok_r( NULL, EOL, &curLine_parserData ) )
+    {
+        // Skip empty lines and spaces between adjacent CR and LF
+        if (curLine[0] == '\0')
+            continue;
+        
+        int64_t in_start, in_stop;
+        if ( parse_timing_from_ssa_packet( curLine, &in_start, &in_stop ) )
+            continue;
+
+        int len = strlen(curLine);
+
+        // Convert the SSA line to MKV-SSA format
+        char *layerField = malloc( len );
+        // SSA subtitles have an empty layer field (bare ',').  The scanf
+        // format specifier "%*128[^,]" will not match on a bare ','.  There
+        // must be at least one non ',' character in the match.  So the format
+        // specifier is placed directly next to the ':' so that the next
+        // expected ' ' after the ':' will be the character it matches on 
+        // when there is no layer field.
+        int numPartsRead = sscanf( curLine, "Dialogue:%128[^,],", layerField );
+        if ( numPartsRead != 1 )
+        {
+            free( layerField );
+            continue;
+        }
+        
+        char *styleToTextFields = (char *)find_field( (uint8_t*)curLine, (uint8_t*)curLine + len, 4 );
+        if ( styleToTextFields == NULL ) 
+        {
+            free( layerField );
+            continue;
+        }
+        
+        // The output should always be shorter than the input
+        hb_buffer_t * out = hb_buffer_init( len );
+        char *mkvOut = (char*)out->data;
+        out->start = in_start;
+        out->stop = in_stop;
+
+        // The sscanf conversion above will result in an extra space
+        // before the layerField.  Strip the space.
+        char *stripLayerField = layerField;
+        for(; *stripLayerField == ' '; stripLayerField++);
+
+        sprintf( mkvOut, "%d,%s,%s", 
+                 pv->readOrder++, stripLayerField, styleToTextFields );
+        
+        free( layerField );
+
+        len = strlen(mkvOut);
+        if ( len == 0 )
+        {
+            hb_buffer_close(&out);
+        }
+        else
+        {
+            out->size = len;
+            if ( out_last == NULL )
+            {
+                out_last = out_first = out;
+            }
+            else
+            {
+                out_last->next = out;
+                out_last = out;
+            }
+        }
+    }
+
+    return out_first;
+}
+
 /*
  * SSA line format:
  *   Dialogue: Marked,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text '\0'
@@ -360,7 +455,13 @@ static hb_buffer_t *ssa_decode_line_to_picture( hb_work_object_t * w, uint8_t *i
     int mkvInSize;
     {
         char *layerField = malloc( in_size );
-        int numPartsRead = sscanf( (char *) in_data, "Dialogue: %128[^,],", layerField );
+        // SSA subtitles have an empty layer field (bare ',').  The scanf
+        // format specifier "%*128[^,]" will not match on a bare ','.  There
+        // must be at least one non ',' character in the match.  So the format
+        // specifier is placed directly next to the ':' so that the next
+        // expected ' ' after the ':' will be the character it matches on 
+        // when there is no layer field.
+        int numPartsRead = sscanf( (char *) in_data, "Dialogue:%128[^,],", layerField );
         if ( numPartsRead != 1 )
             goto fail;
         
@@ -370,11 +471,16 @@ static hb_buffer_t *ssa_decode_line_to_picture( hb_work_object_t * w, uint8_t *i
             goto fail;
         }
         
+        // The sscanf conversion above will result in an extra space
+        // before the layerField.  Strip the space.
+        char *stripLayerField = layerField;
+        for(; *stripLayerField == ' '; stripLayerField++);
+
         mkvIn = malloc( in_size + 1 );
         mkvIn[0] = '\0';
         sprintf(mkvIn, "%d", pv->readOrder++);    // ReadOrder: make this up
         strcat( mkvIn, "," );
-        strcat( mkvIn, layerField );
+        strcat( mkvIn, stripLayerField );
         strcat( mkvIn, "," );
         strcat( mkvIn, (char *) styleToTextFields );
         
@@ -452,6 +558,9 @@ static hb_buffer_t *ssa_decode_line_to_picture( hb_work_object_t * w, uint8_t *i
         out->y = frame->dst_y;
         out->width = frame->w;
         out->height = frame->h;
+        out->start = in_start;
+        out->stop = in_stop;
+        out->sequence = in_sequence;
         
         int i;
         int numPixels = frame->w * frame->h;
@@ -467,25 +576,20 @@ static hb_buffer_t *ssa_decode_line_to_picture( hb_work_object_t * w, uint8_t *i
             int srcA = srcRgba[3];
             
             *dstY = (srcYuv >> 16) & 0xff;
-            *dstU = (srcYuv >> 8 ) & 0xff;
-            *dstV = (srcYuv >> 0 ) & 0xff;
+            *dstV = (srcYuv >> 8 ) & 0xff;
+            *dstU = (srcYuv >> 0 ) & 0xff;
             *dstA = srcA / 16;  // HB's max alpha value is 16
         }
         
         free(rgba);
         
         *outSubpictureListTailPtr = out;
-        outSubpictureListTailPtr = &out->next_subpicture;
+        outSubpictureListTailPtr = &out->next;
     }
     
     // NOTE: The subpicture list is actually considered a single packet by most other code
     hb_buffer_t *out = outSubpictureList;
     
-    // Copy metadata from the input packet to the output packet
-    out->start = in_start;
-    out->stop = in_stop;
-    out->sequence = in_sequence;
-
     return out;
     
 fail:
@@ -497,15 +601,7 @@ static void ssa_log(int level, const char *fmt, va_list args, void *data)
 {
     if ( level < 5 )      // same as default verbosity when no callback is set
     {
-        char *msg;
-        if ( vasprintf( &msg, fmt, args ) < 0 )
-        {
-            hb_log( "decssasub: could not report libass message\n" );
-            return;
-        }
-        hb_log( "[ass] %s", msg );  // no need for extra '\n' because libass sends it
-        
-        free( msg );
+        hb_valog( 1, "[ass]", fmt, args );
     }
 }
 
@@ -515,6 +611,7 @@ static int decssaInit( hb_work_object_t * w, hb_job_t * job )
 
     pv              = calloc( 1, sizeof( hb_work_private_t ) );
     w->private_data = pv;
+    pv->job = job;
     
     if ( w->subtitle->config.dest == RENDERSUB ) {
         pv->ssa = ass_library_init();
@@ -589,20 +686,29 @@ static int decssaInit( hb_work_object_t * w, hb_job_t * job )
 static int decssaWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
                         hb_buffer_t ** buf_out )
 {
+    hb_work_private_t * pv = w->private_data;
     hb_buffer_t * in = *buf_in;
-    hb_buffer_t * out_list = NULL;
     
-    if ( in->size > 0 ) {
-        out_list = ssa_decode_packet(w, in);
-    } else {
-        out_list = hb_buffer_init( 0 );
+#if SSA_VERBOSE_PACKETS
+    printf("\nPACKET(%"PRId64",%"PRId64"): %.*s\n", in->start/90, in->stop/90, in->size, in->data);
+#endif
+    
+    if ( in->size <= 0 )
+    {
+        *buf_out = in;
+        *buf_in = NULL;
+        return HB_WORK_DONE;
     }
-    
-    // Dispose the input packet, as it is no longer needed
-    hb_buffer_close(&in);
-    
-    *buf_in = NULL;
-    *buf_out = out_list;
+
+    if ( w->subtitle->config.dest == PASSTHRUSUB && pv->job->mux == HB_MUX_MKV )
+    {
+        *buf_out = ssa_to_mkv_ssa(w, in);
+    }
+    else
+    {
+        *buf_out = ssa_decode_packet(w, in);
+    }
+
     return HB_WORK_OK;
 }
 

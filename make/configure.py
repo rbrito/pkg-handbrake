@@ -8,6 +8,7 @@
 ###############################################################################
 
 import fnmatch
+import glob
 import optparse
 import os
 import platform
@@ -98,12 +99,6 @@ class Configure( object ):
         cfg.infof( 'compute: makevar SRC/    = %s\n', self.src_final )
         cfg.infof( 'compute: makevar BUILD/  = %s\n', self.build_final )
         cfg.infof( 'compute: makevar PREFIX/ = %s\n', self.prefix_final )
-
-        ## xcode does a chdir so we need appropriate values
-        macosx = os.path.join( self.src_dir, 'macosx' )
-        self.xcode_x_src    = self._final_dir( macosx, self.src_dir )
-        self.xcode_x_build  = self._final_dir( macosx, self.build_dir )
-        self.xcode_x_prefix = self._final_dir( macosx, self.prefix_dir )
 
     ## perform chdir and enable log recording
     def chdir( self ):
@@ -402,8 +397,10 @@ class LDProbe( Action ):
 ##
 ## example results from various platforms:
 ##
-##   i386-apple-darwin9.6.0     (Mac OS X 10.5.6 Intel)
 ##   powerpc-apple-darwin9.6.0  (Mac OS X 10.5.6 PPC)
+##   i386-apple-darwin9.6.0     (Mac OS X 10.5.6 Intel)
+##   x86_64-apple-darwin10.8.0  (Mac OS X 10.6.8 Intel)
+##   x86_64-apple-darwin11.2.0  (Mac OS X 10.7.2 Intel)
 ##   i686-pc-cygwin             (Cygwin, Microsoft Vista)
 ##   x86_64-unknown-linux-gnu   (Linux, Fedora 10 x86_64)
 ##
@@ -553,6 +550,9 @@ class ArchAction( Action ):
         ## some match on system should be made here; otherwise we signal a warning. 
         if host.match( '*-*-cygwin*' ):
             pass
+        elif host.match( '*-*-darwin11.*' ):
+            self.mode['i386']   = 'i386-apple-darwin%s'      % (host.release)
+            self.mode['x86_64'] = 'x86_64-apple-darwin%s'    % (host.release)
         elif host.match( '*-*-darwin*' ):
             self.mode['i386']   = 'i386-apple-darwin%s'      % (host.release)
             self.mode['x86_64'] = 'x86_64-apple-darwin%s'    % (host.release)
@@ -628,20 +628,24 @@ class CoreProbe( Action ):
 class SelectMode( dict ):
     def __init__( self, descr, *modes, **kwargs ):
         super( SelectMode, self ).__init__( modes )
-        self.descr    = descr
-        self.modes    = modes
-        self.default  = kwargs.get('default',modes[0][0])
-        self.mode     = self.default
+        self.descr = descr
+        self.modes = modes
+        self.what  = kwargs.get('what',' mode')
+        if modes:
+            self.default = kwargs.get('default',modes[0][0])
+        else:
+            self.default = None
+        self.mode = self.default
 
     def cli_add_option( self, parser, option ):
         parser.add_option( option, default=self.mode, metavar='MODE',
-            help='select %s mode: %s' % (self.descr,self.toString()),
+            help='select %s%s: %s' % (self.descr,self.what,self.toString()),
             action='callback', callback=self.cli_callback, type='str' )
 
     def cli_callback( self, option, opt_str, value, parser, *args, **kwargs ):
         if value not in self:
-            raise optparse.OptionValueError( 'invalid %s mode: %s (choose from %s)'
-                % (self.descr,value,self.toString( True )) )
+            raise optparse.OptionValueError( 'invalid %s%s: %s (choose from: %s)'
+                % (self.descr,self.what,value,self.toString( True )) )
         self.mode = value
 
     def toString( self, nodefault=False ):
@@ -671,13 +675,29 @@ class SelectMode( dict ):
 ##
 class RepoProbe( ShellProbe ):
     def __init__( self ):
-        super( RepoProbe, self ).__init__( 'svn info', 'svn info %s' % (cfg.src_dir) )
+        svn = 'svn'
+
+        ## Possible the repo was created using an incompatible version than what is
+        ## available in PATH when probe runs. Workaround by checking for file
+        ## .svn/HANDBRAKE_REPO_PROBE which points to a preferred svn executable.
+        try:
+            hrp = os.path.join( cfg.src_dir, '.svn', 'HANDBRAKE_REPO_PROBE' )
+            if os.path.isfile( hrp ) and os.path.getsize( hrp ) > 0:
+                file = cfg.open( hrp, 'r' )
+                line = file.readline().strip()
+                file.close()
+                if line:
+                    svn = line
+        except:
+            pass
+
+        super( RepoProbe, self ).__init__( 'svn info', '%s info %s' % (svn,cfg.src_dir) )
 
         self.url       = 'svn://nowhere.com/project/unknown'
         self.root      = 'svn://nowhere.com/project'
         self.branch    = 'unknown'
         self.uuid      = '00000000-0000-0000-0000-000000000000';
-        self.rev       = 3736
+        self.rev       = 4474
         self.date      = '0000-00-00 00:00:00 -0000'
         self.official  = 0
         self.type      = 'unofficial'
@@ -744,7 +764,7 @@ class Project( Action ):
 
         self.vmajor = 0
         self.vminor = 9
-        self.vpoint = 5
+        self.vpoint = 6
 
     def _action( self ):
         ## add architecture to URL only for Mac
@@ -760,7 +780,7 @@ class Project( Action ):
             self.build = time.strftime('%Y%m%d') + '00'
             self.title = '%s %s (%s)' % (self.name,self.version,self.build)
         elif repo.type == 'developer':
-            self.version = 'svn%d' % (repo.rev)
+            self.version = '%dsvn' % (repo.rev)
             url_ctype = '_unstable'
             url_ntype = 'unstable'
             self.build = time.strftime('%Y%m%d') + '01'
@@ -865,7 +885,7 @@ class SelectTool( Action ):
                 self.run()
                 break
         if not found:
-            raise optparse.OptionValueError( 'invalid %s mode: %s (choose from %s)'
+            raise optparse.OptionValueError( 'invalid %s mode: %s (choose from: %s)'
                 % (self.name,value,self.toString( True )) )
 
     def doc_add( self, doc ):
@@ -1003,8 +1023,8 @@ class Option( optparse.Option ):
     conf_args = []
 
     def _conf_record( self, opt, value ):
-        ## skip conf,force,launch
-        if re.match( '^--(conf|force|launch).*$', opt ):
+        ## filter out non-applicable options
+        if re.match( '^--(force|launch).*$', opt ):
             return
 
         ## remove duplicates (last duplicate wins)
@@ -1030,13 +1050,13 @@ def createCLI():
     cli.description += 'Configure %s build system.' % (project.name)
 
     ## add hidden options
-    cli.add_option( '--conf-method', default='terminal', action='store', help=optparse.SUPPRESS_HELP )
+    cli.add_option( '--xcode-driver', default='bootstrap', action='store', help=optparse.SUPPRESS_HELP )
     cli.add_option( '--force', default=False, action='store_true', help='overwrite existing build config' )
     cli.add_option( '--verbose', default=False, action='store_true', help='increase verbosity' )
 
     ## add install options
     grp = OptionGroup( cli, 'Directory Locations' )
-    h = IfHost( 'specify sysroot (e.g. for Leopard builds from Snow Leapard)', '*-*-darwin*', none=optparse.SUPPRESS_HELP ).value
+    h = IfHost( 'specify sysroot of SDK for Xcode builds', '*-*-darwin*', none=optparse.SUPPRESS_HELP ).value
     grp.add_option( '--sysroot', default=None, action='store', metavar='DIR',
         help=h )
     grp.add_option( '--src', default=cfg.src_dir, action='store', metavar='DIR',
@@ -1059,11 +1079,10 @@ def createCLI():
     grp.add_option( '--disable-gtk-update-checks', default=False, action='store_true', help=h )
     h = IfHost( 'enable GTK GUI (mingw)', '*-*-mingw*', none=optparse.SUPPRESS_HELP ).value
     grp.add_option( '--enable-gtk-mingw', default=False, action='store_true', help=h )
+    h = IfHost( 'disable gstreamer (live preview)', '*-*-linux*', none=optparse.SUPPRESS_HELP ).value
+    grp.add_option( '--disable-gst', default=False, action='store_true', help=h )
     h = IfHost( 'enable use of ffmpeg mpeg2 decoding', '*-*-*', none=optparse.SUPPRESS_HELP ).value
     grp.add_option( '--enable-ff-mpeg2', default=False, action='store_true', help=h )
-
-    h = IfHost( 'disable Xcode', '*-*-darwin*', none=optparse.SUPPRESS_HELP ).value
-    grp.add_option( '--disable-xcode', default=False, action='store_true', help=h )
 
     cli.add_option_group( grp )
 
@@ -1086,10 +1105,24 @@ def createCLI():
     arch.mode.cli_add_option( grp, '--arch' )
     grp.add_option( '--cross', default=None, action='store', metavar='SPEC',
         help='specify GCC cross-compilation spec' )
-    h = IfHost( 'Min OS X Version', '*-*-darwin*', none=optparse.SUPPRESS_HELP ).value
+    h = IfHost( 'specify Mac OS X deployment target for Xcode builds', '*-*-darwin*', none=optparse.SUPPRESS_HELP ).value
     grp.add_option( '--minver', default=None, action='store', metavar='VER',
         help=h )
+
+    h = IfHost( 'Build and use local yasm', '*-*-*', none=optparse.SUPPRESS_HELP ).value
+    grp.add_option( '--enable-local-yasm', default=False, action='store_true', help=h )
+
     cli.add_option_group( grp )
+
+    ## add Xcode options
+    if host.match( '*-*-darwin*' ):
+        grp = OptionGroup( cli, 'Xcode Options' )
+        grp.add_option( '--disable-xcode', default=False, action='store_true',
+            help='disable Xcode' )
+        grp.add_option( '--xcode-symroot', default='xroot', action='store', metavar='DIR',
+            help='specify root of the directory hierarchy that contains product files and intermediate build files' )
+        xcconfigMode.cli_add_option( grp, '--xcode-config' )
+        cli.add_option_group( grp )
 
     ## add tool locations
     grp = OptionGroup( cli, 'Tool Basenames and Locations' )
@@ -1260,6 +1293,19 @@ try:
     debugMode = SelectMode( 'debug', ('none','none'), ('min','min'), ('std','std'), ('max','max') )
     optimizeMode = SelectMode( 'optimize', ('none','none'), ('speed','speed'), ('size','size'), default='speed' )
 
+    ## find xcconfig values
+    xcconfigMode = SelectMode( 'xcconfig', ('none',None), what='' )
+    if host.match( '*-*-darwin*' ):
+        for xc in glob.glob( os.path.join(cfg.dir, '../macosx/xcconfig/*.xcconfig') ):
+            bname = os.path.basename( xc )
+            xname = os.path.splitext( bname )
+            if xname and xname[0]:
+                xcconfigMode[xname[0]] = bname
+        if not 'native' in xcconfigMode:
+            raise Exception( 'native xcconfig not found' )
+        xcconfigMode.default = 'native'
+        xcconfigMode.mode = xcconfigMode.default
+
     ## create CLI and parse
     cli = createCLI()
     (options,args) = cli.parse_args()
@@ -1287,6 +1333,10 @@ try:
     ## run delayed actions
     for action in Action.actions:
         action.run()
+
+    ## enable local yasm when yasm probe fails
+    if Tools.yasm.fail and not options.enable_local_yasm:
+        options.enable_local_yasm = True
 
     if build.system == 'mingw':
         dlfcn_test = """
@@ -1431,18 +1481,14 @@ int main ()
     doc.add( 'BUILD.ncpu',    core.count )
     doc.add( 'BUILD.jobs',    core.jobs )
 
-    doc.add( 'BUILD.cross',        int(options.cross != None or arch.mode.mode != arch.mode.default) )
+    doc.add( 'BUILD.cross', int(options.cross != None or arch.mode.mode != arch.mode.default) )
     if options.cross:
         doc.add( 'BUILD.cross.prefix', '%s-' % (options.cross) )
     else:
         doc.add( 'BUILD.cross.prefix', '' )
 
-    doc.add( 'BUILD.method', 'terminal' )
     doc.add( 'BUILD.date',   time.strftime('%c') )
     doc.add( 'BUILD.arch',   arch.mode.mode )
-
-    doc.addBlank()
-    doc.add( 'CONF.method', options.conf_method )
 
     doc.addBlank()
     doc.add( 'SRC',     cfg.src_final )
@@ -1453,21 +1499,26 @@ int main ()
     doc.add( 'PREFIX/', cfg.prefix_final + os.sep )
     
     doc.addBlank()
-    doc.add( 'FEATURE.asm',   'disabled' )
-    doc.add( 'FEATURE.gtk',   int( not options.disable_gtk ))
-    doc.add( 'FEATURE.gtk.update.checks',   int( not options.disable_gtk_update_checks ))
-    doc.add( 'FEATURE.gtk.mingw',   int( options.enable_gtk_mingw ))
+    doc.add( 'FEATURE.local_yasm', int( options.enable_local_yasm ) )
+    doc.add( 'FEATURE.asm',        'disabled' )
+    doc.add( 'FEATURE.gtk',        int( not options.disable_gtk ))
+    doc.add( 'FEATURE.gtk.update.checks', int( not options.disable_gtk_update_checks ))
+    doc.add( 'FEATURE.gtk.mingw',  int( options.enable_gtk_mingw ))
+    doc.add( 'FEATURE.gst',        int( not options.disable_gst ))
     doc.add( 'FEATURE.ff.mpeg2',   int( options.enable_ff_mpeg2 ))
-    doc.add( 'FEATURE.xcode', int( not (Tools.xcodebuild.fail or options.disable_xcode or options.cross) ))
+    doc.add( 'FEATURE.xcode',      int( not (Tools.xcodebuild.fail or options.disable_xcode or options.cross) ))
 
     if not Tools.xcodebuild.fail and not options.disable_xcode:
         doc.addBlank()
-        doc.add( 'XCODE.external.src',    cfg.xcode_x_src )
-        doc.add( 'XCODE.external.build',  cfg.xcode_x_build )
-        doc.add( 'XCODE.external.prefix', cfg.xcode_x_prefix )
+        doc.add( 'XCODE.driver', options.xcode_driver )
+        if os.path.isabs(options.xcode_symroot):
+            doc.add( 'XCODE.symroot', options.xcode_symroot )
+        else:
+            doc.add( 'XCODE.symroot', os.path.abspath(os.path.join(cfg.build_dir,options.xcode_symroot)) )
+        doc.add( 'XCODE.xcconfig', xcconfigMode[xcconfigMode.mode] )
 
-    doc.addBlank()
     if build.system == 'mingw':
+        doc.addBlank()
         if not dlfcn.fail:
             doc.add( 'HAS.dlfcn', 1 )
         if not pthread.fail:
@@ -1480,9 +1531,10 @@ int main ()
             doc.add( 'HAS.iconv', 1 )
 
     doc.addMake( '' )
-    doc.addMake( '## define debug mode before other includes' )
+    doc.addMake( '## define debug mode and optimize before other includes' )
     doc.addMake( '## since it is tested in some module.defs' )
     doc.add( 'GCC.g', debugMode.mode )
+    doc.add( 'GCC.O', optimizeMode.mode )
     doc.addBlank()
     doc.addMake( '## include definitions' )
     doc.addMake( 'include $(SRC/)make/include/main.defs' )
@@ -1504,11 +1556,8 @@ int main ()
         doc.add( 'GCC.archs', '' )
         doc.add( 'GCC.sysroot', '' )
         doc.add( 'GCC.minver', '' )
-    doc.add( 'GCC.ldsysroot', '$(GCC.sysroot)' )
-    doc.add( 'GCC.ldminver', '$(GCC.minver)' )
-    doc.add( 'GCC.O', optimizeMode.mode )
 
-    if options.enable_asm and not Tools.yasm.fail:
+    if options.enable_asm and ( not Tools.yasm.fail or options.enable_local_yasm ):
         asm = ''
         if build.match( 'i?86-*' ):
             asm = 'x86'

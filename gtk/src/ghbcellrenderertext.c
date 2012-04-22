@@ -19,15 +19,8 @@
 
 #include <config.h>
 #include <stdlib.h>
-#include <gtk/gtk.h>
+#include "ghbcompat.h"
 #include <glib/gi18n-lib.h>
-#include <gtk/gtkmarshal.h>
-//#include <gtk/gtkeditable.h>
-//#include <gtk/gtkentry.h>
-//#include <gtk/gtkintl.h>
-//#include <gtk/gtkprivate.h>
-//#include <gtk/gtktreeprivate.h>
-//#include <gtk/gtkalias.h>
 
 #include "marshalers.h"
 #include "ghbcellrenderertext.h"
@@ -178,10 +171,10 @@ ghb_cell_renderer_text_init (GhbCellRendererText *celltext)
 
   priv = GHB_CELL_RENDERER_TEXT_GET_PRIVATE (celltext);
 
-  GTK_CELL_RENDERER (celltext)->xalign = 0.0;
-  GTK_CELL_RENDERER (celltext)->yalign = 0.5;
-  GTK_CELL_RENDERER (celltext)->xpad = 2;
-  GTK_CELL_RENDERER (celltext)->ypad = 2;
+  g_object_set(celltext, "xalign", 0.0, NULL);
+  g_object_set(celltext, "yalign", 0.5, NULL);
+  g_object_set(celltext, "xpad", 2, NULL);
+  g_object_set(celltext, "ypad", 2, NULL);
   celltext->font_scale = 1.0;
   celltext->fixed_height_rows = -1;
   celltext->font = pango_font_description_new ();
@@ -1233,9 +1226,9 @@ ghb_cell_renderer_text_set_property (GObject      *object,
       celltext->editable = g_value_get_boolean (value);
       celltext->editable_set = TRUE;
       if (celltext->editable)
-        GTK_CELL_RENDERER (celltext)->mode = GTK_CELL_RENDERER_MODE_EDITABLE;
+        g_object_set(celltext, "mode", GTK_CELL_RENDERER_MODE_EDITABLE, NULL);
       else
-        GTK_CELL_RENDERER (celltext)->mode = GTK_CELL_RENDERER_MODE_INERT;
+        g_object_set(celltext, "mode", GTK_CELL_RENDERER_MODE_INERT, NULL);
       g_object_notify (object, "editable-set");
       break;
 
@@ -1524,6 +1517,13 @@ get_size (GtkCellRenderer *cell,
 
   priv = GHB_CELL_RENDERER_TEXT_GET_PRIVATE (cell);
 
+  gint cell_width, cell_height, cell_xpad, cell_ypad;
+  gfloat cell_xalign, cell_yalign;
+
+  gtk_cell_renderer_get_fixed_size(cell, &cell_width, &cell_height);
+  gtk_cell_renderer_get_alignment(cell, &cell_xalign, &cell_yalign);
+  gtk_cell_renderer_get_padding(cell, &cell_xpad, &cell_ypad);
+
   if (celltext->calc_fixed_height)
     {
       PangoContext *context;
@@ -1550,12 +1550,12 @@ get_size (GtkCellRenderer *cell,
       pango_font_description_free (font_desc);
 
       gtk_cell_renderer_set_fixed_size (cell,
-					cell->width, 2*cell->ypad +
+					cell_width, 2*cell_ypad +
 					celltext->fixed_height_rows * PANGO_PIXELS (row_height));
       
       if (height)
 	{
-	  *height = cell->height;
+          *height = cell_height;
 	  height = NULL;
 	}
       celltext->calc_fixed_height = FALSE;
@@ -1568,50 +1568,26 @@ get_size (GtkCellRenderer *cell,
   else
     layout = get_layout (celltext, widget, FALSE, 0);
 
-  pango_layout_get_extents (layout, NULL, &rect);
-  pango_extents_to_pixels (&rect, NULL);
-
-  if (height)
-    *height = cell->ypad * 2 + rect.height;
-
-  /* The minimum size for ellipsized labels is ~ 3 chars */
-  if (width)
-    {
-      if (priv->ellipsize || priv->width_chars > 0)
-	{
-	  PangoContext *context;
-	  PangoFontMetrics *metrics;
-	  gint char_width;
-
-	  context = pango_layout_get_context (layout);
-	  metrics = pango_context_get_metrics (context, widget->style->font_desc, pango_context_get_language (context));
-
-	  char_width = pango_font_metrics_get_approximate_char_width (metrics);
-	  pango_font_metrics_unref (metrics);
-	  
-	  *width = cell->xpad * 2 + (PANGO_PIXELS (char_width) * MAX (priv->width_chars, 3));
-	}
-      else
-	{
-	  *width = cell->xpad * 2 + rect.x + rect.width;
-	}	  
-    }
+  pango_layout_get_pixel_extents(layout, NULL, &rect);
 
   if (cell_area)
     {
+      rect.height = MIN(rect.height, cell_area->height - 2 * cell_ypad);
+      rect.width = MIN(rect.width, cell_area->width - 2 * cell_xpad);
+
       if (x_offset)
 	{
 	  if (gtk_widget_get_direction (widget) == GTK_TEXT_DIR_RTL)
-	    *x_offset = (1.0 - cell->xalign) * (cell_area->width - (rect.x + rect.width + (2 * cell->xpad)));
+	    *x_offset = (1.0 - cell_xalign) * (cell_area->width - (2 * cell_xpad));
 	  else 
-	    *x_offset = cell->xalign * (cell_area->width - (rect.x + rect.width + (2 * cell->xpad)));
+	    *x_offset = cell_xalign * (cell_area->width - (2 * cell_xpad));
 
 	  if ((priv->ellipsize_set && priv->ellipsize != PANGO_ELLIPSIZE_NONE) || priv->wrap_width != -1)
 	    *x_offset = MAX(*x_offset, 0);
 	}
       if (y_offset)
 	{
-	  *y_offset = cell->yalign * (cell_area->height - (rect.height + (2 * cell->ypad)));
+	  *y_offset = cell_yalign * (cell_area->height - (rect.height + (2 * cell_ypad)));
 	  *y_offset = MAX (*y_offset, 0);
 	}
     }
@@ -1620,6 +1596,12 @@ get_size (GtkCellRenderer *cell,
       if (x_offset) *x_offset = 0;
       if (y_offset) *y_offset = 0;
     }
+
+  if (height)
+    *height = cell_ypad * 2 + rect.height;
+
+  if (width)
+    *width = cell_xpad * 2 + rect.width;
 
   g_object_unref (layout);
 }
@@ -1660,13 +1642,17 @@ ghb_cell_renderer_text_render (GtkCellRenderer      *cell,
   layout = get_layout (celltext, widget, TRUE, flags);
   get_size (cell, widget, cell_area, layout, &x_offset, &y_offset, NULL, NULL);
 
-  if (!cell->sensitive) 
+  gboolean sensitive;
+  gint xpad, ypad;
+
+  sensitive = gtk_cell_renderer_get_sensitive(cell);
+  if (!sensitive) 
     {
       state = GTK_STATE_INSENSITIVE;
     }
   else if ((flags & GTK_CELL_RENDERER_SELECTED) == GTK_CELL_RENDERER_SELECTED)
     {
-      if (GTK_WIDGET_HAS_FOCUS (widget))
+      if (gtk_widget_has_focus (widget))
 	state = GTK_STATE_SELECTED;
       else
 	state = GTK_STATE_ACTIVE;
@@ -1683,6 +1669,8 @@ ghb_cell_renderer_text_render (GtkCellRenderer      *cell,
       else
 	state = GTK_STATE_NORMAL;
     }
+
+  gtk_cell_renderer_get_padding(cell, &xpad, &ypad);
 
   if (celltext->background_set && 
       (flags & GTK_CELL_RENDERER_SELECTED) == 0)
@@ -1707,7 +1695,7 @@ ghb_cell_renderer_text_render (GtkCellRenderer      *cell,
 
   if (priv->ellipsize_set && priv->ellipsize != PANGO_ELLIPSIZE_NONE)
     pango_layout_set_width (layout, 
-			    (cell_area->width - x_offset - 2 * cell->xpad) * PANGO_SCALE);
+			    (cell_area->width - x_offset - 2 * xpad) * PANGO_SCALE);
   else if (priv->wrap_width == -1)
     pango_layout_set_width (layout, -1);
 
@@ -1718,8 +1706,8 @@ ghb_cell_renderer_text_render (GtkCellRenderer      *cell,
                     expose_area,
                     widget,
                     "cellrenderertext",
-                    cell_area->x + x_offset + cell->xpad,
-                    cell_area->y + y_offset + cell->ypad,
+                    cell_area->x + x_offset + xpad,
+                    cell_area->y + y_offset + ypad,
                     layout);
 
   g_object_unref (layout);
@@ -1767,9 +1755,11 @@ ghb_cell_renderer_text_editing_done (GtkCellEditable *entry,
       priv->entry_menu_popdown_timeout = 0;
     }
 
+  gboolean editing_canceled;
+  g_object_get(entry, "editing-canceled", &editing_canceled, NULL);
   gtk_cell_renderer_stop_editing (GTK_CELL_RENDERER (data), 
-				  GTK_ENTRY (entry)->editing_canceled);
-  if (GTK_ENTRY (entry)->editing_canceled)
+				  editing_canceled);
+  if (editing_canceled)
     return;
 
   path = g_object_get_data (G_OBJECT (entry), GHB_CELL_RENDERER_TEXT_PATH);
@@ -1787,7 +1777,7 @@ popdown_timeout (gpointer data)
 
   priv->entry_menu_popdown_timeout = 0;
 
-  if (!GTK_WIDGET_HAS_FOCUS (priv->entry))
+  if (!gtk_widget_has_focus (priv->entry))
     ghb_cell_renderer_text_editing_done (GTK_CELL_EDITABLE (priv->entry), data);
 
   return FALSE;
@@ -1843,7 +1833,7 @@ ghb_cell_renderer_text_focus_out_event (GtkWidget *entry,
   if (priv->in_entry_menu)
     return FALSE;
 
-  GTK_ENTRY (entry)->editing_canceled = TRUE;
+  g_object_set(entry, "editing-canceled", TRUE, NULL);
   gtk_cell_editable_remove_widget (GTK_CELL_EDITABLE (entry));
   gtk_cell_editable_editing_done (GTK_CELL_EDITABLE (entry));
 
@@ -1871,9 +1861,11 @@ ghb_cell_renderer_text_start_editing (GtkCellRenderer      *cell,
   if (celltext->editable == FALSE)
     return NULL;
 
+  gint xalign;
+  g_object_get(cell, "xalign", &xalign, NULL);
   priv->entry = g_object_new (GTK_TYPE_ENTRY,
 			      "has-frame", FALSE,
-			      "xalign", cell->xalign,
+			      "xalign", xalign,
 			      NULL);
 
   if (celltext->text)
@@ -1959,8 +1951,10 @@ ghb_cell_renderer_text_set_fixed_height_from_font (GhbCellRendererText *renderer
 
   if (number_of_rows == -1)
     {
+      gint width;
+      g_object_get(renderer, "width", &width, NULL);
       gtk_cell_renderer_set_fixed_size (GTK_CELL_RENDERER (renderer),
-					GTK_CELL_RENDERER (renderer)->width,
+					width,
 					-1);
     }
   else

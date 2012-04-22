@@ -83,7 +83,12 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     memset( pv->filename, 0, 1024 );
     hb_get_tempory_filename( job->h, pv->filename, "x264.log" );
 
-    x264_param_default( &param );
+    if( x264_param_default_preset( &param, job->x264_preset, job->x264_tune ) < 0 )
+    {
+        free( pv );
+        pv = NULL;
+        return 1;
+    }
     
     /* Enable metrics */
     param.analyse.b_psnr = 1;
@@ -98,8 +103,17 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     param.i_threads    = ( hb_get_cpu_count() * 3 / 2 );
     param.i_width      = job->width;
     param.i_height     = job->height;
-    param.i_fps_num    = job->vrate;
-    param.i_fps_den    = job->vrate_base;
+    if( job->pass == 2 && job->cfr != 1 )
+    {
+        hb_interjob_t * interjob = hb_interjob_get( job->h );
+        param.i_fps_num = interjob->vrate;
+        param.i_fps_den = interjob->vrate_base;
+    }
+    else
+    {
+        param.i_fps_num = job->vrate;
+        param.i_fps_den = job->vrate_base;
+    }
     if ( job->cfr == 1 )
     {
         param.i_timebase_num   = 0;
@@ -115,31 +129,41 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     /* Disable annexb. Inserts size into nal header instead of start code */
     param.b_annexb     = 0;
 
-    /* Set min:max key intervals ratio to 1:10 of fps.
-     * This section is skipped if fps=25 (default).
-     */
-    if (job->vrate_base != 1080000)
-    {
-        if (job->pass == 2 && !job->cfr )
-        {
-            /* Even though the framerate might be different due to VFR,
-               we still want the same keyframe intervals as the 1st pass,
-               so the 1st pass stats won't conflict on frame decisions.    */
-            hb_interjob_t * interjob = hb_interjob_get( job->h );
-            param.i_keyint_max = 10 * (int)( (double)interjob->vrate / (double)interjob->vrate_base + 0.5 );
-        }
-        else
-        {
-            /* adjust +0.5 for when fps has remainder to bump
-               { 23.976, 29.976, 59.94 } to { 24, 30, 60 } */
-            param.i_keyint_max = 10 * (int)( (double)job->vrate / (double)job->vrate_base + 0.5 );
-        }
-    }
+    /* Set min:max keyframe intervals to 1:10 of fps.
+       adjust +0.5 for when fps has remainder to bump
+       { 23.976, 29.976, 59.94 } to { 24, 30, 60 } */
+    param.i_keyint_min = (int)( (double)job->vrate / (double)job->vrate_base + 0.5 );
+    param.i_keyint_max = 10 * param.i_keyint_min;
 
     param.i_log_level  = X264_LOG_INFO;
     
+    /* set up the VUI color model & gamma to match what the COLR atom
+     * set in muxmp4.c says. See libhb/muxmp4.c for notes. */
+    if( job->color_matrix_code == 3 )
+    {
+        // Custom
+        param.vui.i_colorprim = job->color_prim;
+        param.vui.i_transfer  = job->color_transfer;
+        param.vui.i_colmatrix = job->color_matrix;
+    }
+    else if( ( job->color_matrix_code == 2 ) || 
+             ( job->color_matrix_code == 0 && ( job->title->width >= 1280 || job->title->height >= 720 ) ) )
+    {
+        // ITU BT.709 HD content
+        param.vui.i_colorprim = 1;
+        param.vui.i_transfer  = 1;
+        param.vui.i_colmatrix = 1;
+    }
+    else
+    {
+        // ITU BT.601 DVD or SD TV content
+        param.vui.i_colorprim = 6;
+        param.vui.i_transfer  = 1;
+        param.vui.i_colmatrix = 6;
+    }
+
     /*
-       	This section passes the string x264opts to libx264 for parsing into
+        This section passes the string advanced_opts to libx264 for parsing into
         parameter names and values.
 
         The string is set up like this:
@@ -153,11 +177,11 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
         Merritt implemented in the Mplayer/Mencoder project.
      */
 
-    if( job->x264opts != NULL && *job->x264opts != '\0' )
+    if( job->advanced_opts != NULL && *job->advanced_opts != '\0' )
     {
         char *x264opts, *x264opts_start;
 
-        x264opts = x264opts_start = strdup(job->x264opts);
+        x264opts = x264opts_start = strdup(job->advanced_opts);
 
         while( x264opts_start && *x264opts )
         {
@@ -182,7 +206,7 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
             /* Here's where the strings are passed to libx264 for parsing. */
             ret = x264_param_parse( &param, name, value );
 
-            /* 	Let x264 sanity check the options for us*/
+            /* Let x264 sanity check the options for us*/
             if( ret == X264_PARAM_BAD_NAME )
                 hb_log( "x264 options: Unknown suboption %s", name );
             if( ret == X264_PARAM_BAD_VALUE )
@@ -190,28 +214,17 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
         }
         free(x264opts_start);
     }
-    
-    /* B-frames are on by default.*/
-    job->areBframes = 1;
-    
-    if( param.i_bframe && param.i_bframe_pyramid )
-    {
-        /* Note b-pyramid here, so the initial delay can be doubled */
-        job->areBframes = 2;
-    }
-    else if( !param.i_bframe )
-    {
-        /*
-         When B-frames are enabled, the max frame count increments
-         by 1 (regardless of the number of B-frames). If you don't
-         change the duration of the video track when you mux, libmp4
-         barfs.  So, check if the x264opts aren't using B-frames, and
-         when they aren't, set the boolean job->areBframes as false.
-         */
-        job->areBframes = 0;
-    }
-    
-    if( param.i_keyint_min != X264_KEYINT_MIN_AUTO || param.i_keyint_max != 250 )
+
+    /* Reload colorimetry settings in case custom values were set
+     * in the advanced_opts string */
+    job->color_matrix_code = 3;
+    job->color_prim = param.vui.i_colorprim;
+    job->color_transfer = param.vui.i_transfer;
+    job->color_matrix = param.vui.i_colmatrix;
+
+    /* For 25 fps sources, HandBrake's explicit keyints will match the x264 defaults:
+       min-keyint 25 (same as auto), keyint 250 */
+    if( param.i_keyint_min != 25 || param.i_keyint_max != 250 )
     {
         int min_auto;
 
@@ -232,37 +245,6 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
         hb_log( "encx264: min-keyint: %s, keyint: %s", min, max );
     }
 
-    /* set up the VUI color model & gamma to match what the COLR atom
-     * set in muxmp4.c says. See libhb/muxmp4.c for notes. */
-    if( job->color_matrix == 1 )
-    {
-        // ITU BT.601 DVD or SD TV content
-        param.vui.i_colorprim = 6;
-        param.vui.i_transfer = 1;
-        param.vui.i_colmatrix = 6;
-    }
-    else if( job->color_matrix == 2 )
-    {
-        // ITU BT.709 HD content
-        param.vui.i_colorprim = 1;
-        param.vui.i_transfer = 1;
-        param.vui.i_colmatrix = 1;
-    }
-    else if ( job->title->width >= 1280 || job->title->height >= 720 )
-    {
-        // we guess that 720p or above is ITU BT.709 HD content
-        param.vui.i_colorprim = 1;
-        param.vui.i_transfer = 1;
-        param.vui.i_colmatrix = 1;
-    }
-    else
-    {
-        // ITU BT.601 DVD or SD TV content
-        param.vui.i_colorprim = 6;
-        param.vui.i_transfer = 1;
-        param.vui.i_colmatrix = 6;
-    }
-
     if( job->anamorphic.mode )
     {
         param.vui.i_sar_width  = job->anamorphic.par_width;
@@ -273,25 +255,16 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     }
 
 
-    if( job->vquality > 0.0 && job->vquality < 1.0 )
+    if( job->vquality >= 0 )
     {
-        /*Constant RF*/
-        param.rc.i_rc_method = X264_RC_CRF;
-        param.rc.f_rf_constant = 51 - job->vquality * 51;
-        hb_log( "encx264: Encoding at constant RF %f", param.rc.f_rf_constant );
-    }
-    else if( job->vquality == 0 || job->vquality >= 1.0 )
-    {
-        /* Use the vquality as a raw RF or QP
-          instead of treating it like a percentage. */
-        /*Constant RF*/
+        /* Constant RF */
         param.rc.i_rc_method = X264_RC_CRF;
         param.rc.f_rf_constant = job->vquality;
         hb_log( "encx264: Encoding at constant RF %f", param.rc.f_rf_constant );
     }
     else
     {
-        /* Rate control */
+        /* Average bitrate */
         param.rc.i_rc_method = X264_RC_ABR;
         param.rc.i_bitrate = job->vbitrate;
         switch( job->pass )
@@ -307,8 +280,46 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
         }
     }
 
+    /* Apply profile settings after explicit settings, if present. */
+    if( job->x264_profile )
+    {
+        if( x264_param_apply_profile( &param, job->x264_profile ) < 0 )
+        {
+            free( pv );
+            pv = NULL;
+            return 1;
+        }
+    }
+
+    /* B-frames are on by default.*/
+    job->areBframes = 1;
+    
+    if( param.i_bframe && param.i_bframe_pyramid )
+    {
+        /* Note b-pyramid here, so the initial delay can be doubled */
+        job->areBframes = 2;
+    }
+    else if( !param.i_bframe )
+    {
+        /*
+         When B-frames are enabled, the max frame count increments
+         by 1 (regardless of the number of B-frames). If you don't
+         change the duration of the video track when you mux, libmp4
+         barfs.  So, check if the x264opts aren't using B-frames, and
+         when they aren't, set the boolean job->areBframes as false.
+         */
+        job->areBframes = 0;
+    }
+    
     hb_deep_log( 2, "encx264: opening libx264 (pass %d)", job->pass );
     pv->x264 = x264_encoder_open( &param );
+    if ( pv->x264 == NULL )
+    {
+        hb_error("encx264: x264_encoder_open failed.");
+        free( pv );
+        pv = NULL;
+        return 1;
+    }
 
     x264_encoder_headers( pv->x264, &nal, &nal_count );
 
@@ -429,16 +440,7 @@ static hb_buffer_t *nal_encode( hb_work_object_t *w, x264_picture_t *pic_out,
         switch( pic_out->i_type )
         {
             case X264_TYPE_IDR:
-                buf->frametype = HB_FRAME_IDR;
-                /* if we have a chapter marker pending and this
-                   frame's presentation time stamp is at or after
-                   the marker's time stamp, use this as the
-                   chapter start. */
-                if( pv->next_chap != 0 && pv->next_chap <= pic_out->i_pts )
-                {
-                    pv->next_chap = 0;
-                    buf->new_chap = pv->chap_mark;
-                }
+                // Handled in b_keyframe check below.
                 break;
 
             case X264_TYPE_I:
@@ -476,6 +478,23 @@ static hb_buffer_t *nal_encode( hb_work_object_t *w, x264_picture_t *pic_out,
             buf->flags &= ~HB_FRAME_REF;
         else
             buf->flags |= HB_FRAME_REF;
+
+        // PIR has no IDR frames, but x264 marks recovery points
+        // as keyframes.  So fake an IDR at these points. This flag
+        // is also set for real IDR frames.
+        if( pic_out->b_keyframe )
+        {
+            buf->frametype = HB_FRAME_IDR;
+            /* if we have a chapter marker pending and this
+               frame's presentation time stamp is at or after
+               the marker's time stamp, use this as the
+               chapter start. */
+            if( pv->next_chap != 0 && pv->next_chap <= pic_out->i_pts )
+            {
+                pv->next_chap = 0;
+                buf->new_chap = pv->chap_mark;
+            }
+        }
 
         buf->size += size;
     }
@@ -607,3 +626,19 @@ int encx264Work( hb_work_object_t * w, hb_buffer_t ** buf_in,
     *buf_out = x264_encode( w, in );
     return HB_WORK_OK;
 }
+
+const char * const * hb_x264_presets()
+{
+    return x264_preset_names;
+}
+
+const char * const * hb_x264_tunes()
+{
+    return x264_tune_names;
+}
+
+const char * const * hb_x264_profiles()
+{
+    return x264_profile_names;
+}
+

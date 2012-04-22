@@ -525,9 +525,7 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
     
     
     /* Video quality */
-    [fVidTargetSizeField setIntValue: 700];
 	[fVidBitrateField    setIntValue: 1000];
-    
     [fVidQualityMatrix   selectCell: fVidBitrateCell];
     [self videoMatrixChanged:nil];
     
@@ -572,6 +570,9 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
 	[fVidTurboPassCheck setEnabled: NO];
 	[fVidTurboPassCheck setState: NSOffState];
     
+    /* Auto Passthru advanced options box */
+    [fAudioAutoPassthruBox setHidden:NO];
+    
     
 	/* lets get our default prefs here */
 	[self getDefaultPresets:nil];
@@ -592,7 +593,7 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
 		fCreateChapterMarkers,fVidTurboPassCheck,fDstMp4LargeFileCheck,fSubForcedCheck,fPresetsOutlineView,
         fDstMp4HttpOptFileCheck,fDstMp4iPodFileCheck,fVidQualityRFField,fVidQualityRFLabel,
         fEncodeStartStopPopUp,fSrcTimeStartEncodingField,fSrcTimeEndEncodingField,fSrcFrameStartEncodingField,
-        fSrcFrameEndEncodingField, fLoadChaptersButton, fSaveChaptersButton, fFrameratePfrCheck};
+        fSrcFrameEndEncodingField, fLoadChaptersButton, fSaveChaptersButton, fFramerateMatrix};
     
     for( unsigned i = 0;
         i < sizeof( controls ) / sizeof( NSControl * ); i++ )
@@ -1049,6 +1050,16 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
     [fQueueController setQueueArray: QueueFileArray];
     [self getQueueStats];
     
+    /* Update the visibility of the Auto Passthru advanced options box */
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"ShowAdvancedOptsForAutoPassthru"] == YES)
+    {
+        [fAudioAutoPassthruBox setHidden:NO];
+    }
+    else
+    {
+        [fAudioAutoPassthruBox setHidden:YES];
+    }
+    
 }
 
 /* We use this to write messages to stderr from the macgui which show up in the activity window and log*/
@@ -1331,7 +1342,7 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
     
     if (fHandle)
     {
-        if (action == @selector(addToQueue:) || action == @selector(showPicturePanel:) || action == @selector(showAddPresetPanel:))
+        if (action == @selector(addToQueue:) || action == @selector(addAllTitlesToQueue:) || action == @selector(showPicturePanel:) || action == @selector(showAddPresetPanel:))
             return SuccessfulScan && [fWindow attachedSheet] == nil;
         
         if (action == @selector(browseSources:))
@@ -1445,7 +1456,7 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
     
     /* If Alert Window or Window and Growl has been selected */
     if( [[[NSUserDefaults standardUserDefaults] stringForKey:@"AlertWhenDone"] isEqualToString: @"Alert Window"] ||
-       [[[NSUserDefaults standardUserDefaults] stringForKey:@"AlertWhenDone"] isEqualToString: @"Alert Window And Growl"] )
+        [[[NSUserDefaults standardUserDefaults] stringForKey:@"AlertWhenDone"] isEqualToString: @"Alert Window And Growl"] )
     {
         /*On Screen Notification*/
         int status;
@@ -1727,33 +1738,34 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
         {
             /*compatible vlc not found, so we set the bool to cancel scanning to 1 */
             cancelScanDecrypt = 1;
-            [self writeToActivityLog: "VLC app not found for decrypting physical dvd"];
+            [self writeToActivityLog: "libdvdcss.2.dylib not found for decrypting physical dvd"];
             int status;
-            status = NSRunAlertPanel(@"HandBrake could not find VLC or your VLC is incompatible (Note: 32 bit vlc is not compatible with 64 bit HandBrake and vice-versa).",@"Please download and install VLC media player if you wish to read encrypted DVDs.", @"Get VLC", @"Cancel Scan", @"Attempt Scan Anyway");
+            status = NSRunAlertPanel(@"HandBrake could not find a compatible version of libdvdcss (32-bit libdvdcss is not compatible with 64-bit HandBrake and vice-versa).",
+                                     @"Please download and install libdvdcss.pkg if you wish to read encrypted DVDs.", @"Get libdvdcss.pkg", @"Cancel Scan", @"Attempt Scan Anyway");
             [NSApp requestUserAttention:NSCriticalRequest];
             
             if (status == NSAlertDefaultReturn)
             {
                 /* User chose to go download vlc (as they rightfully should) so we send them to the vlc site */
-                [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"http://www.videolan.org/vlc/download-macosx.html"]];
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"http://download.videolan.org/libdvdcss/last/macosx/"]];
             }
             else if (status == NSAlertAlternateReturn)
             {
                 /* User chose to cancel the scan */
-                [self writeToActivityLog: "cannot open physical dvd , scan cancelled"];
+                [self writeToActivityLog: "cannot open physical dvd, scan cancelled"];
             }
             else
             {
                 /* User chose to override our warning and scan the physical dvd anyway, at their own peril. on an encrypted dvd this produces massive log files and fails */
                 cancelScanDecrypt = 0;
-                [self writeToActivityLog: "user overrode vlc warning -trying to open physical dvd without decryption"];
+                [self writeToActivityLog: "user overrode dvdcss warning - trying to open physical dvd without decryption"];
             }
             
         }
         else
         {
             /* VLC was found in /Applications so all is well, we can carry on using vlc's libdvdcss.dylib for decrypting if needed */
-            [self writeToActivityLog: "VLC app found for decrypting physical dvd"];
+            [self writeToActivityLog: "libdvdcss.2.dylib found for decrypting physical dvd"];
             vlcFound = 1;
             dlclose(dvdcss);
         }
@@ -1896,14 +1908,24 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
                     feature_title = i;
                 }
                 
-                [fSrcTitlePopUp addItemWithTitle: [NSString
-                                                   stringWithFormat: @"%@ %d - %02dh%02dm%02ds",
-                                                   currentSource, title->index, title->hours, title->minutes,
-                                                   title->seconds]];
+                if( title->type == HB_BD_TYPE )
+                {
+                    [fSrcTitlePopUp addItemWithTitle: [NSString
+                                                       stringWithFormat: @"%@ %d (%05d.MPLS) - %02dh%02dm%02ds",
+                                                       currentSource, title->index, title->playlist,
+                                                       title->hours, title->minutes, title->seconds]];
+                }
+                else
+                {
+                    [fSrcTitlePopUp addItemWithTitle: [NSString
+                                                       stringWithFormat: @"%@ %d - %02dh%02dm%02ds",
+                                                       currentSource, title->index,
+                                                       title->hours, title->minutes, title->seconds]];
+                }
             }
             
             /* if we are a stream, select the first title */
-            if (title->type == HB_STREAM_TYPE)
+            if (title->type == HB_STREAM_TYPE || title->type == HB_FF_STREAM_TYPE)
             {
                 [fSrcTitlePopUp selectItemAtIndex: 0];
             }
@@ -2006,7 +2028,7 @@ static NSString *        ChooseSourceIdentifier             = @"Choose Source It
 - (void) loadQueueFile {
 	/* We declare the default NSFileManager into fileManager */
 	NSFileManager * fileManager = [NSFileManager defaultManager];
-	/*We define the location of the user presets file */
+	/* We define the location of the user presets file */
     QueueFile = @"~/Library/Application Support/HandBrake/Queue.plist";
 	QueueFile = [[QueueFile stringByExpandingTildeInPath]retain];
     /* We check for the Queue.plist */
@@ -2285,8 +2307,10 @@ fWorkingCount = 0;
     
     [queueFileJob setObject:[fDstFormatPopUp titleOfSelectedItem] forKey:@"FileFormat"];
     /* Chapter Markers*/
-    /* If we have only one chapter or a title without chapters, set chapter markers to off */
-    if ([fSrcChapterStartPopUp indexOfSelectedItem] ==  [fSrcChapterEndPopUp indexOfSelectedItem])
+    /* If we are encoding by chapters and we have only one chapter or a title without chapters, set chapter markers to off.
+       Leave them on if we're doing point to point encoding, as libhb supports chapters when doing p2p. */
+    if ([fEncodeStartStopPopUp indexOfSelectedItem] == 0 &&
+        [fSrcChapterStartPopUp indexOfSelectedItem] == [fSrcChapterEndPopUp indexOfSelectedItem])
     {
         [queueFileJob setObject:[NSNumber numberWithInt:0] forKey:@"ChapterMarkers"];
     }
@@ -2325,14 +2349,32 @@ fWorkingCount = 0;
 	[queueFileJob setObject:[fVidEncoderPopUp titleOfSelectedItem] forKey:@"VideoEncoder"];
 	/* x264 Option String */
 	[queueFileJob setObject:[fAdvancedOptions optionsString] forKey:@"x264Option"];
+    /* FFmpeg (lavc) Option String */
+    [queueFileJob setObject:[fAdvancedOptions optionsStringLavc] forKey:@"lavcOption"];
 
-	[queueFileJob setObject:[NSNumber numberWithInt:[fVidQualityMatrix selectedRow]] forKey:@"VideoQualityType"];
-	[queueFileJob setObject:[fVidTargetSizeField stringValue] forKey:@"VideoTargetSize"];
+	[queueFileJob setObject:[NSNumber numberWithInt:[[fVidQualityMatrix selectedCell] tag] + 1] forKey:@"VideoQualityType"];
 	[queueFileJob setObject:[fVidBitrateField stringValue] forKey:@"VideoAvgBitrate"];
 	[queueFileJob setObject:[NSNumber numberWithFloat:[fVidQualityRFField floatValue]] forKey:@"VideoQualitySlider"];
     /* Framerate */
     [queueFileJob setObject:[fVidRatePopUp titleOfSelectedItem] forKey:@"VideoFramerate"];
-    [queueFileJob setObject:[NSNumber numberWithInt:[fFrameratePfrCheck state]] forKey:@"VideoFrameratePFR"];
+    /* Frame Rate Mode */
+    if ([fFramerateMatrix selectedRow] == 1) // if selected we are cfr regardless of the frame rate popup
+    {
+        [queueFileJob setObject:@"cfr" forKey:@"VideoFramerateMode"];
+    }
+    else
+    {
+        if ([fVidRatePopUp indexOfSelectedItem] == 0) // Same as source frame rate
+        {
+            [queueFileJob setObject:@"vfr" forKey:@"VideoFramerateMode"];
+        }
+        else
+        {
+            [queueFileJob setObject:@"pfr" forKey:@"VideoFramerateMode"];
+        }
+        
+    }
+    
     
 	/* 2 Pass Encoding */
 	[queueFileJob setObject:[NSNumber numberWithInt:[fVidTwoPassCheck state]] forKey:@"VideoTwoPass"];
@@ -2390,10 +2432,40 @@ fWorkingCount = 0;
     
     [queueFileJob setObject:[NSNumber numberWithInt:[fPictureController grayscale]] forKey:@"VideoGrayScale"];
     
-    /*Audio*/
-	[fAudioDelegate prepareAudioForQueueFileJob: queueFileJob];	
+    /* Auto Passthru */
+    if ([fAudioAutoPassthruBox isHidden])
+    {
+        // every passthru is allowed, fallback is AC3
+        [queueFileJob setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowAACPass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowAC3Pass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowDTSHDPass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowDTSPass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowMP3Pass"];
+        // just in case we need it for display purposes
+        [queueFileJob setObject:@"AC3 (ffmpeg)" forKey: @"AudioEncoderFallback"];
+        // actual fallback encoder
+        [queueFileJob setObject:[NSNumber numberWithInt:HB_ACODEC_AC3] forKey: @"JobAudioEncoderFallback"];
+        
+    }
+    else
+    {
+        [queueFileJob setObject:[NSNumber numberWithInt:[fAudioAllowAACPassCheck state]] forKey: @"AudioAllowAACPass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:[fAudioAllowAC3PassCheck state]] forKey: @"AudioAllowAC3Pass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:[fAudioAllowDTSHDPassCheck state]] forKey: @"AudioAllowDTSHDPass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:[fAudioAllowDTSPassCheck state]] forKey: @"AudioAllowDTSPass"];
+        [queueFileJob setObject:[NSNumber numberWithInt:[fAudioAllowMP3PassCheck state]] forKey: @"AudioAllowMP3Pass"];
+        // just in case we need it for display purposes
+        [queueFileJob setObject:[fAudioFallbackPopUp titleOfSelectedItem] forKey: @"AudioEncoderFallback"];
+        // actual fallback encoder
+        [queueFileJob setObject:[NSNumber numberWithInt:[[fAudioFallbackPopUp selectedItem] tag]] forKey: @"JobAudioEncoderFallback"];
+    }
     
-	/* Subtitles*/
+    /* Audio */
+    [self writeToActivityLog: "createQueueFileItem: Getting Audio from prepareAudioForQueueFileJob ..."];
+    [fAudioDelegate prepareAudioForQueueFileJob: queueFileJob];
+    [self writeToActivityLog: "createQueueFileItem: Returned getting audio from prepareAudioForQueueFileJob"];
+    
+	/* Subtitles */
     NSMutableArray *subtitlesArray = [[NSMutableArray alloc] initWithArray:[fSubtitlesDelegate getSubtitleArray] copyItems:YES];
     [queueFileJob setObject:[NSArray arrayWithArray: subtitlesArray] forKey:@"SubtitleList"];
     [subtitlesArray autorelease];
@@ -2628,9 +2700,9 @@ fWorkingCount = 0;
          * which will determine which subtitles to enable, if any.
          */
         job->pass = -1;
-        x264opts_tmp = job->x264opts;
+        x264opts_tmp = job->advanced_opts;
         
-        job->x264opts = NULL;
+        job->advanced_opts = NULL;
         
         job->indepth_scan = 1;  
 
@@ -2639,7 +2711,7 @@ fWorkingCount = 0;
          * Add the pre-scan job
          */
         hb_add( fQueueEncodeLibhb, job );
-        job->x264opts = x264opts_tmp;
+        job->advanced_opts = x264opts_tmp;
     }
 
     
@@ -2655,8 +2727,14 @@ fWorkingCount = 0;
         
         job->pass = 2;
         
-        job->x264opts = (char *)calloc(1024, 1); /* Fixme, this just leaks */  
-        strcpy(job->x264opts, [[queueToApply objectForKey:@"x264Option"] UTF8String]);
+        if( job->vcodec == HB_VCODEC_X264 )
+        {
+            job->advanced_opts = strdup( [[queueToApply objectForKey:@"x264Option"] UTF8String] );
+        }
+        else if( job->vcodec & HB_VCODEC_FFMPEG_MASK )
+        {
+            job->advanced_opts = strdup( [[queueToApply objectForKey:@"lavcOption"] UTF8String] );
+        }
         
         hb_add( fQueueEncodeLibhb, job );
         
@@ -2745,6 +2823,7 @@ fWorkingCount = 0;
     /* We set the advanced opt string here if applicable*/
     [fVidEncoderPopUp selectItemWithTitle:[queueToApply objectForKey:@"VideoEncoder"]];
     [fAdvancedOptions setOptions:[queueToApply objectForKey:@"x264Option"]];
+    [fAdvancedOptions setLavcOptions:[queueToApply objectForKey:@"lavcOption"]];
     
     /* Lets run through the following functions to get variables set there */
     [self videoEncoderPopUpChanged:nil];
@@ -2755,32 +2834,17 @@ fWorkingCount = 0;
     /* Video quality */
     [fVidQualityMatrix selectCellAtRow:[[queueToApply objectForKey:@"VideoQualityType"] intValue] column:0];
     
-    [fVidTargetSizeField setStringValue:[queueToApply objectForKey:@"VideoTargetSize"]];
     [fVidBitrateField setStringValue:[queueToApply objectForKey:@"VideoAvgBitrate"]];
-    /* Since we are now using RF Values for the slider, we detect if the preset uses an old quality float.
-     * So, check to see if the quality value is less than 1.0 which should indicate the old ".062" type
-     * quality preset. Caveat: in the case of x264, where the RF scale starts at 0, it would misinterpret
-     * a preset that uses 0.0 - 0.99 for RF as an old style preset. Not sure how to get around that one yet,
-     * though it should be a corner case since it would pretty much be a preset for lossless encoding. */
-    if ([[queueToApply objectForKey:@"VideoQualitySlider"] floatValue] < 1.0)
+    
+    if ([[fVidEncoderPopUp selectedItem] tag] == HB_VCODEC_THEORA)
     {
-        /* For the quality slider we need to convert the old percent's to the new rf scales */
-        float rf =  (([fVidQualitySlider maxValue] - [fVidQualitySlider minValue]) * [[queueToApply objectForKey:@"VideoQualitySlider"] floatValue]);
-        [fVidQualitySlider setFloatValue:rf];
-        
+        /* Since theora's qp value goes up from left to right, we can just set the slider float value */
+        [fVidQualitySlider setFloatValue:[[queueToApply objectForKey:@"VideoQualitySlider"] floatValue]];
     }
     else
     {
-        /* Since theora's qp value goes up from left to right, we can just set the slider float value */
-        if ([[fVidEncoderPopUp selectedItem] tag] == HB_VCODEC_THEORA)
-        {
-            [fVidQualitySlider setFloatValue:[[queueToApply objectForKey:@"VideoQualitySlider"] floatValue]];
-        }
-        else
-        {
-            /* since ffmpeg and x264 use an "inverted" slider (lower qp/rf values indicate a higher quality) we invert the value on the slider */
-            [fVidQualitySlider setFloatValue:([fVidQualitySlider maxValue] + [fVidQualitySlider minValue]) - [[queueToApply objectForKey:@"VideoQualitySlider"] floatValue]];
-        }
+        /* Since ffmpeg and x264 use an "inverted" slider (lower qp/rf values indicate a higher quality) we invert the value on the slider */
+        [fVidQualitySlider setFloatValue:([fVidQualitySlider maxValue] + [fVidQualitySlider minValue]) - [[queueToApply objectForKey:@"VideoQualitySlider"] floatValue]];
     }
     
     [self videoMatrixChanged:nil];
@@ -2803,11 +2867,17 @@ fWorkingCount = 0;
     /* Turbo 1st pass for 2 Pass Encoding */
     [fVidTurboPassCheck setState:[[queueToApply objectForKey:@"VideoTurboTwoPass"] intValue]];
     
-    /*Audio*/
+    /* Auto Passthru */
+    [fAudioAllowAACPassCheck setState:[[queueToApply objectForKey:@"AudioAllowAACPass"] intValue]];
+    [fAudioAllowAC3PassCheck setState:[[queueToApply objectForKey:@"AudioAllowAC3Pass"] intValue]];
+    [fAudioAllowDTSHDPassCheck setState:[[queueToApply objectForKey:@"AudioAllowDTSHDPass"] intValue]];
+    [fAudioAllowDTSPassCheck setState:[[queueToApply objectForKey:@"AudioAllowDTSPass"] intValue]];
+    [fAudioAllowMP3PassCheck setState:[[queueToApply objectForKey:@"AudioAllowMP3Pass"] intValue]];
+    [fAudioFallbackPopUp selectItemWithTitle:[queueToApply objectForKey:@"AudioEncoderFallback"]];
     
-    
+    /* Audio */
     /* Now lets add our new tracks to the audio list here */
-	[fAudioDelegate addTracksFromQueue: queueToApply];
+    [fAudioDelegate addTracksFromQueue: queueToApply];
     
     /*Subtitles*/
     /* Crashy crashy right now, working on it */
@@ -2870,15 +2940,11 @@ fWorkingCount = 0;
     
     /* Filters */
     
-    /* We only allow *either* Decomb or Deinterlace. So check for the PictureDecombDeinterlace key.
-     * also, older presets may not have this key, in which case we also check to see if that preset had  PictureDecomb
-     * specified, in which case we use decomb and ignore any possible Deinterlace settings as using both was less than
-     * sane.
-     */
+    /* We only allow *either* Decomb or Deinterlace. So check for the PictureDecombDeinterlace key. */
     [fPictureController setUseDecomb:1];
     [fPictureController setDecomb:0];
     [fPictureController setDeinterlace:0];
-    if ([[queueToApply objectForKey:@"PictureDecombDeinterlace"] intValue] == 1 || [[queueToApply objectForKey:@"PictureDecomb"] intValue] > 0)
+    if ([[queueToApply objectForKey:@"PictureDecombDeinterlace"] intValue] == 1)
     {
         /* we are using decomb */
         /* Decomb */
@@ -2977,8 +3043,6 @@ fWorkingCount = 0;
         //[fPresetsOutlineView selectRow:[[queueToApply objectForKey:@"PresetIndexNum"] intValue]];
 		/* Change UI to show "Custom" settings are being used */
 		//[fPresetSelectedDisplay setStringValue: [[queueToApply objectForKey:@"PresetName"] stringValue]];
-        
-		curUserPresetChosenNum = nil;
 	}
     else
     {
@@ -2986,8 +3050,6 @@ fWorkingCount = 0;
 		[fPresetsOutlineView deselectRow:[fPresetsOutlineView selectedRow]];
 		/* Change UI to show "Custom" settings are being used */
 		[fPresetSelectedDisplay setStringValue: @"Custom"];
-        
-		//curUserPresetChosenNum = nil;
     }
     
     /* We need to set this bool back to NO, in case the user wants to do a scan */
@@ -3012,7 +3074,6 @@ fWorkingCount = 0;
     hb_title_t * title = (hb_title_t *) hb_list_item( list,
             [fSrcTitlePopUp indexOfSelectedItem] );
     hb_job_t * job = title->job;
-    hb_audio_config_t * audio;
     /* set job->angle for libdvdnav */
     job->angle = [fSrcAnglePopUp indexOfSelectedItem] + 1;
     /* Chapter selection */
@@ -3025,23 +3086,23 @@ fWorkingCount = 0;
 
     job->chapter_markers = 0;
     
-	if( job->vcodec & HB_VCODEC_X264 )
+	if( job->vcodec == HB_VCODEC_X264 )
     {
 		
 		/* Below Sends x264 options to the core library if x264 is selected*/
-		/* Lets use this as per Nyx, Thanks Nyx!*/
-		job->x264opts = (char *)calloc(1024, 1); /* Fixme, this just leaks */
+		/* Lets use this as per Nyx, Thanks Nyx! */
 		/* For previews we ignore the turbo option for the first pass of two since we only use 1 pass */
-		strcpy(job->x264opts, [[fAdvancedOptions optionsString] UTF8String]);
+		job->advanced_opts = strdup( [[fAdvancedOptions optionsString] UTF8String] );
 
         
     }
+    else if( job->vcodec & HB_VCODEC_FFMPEG_MASK )
+    {
+        job->advanced_opts = strdup( [[fAdvancedOptions optionsStringLavc] UTF8String] );
+    }
 
     /* Video settings */
-   /* Set vfr to 0 as it's only on if using same as source in the framerate popup
-     * and detelecine is on, so we handle that in the logic below
-     */
-    job->vfr = 0;
+    
     if( [fVidRatePopUp indexOfSelectedItem] > 0 )
     {
         /* a specific framerate has been chosen */
@@ -3049,8 +3110,8 @@ fWorkingCount = 0;
         job->vrate_base = hb_video_rates[[fVidRatePopUp indexOfSelectedItem]-1].rate;
         /* We are not same as source so we set job->cfr to 1 
          * to enable constant frame rate since user has specified
-         * a specific framerate*/
-        if ([fFrameratePfrCheck state] == 1)
+         * a specific framerate */
+        if ([fFramerateMatrix selectedRow] == 0) // we are pfr if a specific framerate is set
         {
             job->cfr = 2;
         }
@@ -3067,26 +3128,22 @@ fWorkingCount = 0;
         /* We are same as source so we set job->cfr to 0 
          * to enable true same as source framerate */
         job->cfr = 0;
-        /* If we are same as source and we have detelecine on, we need to turn on
-         * job->vfr
-         */
-        if ([fPictureController detelecine] == 1)
+        /* If the user specifies cfr then ... */
+        if ([fFramerateMatrix selectedRow] == 1) // we are cfr
         {
-            job->vfr = 1;
+            job->cfr = 1;
         }
     }
 
-    switch( [fVidQualityMatrix selectedRow] )
+    switch( [[fVidQualityMatrix selectedCell] tag] )
     {
         case 0:
-            /* Target size.
-               Bitrate should already have been calculated and displayed
-               in fVidBitrateField, so let's just use it */
-        case 1:
+            /* ABR */
             job->vquality = -1.0;
             job->vbitrate = [fVidBitrateField intValue];
             break;
-        case 2:
+        case 1:
+            /* Constant Quality */
             job->vquality = [fVidQualityRFField floatValue];
             job->vbitrate = 0;
             break;
@@ -3096,7 +3153,7 @@ fWorkingCount = 0;
     NSMutableArray *subtitlesArray = [[NSMutableArray alloc] initWithArray:[fSubtitlesDelegate getSubtitleArray] copyItems:YES];
     
     
-int subtitle = nil;
+int subtitle;
 int force;
 int burned;
 int def;
@@ -3224,8 +3281,41 @@ bool one_burned = FALSE;
    
     
     
-[subtitlesArray autorelease];    
+[subtitlesArray autorelease];
     
+    
+    /* Auto Passthru */
+    if ([fAudioAutoPassthruBox isHidden])
+    {
+        // every passthru is allowed, fallback is AC3
+        job->acodec_copy_mask = HB_ACODEC_PASS_MASK;
+        job->acodec_fallback = HB_ACODEC_AC3;
+    }
+    else
+    {
+        job->acodec_copy_mask = 0;
+        if ([fAudioAllowAACPassCheck state] == NSOnState)
+        {
+            job->acodec_copy_mask |= HB_ACODEC_FFAAC;
+        }
+        if ([fAudioAllowAC3PassCheck state] == NSOnState)
+        {
+            job->acodec_copy_mask |= HB_ACODEC_AC3;
+        }
+        if ([fAudioAllowDTSHDPassCheck state] == NSOnState)
+        {
+            job->acodec_copy_mask |= HB_ACODEC_DCA_HD;
+        }
+        if ([fAudioAllowDTSPassCheck state] == NSOnState)
+        {
+            job->acodec_copy_mask |= HB_ACODEC_DCA;
+        }
+        if ([fAudioAllowMP3PassCheck state] == NSOnState)
+        {
+            job->acodec_copy_mask |= HB_ACODEC_MP3;
+        }
+        job->acodec_fallback = [[fAudioFallbackPopUp selectedItem] tag];
+    }
     
     /* Audio tracks and mixdowns */
 	[fAudioDelegate prepareAudioForJob: job];
@@ -3273,8 +3363,6 @@ bool one_burned = FALSE;
     if ([fPictureController useDecomb] == 1)
     {
         /* Decomb */
-        /* we add the custom string if present */
-        hb_filter_decomb.settings = NULL;
         if ([fPictureController decomb] == 1)
         {
             /* use a custom decomb string */
@@ -3283,8 +3371,14 @@ bool one_burned = FALSE;
         }
         if ([fPictureController decomb] == 2)
         {
-            /* Run old deinterlacer fd by default */
-            //hb_filter_decomb.settings = (char *) [[fPicSettingDecomb stringValue] UTF8String];
+            /* use libhb defaults */
+            hb_filter_decomb.settings = NULL;
+            hb_list_add( job->filters, &hb_filter_decomb );
+        }
+        if ([fPictureController decomb] == 3)
+        {
+            /* use old defaults (decomb fast) */
+            hb_filter_decomb.settings = "7:2:6:9:1:80";
             hb_list_add( job->filters, &hb_filter_decomb );
         }
     }
@@ -3471,7 +3565,7 @@ bool one_burned = FALSE;
         job->chapter_markers = 0;
     }
     
-    if( job->vcodec & HB_VCODEC_X264 )
+    if( job->vcodec == HB_VCODEC_X264 )
     {
 		if ([[queueToApply objectForKey:@"Mp4iPodCompatible"] intValue] == 1)
 	    {
@@ -3483,24 +3577,30 @@ bool one_burned = FALSE;
         }
 		
 		
-		/* Below Sends x264 options to the core library if x264 is selected*/
-		/* Lets use this as per Nyx, Thanks Nyx!*/
-		job->x264opts = (char *)calloc(1024, 1); /* Fixme, this just leaks */
+		/* Below Sends x264 options to the core library if x264 is selected */
+		/* Lets use this as per Nyx, Thanks Nyx! */
 		/* Turbo first pass if two pass and Turbo First pass is selected */
 		if( [[queueToApply objectForKey:@"VideoTwoPass"] intValue] == 1 && [[queueToApply objectForKey:@"VideoTurboTwoPass"] intValue] == 1 )
 		{
 			/* pass the "Turbo" string to be appended to the existing x264 opts string into a variable for the first pass */
 			NSString *firstPassOptStringTurbo = @":ref=1:subme=2:me=dia:analyse=none:trellis=0:no-fast-pskip=0:8x8dct=0:weightb=0";
 			/* append the "Turbo" string variable to the existing opts string.
-             Note: the "Turbo" string must be appended, not prepended to work properly*/
+             * Note: the "Turbo" string must be appended, not prepended to work properly */
 			NSString *firstPassOptStringCombined = [[queueToApply objectForKey:@"x264Option"] stringByAppendingString:firstPassOptStringTurbo];
-			strcpy(job->x264opts, [firstPassOptStringCombined UTF8String]);
+			job->advanced_opts = strdup( [firstPassOptStringCombined UTF8String] );
 		}
 		else
 		{
-			strcpy(job->x264opts, [[queueToApply objectForKey:@"x264Option"] UTF8String]);
+			job->advanced_opts = strdup( [[queueToApply objectForKey:@"x264Option"] UTF8String] );
 		}
         
+    }
+    else if( job->vcodec & HB_VCODEC_FFMPEG_MASK )
+    {
+        if ([queueToApply objectForKey:@"lavcOption"])
+        {
+            job->advanced_opts = strdup( [[queueToApply objectForKey:@"lavcOption"] UTF8String] );
+        }
     }
     
     
@@ -3535,10 +3635,6 @@ bool one_burned = FALSE;
     /* Video settings */
     /* Framerate */
     
-    /* Set vfr to 0 as it's only on if using same as source in the framerate popup
-     * and detelecine is on, so we handle that in the logic below
-     */
-    job->vfr = 0;
     if( [[queueToApply objectForKey:@"JobIndexVideoFramerate"] intValue] > 0 )
     {
         /* a specific framerate has been chosen */
@@ -3548,7 +3644,7 @@ bool one_burned = FALSE;
          * to enable constant frame rate since user has specified
          * a specific framerate*/
         
-        if ([[queueToApply objectForKey:@"VideoFrameratePFR"] intValue] == 1)
+        if ([[queueToApply objectForKey:@"VideoFramerateMode"] isEqualToString:@"pfr"])
         {
             job->cfr = 2;
         }
@@ -3565,20 +3661,15 @@ bool one_burned = FALSE;
         /* We are same as source so we set job->cfr to 0 
          * to enable true same as source framerate */
         job->cfr = 0;
-        /* If we are same as source and we have detelecine on, we need to turn on
-         * job->vfr
-         */
-        if ([[queueToApply objectForKey:@"PictureDetelecine"] intValue] == 1)
+        /* If the user specifies cfr then ... */
+        if ([[queueToApply objectForKey:@"VideoFramerateMode"] isEqualToString:@"cfr"]) // we are cfr
         {
-            job->vfr = 1;
+            job->cfr = 1;
         }
     }
     
     if ( [[queueToApply objectForKey:@"VideoQualityType"] intValue] != 2 )
     {
-        /* Target size.
-         Bitrate should already have been calculated and displayed
-         in fVidBitrateField, so let's just use it same as abr*/
         job->vquality = -1.0;
         job->vbitrate = [[queueToApply objectForKey:@"VideoAvgBitrate"] intValue];
     }
@@ -3604,7 +3695,7 @@ bool one_burned = FALSE;
  * to the source tracks position in title->list_subtitle.
  */
 
-int subtitle = nil;
+int subtitle;
 int force;
 int burned;
 int def;
@@ -3682,8 +3773,10 @@ bool one_burned = FALSE;
                     sub_config.offset = [[tempObject objectForKey:@"subtitleTrackSrtOffset"] intValue];
                     
                     /* we need to srncpy file name and codeset */
-                    strncpy(sub_config.src_filename, [[tempObject objectForKey:@"subtitleSourceSrtFilePath"] UTF8String], 128);
-                    strncpy(sub_config.src_codeset, [[tempObject objectForKey:@"subtitleTrackSrtCharCode"] UTF8String], 40);
+                    strncpy(sub_config.src_filename, [[tempObject objectForKey:@"subtitleSourceSrtFilePath"] UTF8String], 255);
+                    sub_config.src_filename[255] = 0;
+                    strncpy(sub_config.src_codeset, [[tempObject objectForKey:@"subtitleTrackSrtCharCode"] UTF8String], 39);
+                    sub_config.src_codeset[39] = 0;
                     
                     sub_config.force = 0;
                     sub_config.dest = PASSTHRUSUB;
@@ -3727,11 +3820,34 @@ bool one_burned = FALSE;
 
 #pragma mark -
 
-   
+    /* Auto Passthru */
+    job->acodec_copy_mask = 0;
+    if( [[queueToApply objectForKey: @"AudioAllowAACPass"] intValue] == 1 )
+    {
+        job->acodec_copy_mask |= HB_ACODEC_FFAAC;
+    }
+    if( [[queueToApply objectForKey: @"AudioAllowAC3Pass"] intValue] == 1 )
+    {
+        job->acodec_copy_mask |= HB_ACODEC_AC3;
+    }
+    if( [[queueToApply objectForKey: @"AudioAllowDTSHDPass"] intValue] == 1 )
+    {
+        job->acodec_copy_mask |= HB_ACODEC_DCA_HD;
+    }
+    if( [[queueToApply objectForKey: @"AudioAllowDTSPass"] intValue] == 1 )
+    {
+        job->acodec_copy_mask |= HB_ACODEC_DCA;
+    }
+    if( [[queueToApply objectForKey: @"AudioAllowMP3Pass"] intValue] == 1 )
+    {
+        job->acodec_copy_mask |= HB_ACODEC_MP3;
+    }
+    job->acodec_fallback = [[queueToApply objectForKey: @"JobAudioEncoderFallback"] intValue];
+    
     /* Audio tracks and mixdowns */
-    /* Lets make sure there arent any erroneous audio tracks in the job list, so lets make sure its empty*/
+    /* Lets make sure there arent any erroneous audio tracks in the job list, so lets make sure it's empty */
     int audiotrack_count = hb_list_count(job->list_audio);
-    for( int i = 0; i < audiotrack_count;i++)
+    for( int i = 0; i < audiotrack_count; i++ )
     {
         hb_audio_t * temp_audio = (hb_audio_t*) hb_list_item( job->list_audio, 0 );
         hb_list_rem(job->list_audio, temp_audio);
@@ -3746,8 +3862,10 @@ bool one_burned = FALSE;
 			/* We go ahead and assign values to our audio->out.<properties> */
 			audio->out.track = audio->in.track;
 			audio->out.dynamic_range_compression = [[queueToApply objectForKey: [prefix stringByAppendingString: @"TrackDRCSlider"]] floatValue];
+            audio->out.gain = [[queueToApply objectForKey: [prefix stringByAppendingString: @"TrackGainSlider"]] floatValue];
 			prefix = [NSString stringWithFormat: @"JobAudio%d", counter + 1];
 			audio->out.codec = [[queueToApply objectForKey: [prefix stringByAppendingString: @"Encoder"]] intValue];
+			audio->out.compression_level = hb_get_default_audio_compression(audio->out.codec);
 			audio->out.mixdown = [[queueToApply objectForKey: [prefix stringByAppendingString: @"Mixdown"]] intValue];
 			audio->out.bitrate = [[queueToApply objectForKey: [prefix stringByAppendingString: @"Bitrate"]] intValue];
 			audio->out.samplerate = [[queueToApply objectForKey: [prefix stringByAppendingString: @"Samplerate"]] intValue];
@@ -3780,8 +3898,6 @@ bool one_burned = FALSE;
     if ([[queueToApply objectForKey:@"PictureDecombDeinterlace"] intValue] == 1)
     {
         /* Decomb */
-        /* we add the custom string if present */
-        hb_filter_decomb.settings = NULL;
         if ([[queueToApply objectForKey:@"PictureDecomb"] intValue] == 1)
         {
             /* use a custom decomb string */
@@ -3790,7 +3906,14 @@ bool one_burned = FALSE;
         }
         if ([[queueToApply objectForKey:@"PictureDecomb"] intValue] == 2)
         {
-            /* Use libhb default */
+            /* use libhb defaults */
+            hb_filter_decomb.settings = NULL;
+            hb_list_add( job->filters, &hb_filter_decomb );
+        }
+        if ([[queueToApply objectForKey:@"PictureDecomb"] intValue] == 3)
+        {
+            /* use old defaults (decomb fast) */
+            hb_filter_decomb.settings = "7:2:6:9:1:80";
             hb_list_add( job->filters, &hb_filter_decomb );
         }
         
@@ -4069,8 +4192,8 @@ bool one_burned = FALSE;
 {
     /* Let libhb do the job */
     hb_start( fQueueEncodeLibhb );
-    /*set the fEncodeState State */
-	fEncodeState = 1;
+    /* set the fEncodeState State */
+    fEncodeState = 1;
 }
 
 
@@ -4207,6 +4330,45 @@ bool one_burned = FALSE;
 }
 
 #pragma mark -
+#pragma mark Batch Queue Titles Methods
+- (IBAction) addAllTitlesToQueue: (id) sender
+{
+    NSBeginCriticalAlertSheet( NSLocalizedString( @"You are about to add ALL titles to the queue!", @"" ), 
+                              NSLocalizedString( @"Cancel", @"" ), NSLocalizedString( @"Yes, I want to add all titles to the queue.", @"" ), nil, fWindow, self,
+                              @selector( addAllTitlesToQueueAlertDone:returnCode:contextInfo: ),
+                              NULL, NULL, [NSString stringWithFormat:
+                                           NSLocalizedString( @"Current settings will be applied to all %d titles. Are you sure you want to do this?", @"" ),[fSrcTitlePopUp numberOfItems]] );
+}
+
+- (void) addAllTitlesToQueueAlertDone: (NSWindow *) sheet
+                           returnCode: (int) returnCode contextInfo: (void *) contextInfo
+{
+    if( returnCode == NSAlertAlternateReturn )
+        [self doAddAllTitlesToQueue];
+}
+
+- (void) doAddAllTitlesToQueue
+{
+    
+    /* first get the currently selected index so we can choose it again after cycling through the available titles. */
+    int currentlySelectedTitle = [fSrcTitlePopUp indexOfSelectedItem];
+    
+    /* For each title in the fSrcTitlePopUp select it ... */
+    for( int i = 0; i < [fSrcTitlePopUp numberOfItems]; i++ )
+    {
+        [fSrcTitlePopUp selectItemAtIndex:i];
+        /* Now call titlePopUpChanged to load it up ... */
+        [self titlePopUpChanged:nil];
+        /* now add the title to the queue */
+        [self addToQueue:nil];   
+    }
+    /* Now that we are done, reselect the previously selected title.*/
+    [fSrcTitlePopUp selectItemAtIndex: currentlySelectedTitle];
+    /* Now call titlePopUpChanged to load it up ... */
+    [self titlePopUpChanged:nil]; 
+}
+
+#pragma mark -
 #pragma mark GUI Controls Changed Methods
 
 - (IBAction) titlePopUpChanged: (id) sender
@@ -4216,7 +4378,8 @@ bool one_burned = FALSE;
         hb_list_item( list, [fSrcTitlePopUp indexOfSelectedItem] );
 
     /* If we are a stream type and a batch scan, grok the output file name from title->name upon title change */
-    if (title->type == HB_STREAM_TYPE && hb_list_count( list ) > 1 )
+    if ((title->type == HB_STREAM_TYPE || title->type == HB_FF_STREAM_TYPE) &&
+        hb_list_count( list ) > 1 )
     {
         /* we set the default name according to the new title->name */
         [fDstFile2Field setStringValue: [NSString stringWithFormat:
@@ -4418,18 +4581,11 @@ bool one_burned = FALSE;
         @"%02lld:%02lld:%02lld", duration / 3600, ( duration / 60 ) % 60,
         duration % 60]];
     
-    [self calculateBitrate: sender];
+    //[self calculateBitrate: sender];
     
-    if ( [fSrcChapterStartPopUp indexOfSelectedItem] ==  [fSrcChapterEndPopUp indexOfSelectedItem] )
-    {
-    /* Disable chapter markers for any source with less than two chapters as it makes no sense. */
-    [fCreateChapterMarkers setEnabled: NO];
-    [fCreateChapterMarkers setState: NSOffState];
-    }
-    else
-    {
-    [fCreateChapterMarkers setEnabled: YES];
-    }
+    /* We're changing the chapter range - we may need to flip the m4v/mp4 extension */
+    if ([fDstFormatPopUp indexOfSelectedItem] == 0)
+        [self autoSetM4vExtension: sender];
 }
 
 - (IBAction) startEndSecValueChanged: (id) sender
@@ -4464,38 +4620,75 @@ bool one_burned = FALSE;
     NSString * string = [fDstFile2Field stringValue];
     int format = [fDstFormatPopUp indexOfSelectedItem];
     char * ext = NULL;
+    NSMenuItem *menuItem;
+    int i;
 	/* Initially set the large file (64 bit formatting) output checkbox to hidden */
     [fDstMp4LargeFileCheck setHidden: YES];
     [fDstMp4HttpOptFileCheck setHidden: YES];
     [fDstMp4iPodFileCheck setHidden: YES];
     
-    /* Update the Video Codec PopUp */
+    /* Update the Video Codec Popup */
     /* lets get the tag of the currently selected item first so we might reset it later */
     int selectedVidEncoderTag;
     selectedVidEncoderTag = [[fVidEncoderPopUp selectedItem] tag];
     
     /* Note: we now store the video encoder int values from common.c in the tags of each popup for easy retrieval later */
     [fVidEncoderPopUp removeAllItems];
-    NSMenuItem *menuItem;
-    /* These video encoders are available to all of our current muxers, so lets list them once here */
-    menuItem = [[fVidEncoderPopUp menu] addItemWithTitle:@"MPEG-4 (FFmpeg)" action: NULL keyEquivalent: @""];
-    [menuItem setTag: HB_VCODEC_FFMPEG];
+    for( i = 0; i < hb_video_encoders_count; i++ )
+    {
+        if( ( ( format == 0 ) && ( hb_video_encoders[i].muxers & HB_MUX_MP4 ) ) ||
+            ( ( format == 1 ) && ( hb_video_encoders[i].muxers & HB_MUX_MKV ) ) )
+        {
+            menuItem = [[fVidEncoderPopUp menu] addItemWithTitle: [NSString stringWithUTF8String: hb_video_encoders[i].human_readable_name]
+                                                          action: NULL keyEquivalent: @""];
+            [menuItem setTag: hb_video_encoders[i].encoder];
+        }
+    }
+    
+    /* if we have a previously selected vid encoder tag, then try to select it */
+    if (selectedVidEncoderTag)
+    {
+        [fVidEncoderPopUp selectItemWithTag: selectedVidEncoderTag];
+    }
+    else
+    {
+        [fVidEncoderPopUp selectItemAtIndex: 0];
+    }
+    
+    /* Update the Auto Passtgru Fallback Codec Popup */
+    /* lets get the tag of the currently selected item first so we might reset it later */
+    int selectedAutoPassthruFallbackEncoderTag;
+    selectedAutoPassthruFallbackEncoderTag = [[fAudioFallbackPopUp selectedItem] tag];
+    
+    [fAudioFallbackPopUp removeAllItems];
+    for( i = 0; i < hb_audio_encoders_count; i++ )
+    {
+        if( !( hb_audio_encoders[i].encoder & HB_ACODEC_PASS_FLAG ) &&
+             ( ( ( format == 0 ) && ( hb_audio_encoders[i].muxers & HB_MUX_MP4 ) ) ||
+               ( ( format == 1 ) && ( hb_audio_encoders[i].muxers & HB_MUX_MKV ) ) ) )
+        {
+            menuItem = [[fAudioFallbackPopUp menu] addItemWithTitle: [NSString stringWithUTF8String: hb_audio_encoders[i].human_readable_name]
+                                                             action: NULL keyEquivalent: @""];
+            [menuItem setTag: hb_audio_encoders[i].encoder];
+        }
+    }
+    
+    /* if we have a previously selected auto passthru fallback encoder tag, then try to select it */
+    if (selectedAutoPassthruFallbackEncoderTag)
+    {
+        selectedAutoPassthruFallbackEncoderTag = [fAudioFallbackPopUp selectItemWithTag: selectedAutoPassthruFallbackEncoderTag];
+    }
+    /* if we had no previous fallback selected OR if selection failed
+     * select the default fallback encoder (AC3) */
+    if (!selectedAutoPassthruFallbackEncoderTag)
+    {
+        [fAudioFallbackPopUp selectItemWithTag: HB_ACODEC_AC3];
+    }
     
     switch( format )
     {
         case 0:
-			/*Get Default MP4 File Extension*/
-			if ([[NSUserDefaults standardUserDefaults] boolForKey:@"DefaultMpegName"] > 0)
-			{
-				ext = "m4v";
-			}
-			else
-			{
-				ext = "mp4";
-			}
-            /* Add additional video encoders here */
-            menuItem = [[fVidEncoderPopUp menu] addItemWithTitle:@"H.264 (x264)" action: NULL keyEquivalent: @""];
-            [menuItem setTag: HB_VCODEC_X264];
+			[self autoSetM4vExtension: nil];
             /* We show the mp4 option checkboxes here since we are mp4 */
             [fCreateChapterMarkers setEnabled: YES];
 			[fDstMp4LargeFileCheck setHidden: NO];
@@ -4503,13 +4696,8 @@ bool one_burned = FALSE;
             [fDstMp4iPodFileCheck setHidden: NO];
             break;
             
-            case 1:
+        case 1:
             ext = "mkv";
-            /* Add additional video encoders here */
-            menuItem = [[fVidEncoderPopUp menu] addItemWithTitle:@"H.264 (x264)" action: NULL keyEquivalent: @""];
-            [menuItem setTag: HB_VCODEC_X264];
-            menuItem = [[fVidEncoderPopUp menu] addItemWithTitle:@"VP3 (Theora)" action: NULL keyEquivalent: @""];
-            [menuItem setTag: HB_VCODEC_THEORA];
             /* We enable the create chapters checkbox here */
 			[fCreateChapterMarkers setEnabled: YES];
 			break;
@@ -4528,17 +4716,6 @@ bool one_burned = FALSE;
 								 userInfo: [NSDictionary dictionaryWithObjectsAndKeys:
 											[NSNumber numberWithInt: [[fDstFormatPopUp selectedItem] tag]], keyContainerTag,
 											nil]]];
-	
-    /* if we have a previously selected vid encoder tag, then try to select it */
-    if (selectedVidEncoderTag)
-    {
-        [fVidEncoderPopUp selectItemWithTag: selectedVidEncoderTag];
-    }
-    else
-    {
-        [fVidEncoderPopUp selectItemAtIndex: 0];
-    }
-
 
     if( format == 0 )
         [self autoSetM4vExtension: sender];
@@ -4555,9 +4732,6 @@ bool one_burned = FALSE;
             [fVidEncoderPopUp selectItemAtIndex:0];
             [self videoEncoderPopUpChanged:nil];
 
-            /* changing the format may mean that we can / can't offer mono or 6ch, */
-            /* so call audioTrackPopUpChanged for both audio tracks to update the mixdown popups */
-
             /* We call the method to properly enable/disable turbo 2 pass */
             [self twoPassCheckboxChanged: sender];
             /* We call method method to change UI to reflect whether a preset is used or not*/
@@ -4570,22 +4744,27 @@ bool one_burned = FALSE;
 {
     if ( [fDstFormatPopUp indexOfSelectedItem] )
         return;
-
+    
     NSString * extension = @"mp4";
-
-	BOOL anyCodecAC3 = [fAudioDelegate anyCodecMatches: HB_ACODEC_AC3] || [fAudioDelegate anyCodecMatches: HB_ACODEC_AC3_PASS];
-	if (YES == anyCodecAC3 ||
-                                                        [fCreateChapterMarkers state] == NSOnState ||
-                                                        [[NSUserDefaults standardUserDefaults] boolForKey:@"DefaultMpegName"] > 0 )
+    
+    BOOL anyCodecAC3 = [fAudioDelegate anyCodecMatches: HB_ACODEC_AC3] || [fAudioDelegate anyCodecMatches: HB_ACODEC_AC3_PASS];
+    /* Chapter markers are enabled if the checkbox is ticked and we are doing p2p or we have > 1 chapter */
+    BOOL chapterMarkers = ([fCreateChapterMarkers state] == NSOnState) &&
+                          ([fEncodeStartStopPopUp indexOfSelectedItem] != 0 ||
+                           [fSrcChapterStartPopUp indexOfSelectedItem] < [fSrcChapterEndPopUp indexOfSelectedItem]);
+	
+    if ([[[NSUserDefaults standardUserDefaults] objectForKey:@"DefaultMpegExtension"] isEqualToString: @".m4v"] || 
+        ((YES == anyCodecAC3 || YES == chapterMarkers) &&
+         [[[NSUserDefaults standardUserDefaults] objectForKey:@"DefaultMpegExtension"] isEqualToString: @"Auto"] ))
     {
         extension = @"m4v";
     }
-
+    
     if( [extension isEqualTo: [[fDstFile2Field stringValue] pathExtension]] )
         return;
     else
         [fDstFile2Field setStringValue: [NSString stringWithFormat:@"%@.%@",
-                                    [[fDstFile2Field stringValue] stringByDeletingPathExtension], extension]];
+                                         [[fDstFile2Field stringValue] stringByDeletingPathExtension], extension]];
 }
 
 /* Method to determine if we should change the UI
@@ -4599,8 +4778,6 @@ the user is using "Custom" settings by determining the sender*/
 		[fPresetsOutlineView deselectRow:[fPresetsOutlineView selectedRow]];
 		/* Change UI to show "Custom" settings are being used */
 		[fPresetSelectedDisplay setStringValue: @"Custom"];
-
-		curUserPresetChosenNum = nil;
 	}
 [self calculateBitrate:nil];
 }
@@ -4611,23 +4788,36 @@ the user is using "Custom" settings by determining the sender*/
 
 - (IBAction) videoEncoderPopUpChanged: (id) sender
 {
-    hb_job_t * job = fTitle->job;
     int videoEncoder = [[fVidEncoderPopUp selectedItem] tag];
     
     [fAdvancedOptions setHidden:YES];
-    /* If we are using x264 then show the x264 advanced panel*/
+    /* If we are using x264 then show the x264 advanced panel */
     if (videoEncoder == HB_VCODEC_X264)
     {
         [fAdvancedOptions setHidden:NO];
         [self autoSetM4vExtension: sender];
     }
+    else // we are FFmpeg (lavc) or Theora
+    {
+        [fAdvancedOptions setHidden:YES];
+        
+        // We Are Lavc
+        if ([[fVidEncoderPopUp selectedItem] tag] & HB_VCODEC_FFMPEG_MASK)
+        {
+            [fAdvancedOptions setLavcOptsEnabled:YES];
+        }
+        else /// We are Theora
+        {
+          [fAdvancedOptions setLavcOptsEnabled:NO];  
+        }
+    }
 
-    if (videoEncoder == HB_VCODEC_FFMPEG)
+
+    if (videoEncoder != HB_VCODEC_X264)
     {
         /* We set the iPod atom checkbox to disabled and uncheck it as its only for x264 in the mp4
-         container. Format is taken care of in formatPopUpChanged method by hiding and unchecking
-         anything other than MP4.
-         */ 
+         * container. Format is taken care of in formatPopUpChanged method by hiding and unchecking
+         * anything other than MP4. */ 
         [fDstMp4iPodFileCheck setEnabled: NO];
         [fDstMp4iPodFileCheck setState: NSOffState];
     }
@@ -4674,14 +4864,17 @@ the user is using "Custom" settings by determining the sender*/
 - (IBAction ) videoFrameRateChanged: (id) sender
 {
     /* Hide and set the PFR Checkbox to OFF if we are set to Same as Source */
-    if ([fVidRatePopUp indexOfSelectedItem] == 0)
+    /* Depending on whether or not Same as source is selected modify the title for
+     * fFramerateVfrPfrCell*/
+    if ([fVidRatePopUp indexOfSelectedItem] == 0) // We are Same as Source
     {
-        [fFrameratePfrCheck setHidden:YES];
-        [fFrameratePfrCheck setState:0];
+        [fFramerateVfrPfrCell setTitle:@"Variable Framerate"];
     }
     else
     {
-        [fFrameratePfrCheck setHidden:NO];
+        [fFramerateVfrPfrCell setTitle:@"Peak Framerate (VFR)"];
+
+
     }
     
     /* We call method method to calculatePictureSizing to error check detelecine*/
@@ -4690,33 +4883,33 @@ the user is using "Custom" settings by determining the sender*/
     /* We call method method to change UI to reflect whether a preset is used or not*/
 	[self customSettingUsed: sender];
 }
+
 - (IBAction) videoMatrixChanged: (id) sender;
 {
-    bool target, bitrate, quality;
-
-    target = bitrate = quality = false;
+    /* We use the selectedCell: tag of the fVidQualityMatrix instead of selectedRow
+     * so that the order of the video controls can be switched around.
+     * Constant quality is 1 and Average bitrate is 0 for reference. */
+    bool bitrate, quality;
+    bitrate = quality = false;
     if( [fVidQualityMatrix isEnabled] )
     {
-        switch( [fVidQualityMatrix selectedRow] )
+        switch( [[fVidQualityMatrix selectedCell] tag] )
         {
             case 0:
-                target = true;
-                break;
-            case 1:
                 bitrate = true;
                 break;
-            case 2:
+            case 1:
                 quality = true;
                 break;
         }
     }
-    [fVidTargetSizeField  setEnabled: target];
+
     [fVidBitrateField     setEnabled: bitrate];
     [fVidQualitySlider    setEnabled: quality];
     [fVidQualityRFField   setEnabled: quality];
     [fVidQualityRFLabel    setEnabled: quality];
     [fVidTwoPassCheck     setEnabled: !quality &&
-        [fVidQualityMatrix isEnabled]];
+     [fVidQualityMatrix isEnabled]];
     if( quality )
     {
         [fVidTwoPassCheck setState: NSOffState];
@@ -4725,7 +4918,7 @@ the user is using "Custom" settings by determining the sender*/
     }
 
     [self qualitySliderChanged: sender];
-    [self calculateBitrate: sender];
+    //[self calculateBitrate: sender];
 	[self customSettingUsed: sender];
 }
 
@@ -4749,8 +4942,8 @@ the user is using "Custom" settings by determining the sender*/
         [fVidQualitySlider setNumberOfTickMarks:(([fVidQualitySlider maxValue] - [fVidQualitySlider minValue]) * fractionalGranularity) + 1];
         qpRFLabelString = @"RF:";
     }
-    /* ffmpeg  1-31 */
-    if ([[fVidEncoderPopUp selectedItem] tag] == HB_VCODEC_FFMPEG )
+    /* FFmpeg MPEG-2/4 1-31 */
+    if ([[fVidEncoderPopUp selectedItem] tag] & HB_VCODEC_FFMPEG_MASK )
     {
         [fVidQualitySlider setMinValue:1.0];
         [fVidQualitySlider setMaxValue:31.0];
@@ -4818,7 +5011,7 @@ the user is using "Custom" settings by determining the sender*/
 
 - (IBAction) calculateBitrate: (id) sender
 {
-    if( !fHandle || [fVidQualityMatrix selectedRow] != 0 || !SuccessfulScan )
+    if( !fHandle || ![fVidQualityMatrix selectedRow] || !SuccessfulScan )
     {
         return;
     }
@@ -4827,7 +5020,6 @@ the user is using "Custom" settings by determining the sender*/
     hb_title_t * title = (hb_title_t *) hb_list_item( list,
             [fSrcTitlePopUp indexOfSelectedItem] );
     hb_job_t * job = title->job;
-    hb_audio_config_t * audio;
     /* For  hb_calc_bitrate in addition to the Target Size in MB out of the
      * Target Size Field, we also need the job info for the Muxer, the Chapters
      * as well as all of the audio track info.
@@ -4843,7 +5035,6 @@ the user is using "Custom" settings by determining the sender*/
     /* Audio goes here */
 	[fAudioDelegate prepareAudioForJob: job];
        
-[fVidBitrateField setIntValue: hb_calc_bitrate( job, [fVidTargetSizeField intValue] )];
 }
 
 #pragma mark -
@@ -4920,7 +5111,11 @@ the user is using "Custom" settings by determining the sender*/
     if ([fPictureController useDecomb] == 1)
     {
         /* Decomb */
-        if ([fPictureController decomb] == 2)
+        if ([fPictureController decomb] == 3)
+        {
+            videoFilters = [videoFilters stringByAppendingString:@" - Decomb (Fast)"];
+        }
+        else if ([fPictureController decomb] == 2)
         {
             videoFilters = [videoFilters stringByAppendingString:@" - Decomb (Default)"];
         }
@@ -4999,20 +5194,12 @@ the user is using "Custom" settings by determining the sender*/
 #pragma mark - Audio and Subtitles
 
 
-#pragma mark -
-
-- (BOOL) hasValidPresetSelected
-
-{
-	return ([fPresetsOutlineView selectedRow] >= 0 && [[[fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]] objectForKey:@"Folder"] intValue] != 1);
-}
-
 //	This causes all audio tracks from the title to be used based on the current preset
 - (IBAction) addAllAudioTracks: (id) sender
 
 {
-	[fAudioDelegate	addAllTracksFromPreset: [fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]]];
-	return;
+    [fAudioDelegate	addAllTracksFromPreset:[self selectedPreset]];
+    return;
 }
 
 - (IBAction) browseImportSrtFile: (id) sender
@@ -5119,11 +5306,6 @@ the user is using "Custom" settings by determining the sender*/
 - (IBAction) showPicturePanel: (id) sender
 {
 	[fPictureController showPictureWindow:sender];
-}
-
-- (void) picturePanelFullScreen
-{
-	[fPictureController setToFullScreenMode];
 }
 
 - (void) picturePanelWindowed
@@ -5377,8 +5559,8 @@ return YES;
 - (BOOL)outlineView:(NSOutlineView *)outlineView writeItems:(NSArray *)items toPasteboard:(NSPasteboard *)pboard
 {
 	// Dragging is only allowed for custom presets.
-    //[[[fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]] objectForKey:@"Default"] intValue] != 1
-	if ([[[fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]] objectForKey:@"Type"] intValue] == 0) // 0 is built in preset
+    //[[[self selectedPreset] objectForKey:@"Default"] intValue] != 1
+    if ([[[self selectedPreset] objectForKey:@"Type"] intValue] == 0) // 0 is built in preset
     {
         return NO;
     }
@@ -5483,12 +5665,12 @@ return YES;
 
 - (IBAction)selectPreset:(id)sender
 {
-    
-	if (YES == [self hasValidPresetSelected])
+
+    if (YES == [self hasValidPresetSelected])
     {
-        chosenPreset = [fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]];
+        chosenPreset = [self selectedPreset];
         [fPresetSelectedDisplay setStringValue:[chosenPreset objectForKey:@"PresetName"]];
-        
+
         if ([[chosenPreset objectForKey:@"Default"] intValue] == 1)
         {
             [fPresetSelectedDisplay setStringValue:[NSString stringWithFormat:@"%@ (Default)", [chosenPreset objectForKey:@"PresetName"]]];
@@ -5514,45 +5696,56 @@ return YES;
         
         /* Video encoder */
         [fVidEncoderPopUp selectItemWithTitle:[chosenPreset objectForKey:@"VideoEncoder"]];
+        [self videoEncoderPopUpChanged:nil];
         /* We set the advanced opt string here if applicable*/
-        [fAdvancedOptions setOptions:[chosenPreset objectForKey:@"x264Option"]];
+        if ([chosenPreset objectForKey:@"x264Option"])
+        {
+            [fAdvancedOptions setOptions:[chosenPreset objectForKey:@"x264Option"]];
+        }
+        else
+        {
+            [fAdvancedOptions setOptions:@""];   
+        }
+        if ([chosenPreset objectForKey:@"lavcOption"])
+        {
+            [fAdvancedOptions setLavcOptions:[chosenPreset objectForKey:@"lavcOption"]];
+        }
+        else
+        {
+            [fAdvancedOptions setLavcOptions:@""];   
+        }
         
         /* Lets run through the following functions to get variables set there */
-        [self videoEncoderPopUpChanged:nil];
+        //[self videoEncoderPopUpChanged:nil];
         /* Set the state of ipod compatible with Mp4iPodCompatible. Only for x264*/
         [fDstMp4iPodFileCheck setState:[[chosenPreset objectForKey:@"Mp4iPodCompatible"] intValue]];
         [self calculateBitrate:nil];
         
         /* Video quality */
-        [fVidQualityMatrix selectCellAtRow:[[chosenPreset objectForKey:@"VideoQualityType"] intValue] column:0];
         
-        [fVidTargetSizeField setStringValue:[chosenPreset objectForKey:@"VideoTargetSize"]];
+        int qualityType = [[chosenPreset objectForKey:@"VideoQualityType"] intValue] - 1;
+        /* Note since the removal of Target Size encoding, the possible values for VideoQuality type are 0 - 1.
+         * Therefore any preset that uses the old 2 for Constant Quality would now use 1 since there is one less index
+         * for the fVidQualityMatrix. It should also be noted that any preset that used the deprecated Target Size
+         * setting of 0 would set us to 0 or ABR since ABR is now tagged 0. Fortunately this does not affect any built-in
+         * presets since they all use Constant Quality or Average Bitrate.*/
+        if (qualityType == -1)
+        {
+            qualityType = 0;
+        }
+        [fVidQualityMatrix selectCellWithTag:qualityType];
+
         [fVidBitrateField setStringValue:[chosenPreset objectForKey:@"VideoAvgBitrate"]];
         
-        /* Since we are now using RF Values for the slider, we detect if the preset uses an old quality float.
-         * So, check to see if the quality value is less than 1.0 which should indicate the old ".062" type
-         * quality preset. Caveat: in the case of x264, where the RF scale starts at 0, it would misinterpret
-         * a preset that uses 0.0 - 0.99 for RF as an old style preset. Not sure how to get around that one yet,
-         * though it should be a corner case since it would pretty much be a preset for lossless encoding. */
-        if ([[chosenPreset objectForKey:@"VideoQualitySlider"] floatValue] < 1.0)
+        if ([[fVidEncoderPopUp selectedItem] tag] == HB_VCODEC_THEORA)
         {
-            /* For the quality slider we need to convert the old percent's to the new rf scales */
-            float rf =  (([fVidQualitySlider maxValue] - [fVidQualitySlider minValue]) * [[chosenPreset objectForKey:@"VideoQualitySlider"] floatValue]);
-            [fVidQualitySlider setFloatValue:rf];
-            
+            /* Since theora's qp value goes up from left to right, we can just set the slider float value */
+            [fVidQualitySlider setFloatValue:[[chosenPreset objectForKey:@"VideoQualitySlider"] floatValue]];
         }
         else
         {
-            /* Since theora's qp value goes up from left to right, we can just set the slider float value */
-            if ([[fVidEncoderPopUp selectedItem] tag] == HB_VCODEC_THEORA)
-            {
-                [fVidQualitySlider setFloatValue:[[chosenPreset objectForKey:@"VideoQualitySlider"] floatValue]];
-            }
-            else
-            {
-                /* since ffmpeg and x264 use an "inverted" slider (lower qp/rf values indicate a higher quality) we invert the value on the slider */
-                [fVidQualitySlider setFloatValue:([fVidQualitySlider maxValue] + [fVidQualitySlider minValue]) - [[chosenPreset objectForKey:@"VideoQualitySlider"] floatValue]];
-            }
+            /* Since ffmpeg and x264 use an "inverted" slider (lower qp/rf values indicate a higher quality) we invert the value on the slider */
+            [fVidQualitySlider setFloatValue:([fVidQualitySlider maxValue] + [fVidQualitySlider minValue]) - [[chosenPreset objectForKey:@"VideoQualitySlider"] floatValue]];
         }
         
         [self videoMatrixChanged:nil];
@@ -5563,13 +5756,30 @@ return YES;
         if ([[chosenPreset objectForKey:@"VideoFramerate"] isEqualToString:@"Same as source"])
         {
             [fVidRatePopUp selectItemAtIndex: 0];
+            /* Now set the Video Frame Rate Mode to either vfr or cfr according to the preset */
+            if (![chosenPreset objectForKey:@"VideoFramerateMode"] || [[chosenPreset objectForKey:@"VideoFramerateMode"] isEqualToString:@"vfr"])
+            {
+                [fFramerateMatrix selectCellAtRow: 0 column: 0]; // we want vfr
+            }
+            else
+            {
+                [fFramerateMatrix selectCellAtRow: 1 column: 0]; // we want cfr
+            }
         }
         else
         {
             [fVidRatePopUp selectItemWithTitle:[chosenPreset objectForKey:@"VideoFramerate"]];
+            /* Now set the Video Frame Rate Mode to either pfr or cfr according to the preset */
+            if ([[chosenPreset objectForKey:@"VideoFramerateMode"] isEqualToString:@"pfr"] || [[chosenPreset objectForKey:@"VideoFrameratePFR"] intValue] == 1)
+            {
+                [fFramerateMatrix selectCellAtRow: 0 column: 0]; // we want pfr
+            }
+            else
+            {
+                [fFramerateMatrix selectCellAtRow: 1 column: 0]; // we want cfr
+            }
         }
-        /* Set PFR */
-        [fFrameratePfrCheck setState:[[chosenPreset objectForKey:@"VideoFrameratePFR"] intValue]];
+        
         [self videoFrameRateChanged:nil];
         
         /* 2 Pass Encoding */
@@ -5579,8 +5789,61 @@ return YES;
         /* Turbo 1st pass for 2 Pass Encoding */
         [fVidTurboPassCheck setState:[[chosenPreset objectForKey:@"VideoTurboTwoPass"] intValue]];
         
-        /*Audio*/
-		[fAudioDelegate addTracksFromPreset: chosenPreset];
+        /* Auto Passthru */
+        /* If the preset has Auto Passthru fields, use them;
+         * else assume every passthru is allowed and the fallback is AC3 */
+        id tempObject;
+        if ((tempObject = [chosenPreset objectForKey:@"AudioAllowAACPass"]) != nil)
+        {
+            [fAudioAllowAACPassCheck setState:[tempObject intValue]];
+        }
+        else
+        {
+            [fAudioAllowAACPassCheck setState:NSOnState];
+        }
+        if ((tempObject = [chosenPreset objectForKey:@"AudioAllowAC3Pass"]) != nil)
+        {
+            [fAudioAllowAC3PassCheck setState:[tempObject intValue]];
+        }
+        else
+        {
+            [fAudioAllowAC3PassCheck setState:NSOnState];
+        }
+        if ((tempObject = [chosenPreset objectForKey:@"AudioAllowDTSHDPass"]) != nil)
+        {
+            [fAudioAllowDTSHDPassCheck setState:[tempObject intValue]];
+        }
+        else
+        {
+            [fAudioAllowDTSHDPassCheck setState:NSOnState];
+        }
+        if ((tempObject = [chosenPreset objectForKey:@"AudioAllowDTSPass"]) != nil)
+        {
+            [fAudioAllowDTSPassCheck setState:[tempObject intValue]];
+        }
+        else
+        {
+            [fAudioAllowDTSPassCheck setState:NSOnState];
+        }
+        if ((tempObject = [chosenPreset objectForKey:@"AudioAllowMP3Pass"]) != nil)
+        {
+            [fAudioAllowMP3PassCheck setState:[tempObject intValue]];
+        }
+        else
+        {
+            [fAudioAllowMP3PassCheck setState:NSOnState];
+        }
+        if ((tempObject = [chosenPreset objectForKey:@"AudioEncoderFallback"]) != nil)
+        {
+            [fAudioFallbackPopUp selectItemWithTitle:tempObject];
+        }
+        else
+        {
+            [fAudioFallbackPopUp selectItemWithTitle:@"AC3 (ffmpeg)"];
+        }
+        
+        /* Audio */
+        [fAudioDelegate addTracksFromPreset: chosenPreset];
         
         /*Subtitles*/
         [fSubPopUp selectItemWithTitle:[chosenPreset objectForKey:@"Subtitles"]];
@@ -5710,15 +5973,11 @@ return YES;
         {
             /* Filters */
             
-            /* We only allow *either* Decomb or Deinterlace. So check for the PictureDecombDeinterlace key.
-             * also, older presets may not have this key, in which case we also check to see if that preset had  PictureDecomb
-             * specified, in which case we use decomb and ignore any possible Deinterlace settings as using both was less than
-             * sane.
-             */
+            /* We only allow *either* Decomb or Deinterlace. So check for the PictureDecombDeinterlace key. */
             [fPictureController setUseDecomb:1];
             [fPictureController setDecomb:0];
             [fPictureController setDeinterlace:0];
-            if ([[chosenPreset objectForKey:@"PictureDecombDeinterlace"] intValue] == 1 || [[chosenPreset objectForKey:@"PictureDecomb"] intValue] > 0)
+            if ([[chosenPreset objectForKey:@"PictureDecombDeinterlace"] intValue] == 1)
             {
                 /* we are using decomb */
                 /* Decomb */
@@ -5809,35 +6068,47 @@ return YES;
 }
 
 
+- (BOOL)hasValidPresetSelected
+{
+    return ([fPresetsOutlineView selectedRow] >= 0 && [[[self selectedPreset] objectForKey:@"Folder"] intValue] != 1);
+}
+
+
+- (id)selectedPreset
+{
+    return [fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]];
+}
+
+
 #pragma mark -
 #pragma mark Manage Presets
 
 - (void) loadPresets {
-	/* We declare the default NSFileManager into fileManager */
-	NSFileManager * fileManager = [NSFileManager defaultManager];
-	/*We define the location of the user presets file */
+    /* We declare the default NSFileManager into fileManager */
+    NSFileManager * fileManager = [NSFileManager defaultManager];
+    /* We define the location of the user presets file */
     UserPresetsFile = @"~/Library/Application Support/HandBrake/UserPresets.plist";
-	UserPresetsFile = [[UserPresetsFile stringByExpandingTildeInPath]retain];
+    UserPresetsFile = [[UserPresetsFile stringByExpandingTildeInPath]retain];
     /* We check for the presets.plist */
-	if ([fileManager fileExistsAtPath:UserPresetsFile] == 0)
-	{
-		[fileManager createFileAtPath:UserPresetsFile contents:nil attributes:nil];
-	}
+    if ([fileManager fileExistsAtPath:UserPresetsFile] == 0)
+    {
+        [fileManager createFileAtPath:UserPresetsFile contents:nil attributes:nil];
+    }
 
-	UserPresets = [[NSMutableArray alloc] initWithContentsOfFile:UserPresetsFile];
-	if (nil == UserPresets)
-	{
-		UserPresets = [[NSMutableArray alloc] init];
-		[self addFactoryPresets:nil];
-	}
-	[fPresetsOutlineView reloadData];
+    UserPresets = [[NSMutableArray alloc] initWithContentsOfFile:UserPresetsFile];
+    if (nil == UserPresets)
+    {
+        UserPresets = [[NSMutableArray alloc] init];
+        [self addFactoryPresets:nil];
+    }
+    [fPresetsOutlineView reloadData];
     
     [self checkBuiltInsForUpdates];
 }
 
 - (void) checkBuiltInsForUpdates {
     
-	BOOL updateBuiltInPresets = NO;
+    BOOL updateBuiltInPresets = NO;
     int i = 0;
     NSEnumerator *enumerator = [UserPresets objectEnumerator];
     id tempObject;
@@ -5896,9 +6167,10 @@ return YES;
     [fPresetNewPicSettingsPopUp addItemWithTitle:@"None"];
     [fPresetNewPicSettingsPopUp addItemWithTitle:@"Custom"];
     [fPresetNewPicSettingsPopUp addItemWithTitle:@"Source Maximum (post source scan)"];
-    [fPresetNewPicSettingsPopUp selectItemAtIndex: 0];	
-    /* Uncheck the preset use filters checkbox */
-    [fPresetNewPicFiltersCheck setState:NSOffState];
+    /* Use current width and height by default (Custom) */
+    [fPresetNewPicSettingsPopUp selectItemAtIndex: 1];
+    /* Save the current filters in the preset by default */
+    [fPresetNewPicFiltersCheck setState:NSOnState];
     // fPresetNewFolderCheck
     [fPresetNewFolderCheck setState:NSOffState];
     /* Erase info from the input fields*/
@@ -6019,22 +6291,43 @@ return YES;
         [preset setObject:[fVidEncoderPopUp titleOfSelectedItem] forKey:@"VideoEncoder"];
         /* x264 Option String */
         [preset setObject:[fAdvancedOptions optionsString] forKey:@"x264Option"];
+        /* FFmpeg (lavc) Option String */
+        [preset setObject:[fAdvancedOptions optionsStringLavc] forKey:@"lavcOption"];
         
-        [preset setObject:[NSNumber numberWithInt:[fVidQualityMatrix selectedRow]] forKey:@"VideoQualityType"];
-        [preset setObject:[fVidTargetSizeField stringValue] forKey:@"VideoTargetSize"];
+        /* though there are actually only 0 - 1 types available in the ui we need to map to the old 0 - 2
+         * set of indexes from when we had 0 == Target , 1 == Abr and 2 == Constant Quality for presets
+         * to take care of any legacy presets. */
+        [preset setObject:[NSNumber numberWithInt:[[fVidQualityMatrix selectedCell] tag] +1 ] forKey:@"VideoQualityType"];
         [preset setObject:[fVidBitrateField stringValue] forKey:@"VideoAvgBitrate"];
         [preset setObject:[NSNumber numberWithFloat:[fVidQualityRFField floatValue]] forKey:@"VideoQualitySlider"];
         
         /* Video framerate */
+        /* Set the Video Frame Rate Mode */
+        if ([fFramerateMatrix selectedRow] == 1)
+        {
+            [preset setObject:@"cfr" forKey:@"VideoFramerateMode"];
+        }
+        /* Set the actual framerate from popup overriding the cfr setting as needed */
         if ([fVidRatePopUp indexOfSelectedItem] == 0) // Same as source is selected
         {
             [preset setObject:@"Same as source" forKey:@"VideoFramerate"];
+            
+            if ([fFramerateMatrix selectedRow] == 0)
+            {
+                [preset setObject:@"vfr" forKey:@"VideoFramerateMode"];
+            }
         }
         else // we can record the actual titleOfSelectedItem
         {
             [preset setObject:[fVidRatePopUp titleOfSelectedItem] forKey:@"VideoFramerate"];
+            
+            if ([fFramerateMatrix selectedRow] == 0)
+            {
+                [preset setObject:@"pfr" forKey:@"VideoFramerateMode"];
+            }
         }
-        [preset setObject:[NSNumber numberWithInt:[fFrameratePfrCheck state]] forKey:@"VideoFrameratePFR"];
+        
+
         
         /* 2 Pass Encoding */
         [preset setObject:[NSNumber numberWithInt:[fVidTwoPassCheck state]] forKey:@"VideoTwoPass"];
@@ -6071,7 +6364,28 @@ return YES;
         [preset setObject:[fPictureController decombCustomString] forKey:@"PictureDecombCustom"];
         [preset setObject:[NSNumber numberWithInt:[fPictureController grayscale]] forKey:@"VideoGrayScale"];
         
-        /*Audio*/
+        /* Auto Pasthru */
+        if ([fAudioAutoPassthruBox isHidden])
+        {
+            // every passthru is allowed, fallback is AC3
+            [preset setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowAACPass"];
+            [preset setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowAC3Pass"];
+            [preset setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowDTSHDPass"];
+            [preset setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowDTSPass"];
+            [preset setObject:[NSNumber numberWithInt:1] forKey: @"AudioAllowMP3Pass"];
+            [preset setObject:@"AC3 (ffmpeg)" forKey: @"AudioEncoderFallback"];
+        }
+        else
+        {
+            [preset setObject:[NSNumber numberWithInt:[fAudioAllowAACPassCheck state]] forKey: @"AudioAllowAACPass"];
+            [preset setObject:[NSNumber numberWithInt:[fAudioAllowAC3PassCheck state]] forKey: @"AudioAllowAC3Pass"];
+            [preset setObject:[NSNumber numberWithInt:[fAudioAllowDTSHDPassCheck state]] forKey: @"AudioAllowDTSHDPass"];
+            [preset setObject:[NSNumber numberWithInt:[fAudioAllowDTSPassCheck state]] forKey: @"AudioAllowDTSPass"];
+            [preset setObject:[NSNumber numberWithInt:[fAudioAllowMP3PassCheck state]] forKey: @"AudioAllowMP3Pass"];
+            [preset setObject:[fAudioFallbackPopUp titleOfSelectedItem] forKey: @"AudioEncoderFallback"];
+        }
+        
+        /* Audio */
         NSMutableArray *audioListArray = [[NSMutableArray alloc] init];
 		[fAudioDelegate prepareAudioForPreset: audioListArray];
         
@@ -6108,15 +6422,15 @@ return YES;
         return;
     }
     /* Alert user before deleting preset */
-	int status;
+    int status;
     status = NSRunAlertPanel(@"Warning!", @"Are you sure that you want to delete the selected preset?", @"OK", @"Cancel", nil);
-    
-    if ( status == NSAlertDefaultReturn ) 
+
+    if ( status == NSAlertDefaultReturn )
     {
-        int presetToModLevel = [fPresetsOutlineView levelForItem: [fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]]];
-        NSDictionary *presetToMod = [fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]];
+        int presetToModLevel = [fPresetsOutlineView levelForItem: [self selectedPreset]];
+        NSDictionary *presetToMod = [self selectedPreset];
         NSDictionary *presetToModParent = [fPresetsOutlineView parentForItem: presetToMod];
-        
+
         NSEnumerator *enumerator;
         NSMutableArray *presetsArrayToMod;
         NSMutableArray *tempArray;
@@ -6183,17 +6497,17 @@ return YES;
         if (nil == presetsToExport)
         {
             presetsToExport = [[NSMutableArray alloc] init];
-            
+
             /* now get and add selected presets to export */
-            
+
         }
-		if (YES == [self hasValidPresetSelected])
+        if (YES == [self hasValidPresetSelected])
         {
-            [presetsToExport addObject:[fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]]];
+            [presetsToExport addObject:[self selectedPreset]];
             [presetsToExport writeToFile:exportPresetsFile atomically:YES];
-            
+
         }
-        
+
     }
 }
 
@@ -6361,24 +6675,24 @@ return YES;
 - (IBAction)setDefaultPreset:(id)sender
 {
 /* We need to determine if the item is a folder */
-   if ([[[fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]] objectForKey:@"Folder"] intValue] == 1)
+   if ([[[self selectedPreset] objectForKey:@"Folder"] intValue] == 1)
    {
    return;
    }
 
     int i = 0;
     NSEnumerator *enumerator = [UserPresets objectEnumerator];
-	id tempObject;
-	/* First make sure the old user specified default preset is removed */
+    id tempObject;
+    /* First make sure the old user specified default preset is removed */
     while (tempObject = [enumerator nextObject])
-	{
-		NSMutableDictionary *thisPresetDict = tempObject;
-		if ([[tempObject objectForKey:@"Default"] intValue] != 1) // if not the default HB Preset, set to 0
-		{
-			[[UserPresets objectAtIndex:i] setObject:[NSNumber numberWithInt:0] forKey:@"Default"];	
-		}
+    {
+        NSMutableDictionary *thisPresetDict = tempObject;
+        if ([[tempObject objectForKey:@"Default"] intValue] != 1) // if not the default HB Preset, set to 0
+        {
+            [[UserPresets objectAtIndex:i] setObject:[NSNumber numberWithInt:0] forKey:@"Default"];	
+        }
 		
-		/* if we run into a folder, go to level 1 and iterate through the children arrays for the default */
+        /* if we run into a folder, go to level 1 and iterate through the children arrays for the default */
         if ([thisPresetDict objectForKey:@"ChildrenArray"])
         {
             NSEnumerator *enumerator = [[thisPresetDict objectForKey:@"ChildrenArray"] objectEnumerator];
@@ -6408,20 +6722,20 @@ return YES;
                 }
                 ii++;
             }
-            
+
         }
-        i++; 
+        i++;
 	}
-    
-    
-    int presetToModLevel = [fPresetsOutlineView levelForItem: [fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]]];
-    NSDictionary *presetToMod = [fPresetsOutlineView itemAtRow:[fPresetsOutlineView selectedRow]];
+
+
+    int presetToModLevel = [fPresetsOutlineView levelForItem: [self selectedPreset]];
+    NSDictionary *presetToMod = [self selectedPreset];
     NSDictionary *presetToModParent = [fPresetsOutlineView parentForItem: presetToMod];
-    
-    
+
+
     NSMutableArray *presetsArrayToMod;
     NSMutableArray *tempArray;
-    
+
     /* If we are a root level preset, we are modding the UserPresets array */
     if (presetToModLevel == 0)
     {

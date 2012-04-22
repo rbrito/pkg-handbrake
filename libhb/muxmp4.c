@@ -154,7 +154,7 @@ static int MP4Init( hb_mux_object_t * m )
 			MP4AddIPodUUID(m->file, mux_data->track);
 		}
     }
-    else /* FFmpeg or XviD */
+    else if ( job->vcodec == HB_VCODEC_FFMPEG_MPEG4 ) /* FFmpeg MPEG-4 */
     {
         MP4SetVideoProfileLevel( m->file, MPEG4_SP_L3 );
         mux_data->track = MP4AddVideoTrack( m->file, 90000,
@@ -182,28 +182,55 @@ static int MP4Init( hb_mux_object_t * m )
             return 0;
         }
     }
+    else if ( job->vcodec == HB_VCODEC_FFMPEG_MPEG2 ) /* FFmpeg MPEG-2 */
+    {
+        mux_data->track = MP4AddVideoTrack( m->file, 90000,
+                MP4_INVALID_DURATION, job->width, job->height,
+                MP4_MPEG2_VIDEO_TYPE );
+        if (mux_data->track == MP4_INVALID_TRACK_ID)
+        {
+            hb_error("muxmp4.c: MP4AddVideoTrack failed!");
+            *job->die = 1;
+            return 0;
+        }
+
+        /* Tune track chunk duration */
+        if( !MP4TuneTrackDurationPerChunk( m, mux_data->track ))
+        {
+            return 0;
+        }
+
+        /* VOL from FFmpeg */
+        if (!(MP4SetTrackESConfiguration( m->file, mux_data->track,
+                job->config.mpeg4.bytes, job->config.mpeg4.length )))
+        {
+            hb_error("muxmp4.c: MP4SetTrackESConfiguration failed!");
+            *job->die = 1;
+            return 0;
+        }
+    }
+    else
+    {
+        hb_error("muxmp4.c: Unsupported video encoder!");
+    }
 
     // COLR atom for color and gamma correction.
     // Per the notes at:
     //   http://developer.apple.com/quicktime/icefloe/dispatch019.html#colr
     //   http://forum.doom9.org/showthread.php?t=133982#post1090068
-    // the user can set it from job->color_matrix, otherwise by default
+    // the user can set it from job->color_matrix_code, otherwise by default
     // we say anything that's likely to be HD content is ITU BT.709 and
     // DVD, SD TV & other content is ITU BT.601.  We look at the title height
     // rather than the job height here to get uncropped input dimensions.
-    if( job->color_matrix == 1 )
+    if( job->color_matrix_code == 3 )
     {
-        // ITU BT.601 DVD or SD TV content
-        MP4AddColr(m->file, mux_data->track, 6, 1, 6);
+        // Custom
+        MP4AddColr(m->file, mux_data->track, job->color_prim, job->color_transfer, job->color_matrix);        
     }
-    else if( job->color_matrix == 2 )
+    else if( ( job->color_matrix_code == 2 ) || 
+             ( job->color_matrix_code == 0 && ( job->title->width >= 1280 || job->title->height >= 720 ) ) )
     {
         // ITU BT.709 HD content
-        MP4AddColr(m->file, mux_data->track, 1, 1, 1);        
-    }
-    else if ( job->title->width >= 1280 || job->title->height >= 720 )
-    {
-        // we guess that 720p or above is ITU BT.709 HD content
         MP4AddColr(m->file, mux_data->track, 1, 1, 1);
     }
     else
@@ -226,225 +253,206 @@ static int MP4Init( hb_mux_object_t * m )
         MP4SetTrackFloatProperty(m->file, mux_data->track, "tkhd.width", job->width * (width / height));
     }
 
-	/* add the audio tracks */
+    /* add the audio tracks */
     for( i = 0; i < hb_list_count( title->list_audio ); i++ )
     {
         audio = hb_list_item( title->list_audio, i );
         mux_data = calloc(1, sizeof( hb_mux_data_t ) );
         audio->priv.mux_data = mux_data;
 
-        if( audio->config.out.codec == HB_ACODEC_AC3_PASS )
+        switch ( audio->config.out.codec & HB_ACODEC_MASK )
         {
-            uint8_t bsid = audio->config.in.version;
-            uint8_t bsmod = audio->config.in.mode;
-            uint8_t acmod = audio->config.flags.ac3 & 0x7;
-            uint8_t lfeon = (audio->config.flags.ac3 & A52_LFE) ? 1 : 0;
-            uint8_t bit_rate_code = 0;
-            int ii, jj;
-            int freq = audio->config.in.samplerate;
-            int bitrate = audio->config.in.bitrate;
-            int sr_shift, sr_code;
-
-            for (ii = 0; ii < 3; ii++)
+            case HB_ACODEC_AC3:
             {
-                for (jj = 0; jj < 3; jj++)
+                uint8_t bsid;
+                uint8_t bsmod;
+                uint8_t acmod;
+                uint8_t lfeon;
+                uint8_t bit_rate_code = 0;
+                int ii, jj;
+                int freq;
+                int bitrate;
+                int sr_shift, sr_code;
+
+                if ( audio->config.out.codec & HB_ACODEC_PASS_FLAG )
                 {
-                    if ((ac3_sample_rate_tab[jj] >> ii) == freq)
+                    bsmod = audio->config.in.mode;
+                    acmod = audio->config.flags.ac3 & 0x7;
+                    lfeon = (audio->config.flags.ac3 & A52_LFE) ? 1 : 0;
+                    freq = audio->config.in.samplerate;
+                    bitrate = audio->config.in.bitrate;
+                }
+                else
+                {
+                    bsmod = 0;
+                    freq = audio->config.out.samplerate;
+                    bitrate = audio->config.out.bitrate * 1000;
+                    switch( audio->config.out.mixdown )
                     {
-                        goto rate_found1;
+                        case HB_AMIXDOWN_MONO:
+                            acmod = 1;
+                            lfeon = 0;
+                            break;
+
+                        case HB_AMIXDOWN_STEREO:
+                        case HB_AMIXDOWN_DOLBY:
+                        case HB_AMIXDOWN_DOLBYPLII:
+                            acmod = 2;
+                            lfeon = 0;
+                            break;
+
+                        case HB_AMIXDOWN_6CH:
+                            acmod = 7;
+                            lfeon = 1;
+                            break;
+
+                        default:
+                            hb_log(" MP4Init: bad mixdown" );
+                            acmod = 2;
+                            lfeon = 0;
+                            break;
                     }
                 }
-            }
-            hb_error("Unknown AC3 samplerate");
-            ii = jj = 0;
-rate_found1:
-            sr_shift = ii;
-            sr_code = jj;
-            for (ii = 0; ii < 19; ii++)
-            {
-                if ((ac3_bitrate_tab[ii] >> sr_shift)*1000 == bitrate)
-                    break;
-            }
-            if ( ii >= 19 )
-            {
-                hb_error("Unknown AC3 bitrate");
-                ii = 0;
-            }
-            bit_rate_code = ii;
 
-            mux_data->track = MP4AddAC3AudioTrack(
-                m->file,
-                audio->config.in.samplerate, 
-                sr_code,
-                bsid,
-                bsmod,
-                acmod,
-                lfeon,
-                bit_rate_code);
-
-            /* Tune track chunk duration */
-            MP4TuneTrackDurationPerChunk( m, mux_data->track );
-
-            if (audio->config.out.name == NULL) {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)"Surround", strlen("Surround"));
-            }
-            else {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)(audio->config.out.name),
-                    strlen(audio->config.out.name));
-            }
-        }
-        else if( audio->config.out.codec == HB_ACODEC_AC3 )
-        {
-            uint8_t bsid = 8;
-            uint8_t bsmod = 0;
-            uint8_t acmod = 2;
-            uint8_t lfeon = 0;
-            uint8_t bit_rate_code = 0;
-            int ii, jj;
-            int freq = audio->config.out.samplerate;
-            int bitrate = audio->config.out.bitrate;
-            int sr_shift, sr_code;
-
-            for (ii = 0; ii < 3; ii++)
-            {
-                for (jj = 0; jj < 3; jj++)
+                for (ii = 0; ii < 3; ii++)
                 {
-                    if ((ac3_sample_rate_tab[jj] >> ii) == freq)
+                    for (jj = 0; jj < 3; jj++)
                     {
-                        goto rate_found2;
+                        if ((ac3_sample_rate_tab[jj] >> ii) == freq)
+                        {
+                            goto rate_found1;
+                        }
                     }
                 }
-            }
-            hb_error("Unknown AC3 samplerate");
-            ii = jj = 0;
-rate_found2:
-            sr_shift = ii;
-            sr_code = jj;
-            bsid = 8 + ii;
-            for (ii = 0; ii < 19; ii++)
+                hb_error("Unknown AC3 samplerate");
+                ii = jj = 0;
+    rate_found1:
+                sr_shift = ii;
+                sr_code = jj;
+                bsid = 8 + ii;
+                for (ii = 0; ii < 19; ii++)
+                {
+                    if ((ac3_bitrate_tab[ii] >> sr_shift)*1000 == bitrate)
+                        break;
+                }
+                if ( ii >= 19 )
+                {
+                    hb_error("Unknown AC3 bitrate");
+                    ii = 0;
+                }
+                bit_rate_code = ii;
+
+                mux_data->track = MP4AddAC3AudioTrack(
+                    m->file,
+                    freq,
+                    sr_code,
+                    bsid,
+                    bsmod,
+                    acmod,
+                    lfeon,
+                    bit_rate_code);
+
+                /* Tune track chunk duration */
+                MP4TuneTrackDurationPerChunk( m, mux_data->track );
+
+                if (audio->config.out.name == NULL) {
+                    MP4SetTrackBytesProperty(
+                        m->file, mux_data->track,
+                        "udta.name.value",
+                        (const uint8_t*)"Surround", strlen("Surround"));
+                }
+                else {
+                    MP4SetTrackBytesProperty(
+                        m->file, mux_data->track,
+                        "udta.name.value",
+                        (const uint8_t*)(audio->config.out.name),
+                        strlen(audio->config.out.name));
+                }
+            } break;
+
+            case HB_ACODEC_FAAC:
+            case HB_ACODEC_FFAAC:
+            case HB_ACODEC_CA_AAC:
+            case HB_ACODEC_CA_HAAC:
+            case HB_ACODEC_LAME:
+            case HB_ACODEC_MP3:
+            case HB_ACODEC_DCA_HD:
+            case HB_ACODEC_DCA:
             {
-                if ((ac3_bitrate_tab[ii] >> sr_shift) == bitrate)
-                    break;
-            }
-            if ( ii >= 19 )
+                uint8_t audio_type = MP4_MPEG4_AUDIO_TYPE;
+                int samplerate, samples_per_frame, channels, config_len = 0;
+                uint8_t *config_bytes = NULL;
+
+                switch ( audio->config.out.codec & HB_ACODEC_MASK )
+                {
+                    case HB_ACODEC_FAAC:
+                    case HB_ACODEC_FFAAC:
+                    case HB_ACODEC_CA_AAC:
+                    case HB_ACODEC_CA_HAAC:
+                    {
+                        audio_type = MP4_MPEG4_AUDIO_TYPE;
+                        config_bytes = audio->priv.config.extradata.bytes;
+                        config_len = audio->priv.config.extradata.length;
+                    } break;
+                    case HB_ACODEC_LAME:
+                    case HB_ACODEC_MP3:
+                    {
+                        audio_type = MP4_MPEG2_AUDIO_TYPE;
+                    } break;
+                    case HB_ACODEC_DCA:
+                    case HB_ACODEC_DCA_HD:
+                    {
+                        audio_type = 0xA9;
+                    } break;
+                }
+                if( audio->config.out.codec & HB_ACODEC_PASS_FLAG )
+                {
+                    samplerate = audio->config.in.samplerate;
+                    samples_per_frame = audio->config.in.samples_per_frame;
+                    channels = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT(
+                                            audio->config.in.channel_layout );
+                }
+                else
+                {
+                    samplerate = audio->config.out.samplerate;
+                    samples_per_frame = audio->config.out.samples_per_frame;
+                    channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(
+                                            audio->config.out.mixdown );
+                }
+                mux_data->track = MP4AddAudioTrack( m->file, samplerate, 
+                                                samples_per_frame, audio_type );
+
+                /* Tune track chunk duration */
+                MP4TuneTrackDurationPerChunk( m, mux_data->track );
+
+                if (audio->config.out.name == NULL) {
+                    MP4SetTrackBytesProperty(
+                        m->file, mux_data->track,
+                        "udta.name.value",
+                        (const uint8_t*)"Stereo", strlen("Stereo"));
+                }
+                else {
+                    MP4SetTrackBytesProperty(
+                        m->file, mux_data->track,
+                        "udta.name.value",
+                        (const uint8_t*)(audio->config.out.name),
+                        strlen(audio->config.out.name));
+                }
+
+                MP4SetAudioProfileLevel( m->file, 0x0F );
+                if ( config_bytes )
+                {
+                    MP4SetTrackESConfiguration( m->file, mux_data->track,
+                                                config_bytes, config_len );
+                }
+                /* Set the correct number of channels for this track */
+                MP4SetTrackIntegerProperty(m->file, mux_data->track, "mdia.minf.stbl.stsd.*.channels", channels);
+            } break;
+
+            default:
             {
-                hb_error("Unknown AC3 bitrate");
-                ii = 0;
-            }
-            bit_rate_code = ii;
-
-            switch( audio->config.out.mixdown )
-            {
-                case HB_AMIXDOWN_MONO:
-                    acmod = 1;
-                    break;
-
-                case HB_AMIXDOWN_STEREO:
-                case HB_AMIXDOWN_DOLBY:
-                case HB_AMIXDOWN_DOLBYPLII:
-                    acmod = 2;
-                    break;
-
-                case HB_AMIXDOWN_6CH:
-                    acmod = 7;
-                    lfeon = 1;
-                    break;
-
-                default:
-                    hb_log(" MP4Init: bad mixdown" );
-                    break;
-            }
-
-            mux_data->track = MP4AddAC3AudioTrack(
-                m->file,
-                audio->config.out.samplerate, 
-                sr_code,
-                bsid,
-                bsmod,
-                acmod,
-                lfeon,
-                bit_rate_code);
-
-            /* Tune track chunk duration */
-            MP4TuneTrackDurationPerChunk( m, mux_data->track );
-
-            if (audio->config.out.name == NULL) {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)"Surround", strlen("Surround"));
-            }
-            else {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)(audio->config.out.name),
-                    strlen(audio->config.out.name));
-            }
-        } 
-        else if( audio->config.out.codec == HB_ACODEC_FAAC ||
-                 audio->config.out.codec == HB_ACODEC_CA_AAC ) 
-        {
-            mux_data->track = MP4AddAudioTrack(
-                m->file,
-                audio->config.out.samplerate, 1024, MP4_MPEG4_AUDIO_TYPE );
-
-            /* Tune track chunk duration */
-            MP4TuneTrackDurationPerChunk( m, mux_data->track );
-
-            if (audio->config.out.name == NULL) {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)"Stereo", strlen("Stereo"));
-            }
-            else {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)(audio->config.out.name),
-                    strlen(audio->config.out.name));
-            }
-
-            MP4SetAudioProfileLevel( m->file, 0x0F );
-            MP4SetTrackESConfiguration(
-                m->file, mux_data->track,
-                audio->priv.config.aac.bytes, audio->priv.config.aac.length );
-
-            /* Set the correct number of channels for this track */
-             MP4SetTrackIntegerProperty(m->file, mux_data->track, "mdia.minf.stbl.stsd.mp4a.channels", (uint16_t)HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown));
-        } else if( audio->config.out.codec == HB_ACODEC_LAME ) {
-            mux_data->track = MP4AddAudioTrack(
-                m->file,
-                audio->config.out.samplerate, 1152, MP4_MPEG2_AUDIO_TYPE );
-
-            /* Tune track chunk duration */
-            MP4TuneTrackDurationPerChunk( m, mux_data->track );
-
-            if (audio->config.out.name == NULL) {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)"Stereo", strlen("Stereo"));
-            }
-            else {
-                MP4SetTrackBytesProperty(
-                    m->file, mux_data->track,
-                    "udta.name.value",
-                    (const uint8_t*)(audio->config.out.name),
-                    strlen(audio->config.out.name));
-            }
-
-            MP4SetAudioProfileLevel( m->file, 0x0F );
-
-            /* Set the correct number of channels for this track */
-             MP4SetTrackIntegerProperty(m->file, mux_data->track, "mdia.minf.stbl.stsd.mp4a.channels", (uint16_t)HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown));
+                hb_log("MP4Mux: Unsupported audio codec %x", audio->config.out.codec);
+            } break;
         }
 
         /* Set the language for this track */
@@ -886,7 +894,8 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
     {
         /* Video */
 
-        if( job->vcodec == HB_VCODEC_X264 )
+        if( job->vcodec == HB_VCODEC_X264 ||
+            ( job->vcodec & HB_VCODEC_FFMPEG_MASK ) )
         {
             if ( buf && buf->start < buf->renderOffset )
             {
@@ -905,7 +914,8 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
         if ( !buf )
             return 0;
 
-        if( job->vcodec == HB_VCODEC_X264 )
+        if( job->vcodec == HB_VCODEC_X264 ||
+            ( job->vcodec & HB_VCODEC_FFMPEG_MASK ) )
         {
             // x264 supplies us with DTS, so offset is PTS - DTS
             offset = buf->start - buf->renderOffset;
@@ -942,7 +952,8 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
             }
         }
 
-        if( job->vcodec == HB_VCODEC_X264 )
+        if( job->vcodec == HB_VCODEC_X264 ||
+            ( job->vcodec & HB_VCODEC_FFMPEG_MASK ) )
         {
             // x264 supplies us with DTS
             if ( m->delay_buf )
@@ -1014,7 +1025,9 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
     }
 
     /* Here's where the sample actually gets muxed. */
-    if( job->vcodec == HB_VCODEC_X264 && mux_data == job->mux_data )
+    if( ( job->vcodec == HB_VCODEC_X264 ||
+        ( job->vcodec & HB_VCODEC_FFMPEG_MASK ) )
+        && mux_data == job->mux_data )
     {
         /* Compute dependency flags.
          *
@@ -1071,67 +1084,108 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
     {
         if( mux_data->sub_format == TEXTSUB )
         {
-            /* Write an empty sample */
-            if ( mux_data->sum_dur < buf->start )
+            /* MPEG4 timed text does not allow overlapping samples; upstream
+               code should coalesce overlapping subtitle lines. */
+            if( buf->start < mux_data->sum_dur )
             {
-                uint8_t empty[2] = {0,0};
+                if ( buf->stop - mux_data->sum_dur > 90*500 )
+                {
+                    hb_log("MP4Mux: shortening overlapping subtitle, "
+                           "start %"PRId64", stop %"PRId64", sum_dur %"PRId64,
+                           buf->start, buf->stop, m->sum_dur);
+                    buf->start = mux_data->sum_dur;
+                }
+            }
+            if( buf->start < mux_data->sum_dur )
+            {
+                hb_log("MP4Mux: skipping overlapping subtitle, "
+                       "start %"PRId64", stop %"PRId64", sum_dur %"PRId64,
+                       buf->start, buf->stop, m->sum_dur);
+            }
+            else
+            {
+                int64_t duration;
+
+                if( buf->start < 0 )
+                    buf->start = mux_data->sum_dur;
+
+                if( buf->stop < 0 )
+                    duration = 90000L * 10;
+                else
+                    duration = buf->stop - buf->start;
+
+                /* Write an empty sample */
+                if ( mux_data->sum_dur < buf->start )
+                {
+                    uint8_t empty[2] = {0,0};
+                    if( !MP4WriteSample( m->file,
+                                        mux_data->track,
+                                        empty,
+                                        2,
+                                        buf->start - mux_data->sum_dur,
+                                        0,
+                                        1 ))
+                    {
+                        hb_error("Failed to write to output file, disk full?");
+                        *job->die = 1;
+                    }
+                    mux_data->sum_dur += buf->start - mux_data->sum_dur;
+                }
+                uint8_t styleatom[2048];;
+                uint16_t stylesize = 0;
+                uint8_t buffer[2048];
+                uint16_t buffersize = 0;
+                uint8_t output[2048];
+
+                *buffer = '\0';
+
+                /*
+                 * Copy the subtitle into buffer stripping markup and creating
+                 * style atoms for them.
+                 */
+                hb_muxmp4_process_subtitle_style( buf->data,
+                                                  buffer,
+                                                  styleatom, &stylesize );
+
+                buffersize = strlen((char*)buffer);
+
+                hb_deep_log(3, "MuxMP4:Sub:%fs:%"PRId64":%"PRId64":%"PRId64": %s",
+                            (float)buf->start / 90000, buf->start, buf->stop,
+                            duration, buffer);
+
+                /* Write the subtitle sample */
+                memcpy( output + 2, buffer, buffersize );
+                memcpy( output + 2 + buffersize, styleatom, stylesize);
+                output[0] = ( buffersize >> 8 ) & 0xff;
+                output[1] = buffersize & 0xff;
+
                 if( !MP4WriteSample( m->file,
-                                    mux_data->track,
-                                    empty,
-                                    2,
-                                    buf->start - mux_data->sum_dur,
-                                    0,
-                                    1 ))
+                                     mux_data->track,
+                                     output,
+                                     buffersize + stylesize + 2,
+                                     duration,
+                                     0,
+                                     1 ))
                 {
                     hb_error("Failed to write to output file, disk full?");
                     *job->die = 1;
-                } 
-                mux_data->sum_dur += buf->start - mux_data->sum_dur;
+                }
+
+                mux_data->sum_dur += duration;
             }
-            uint8_t styleatom[2048];;
-            uint16_t stylesize = 0;
-            uint8_t buffer[2048];
-            uint16_t buffersize = 0;
-            uint8_t output[2048];
-
-            *buffer = '\0';
-
-            /*
-             * Copy the subtitle into buffer stripping markup and creating
-             * style atoms for them.
-             */
-            hb_muxmp4_process_subtitle_style( buf->data,
-                                              buffer,
-                                              styleatom, &stylesize );
-
-            buffersize = strlen((char*)buffer);
-
-            hb_deep_log(3, "MuxMP4:Sub:%fs:%"PRId64":%"PRId64":%"PRId64": %s",
-                        (float)buf->start / 90000, buf->start, buf->stop, 
-                        (buf->stop - buf->start), buffer);
-
-            /* Write the subtitle sample */
-            memcpy( output + 2, buffer, buffersize );
-            memcpy( output + 2 + buffersize, styleatom, stylesize);
-            output[0] = ( buffersize >> 8 ) & 0xff;
-            output[1] = buffersize & 0xff;
-
-            if( !MP4WriteSample( m->file,
-                                 mux_data->track,
-                                 output,
-                                 buffersize + stylesize + 2,
-                                 buf->stop - buf->start,
-                                 0,
-                                 1 ))
-            {
-                hb_error("Failed to write to output file, disk full?");
-                *job->die = 1;
-            }
-
-            mux_data->sum_dur += (buf->stop - buf->start);
         }
         else if( mux_data->sub_format == PICTURESUB )
         {
+            int64_t duration;
+
+            if( buf->start < 0 )
+                buf->start = mux_data->sum_dur;
+
+            if( buf->stop < 0 )
+                duration = 90000L * 10;
+            else
+                duration = buf->stop - buf->start;
+
             /* Write an empty sample */
             if ( mux_data->sum_dur < buf->start )
             {
@@ -1153,7 +1207,7 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
                                  mux_data->track,
                                  buf->data,
                                  buf->size,
-                                 buf->stop - buf->start,
+                                 duration,
                                  0,
                                  1 ))
             {
@@ -1161,7 +1215,7 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
                 *job->die = 1;
             }
 
-            mux_data->sum_dur += (buf->stop - buf->start);
+            mux_data->sum_dur += duration;
         }
     }
     else

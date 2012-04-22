@@ -50,8 +50,22 @@ int enclameInit( hb_work_object_t * w, hb_job_t * job )
 
     pv->lame = lame_init();
     // use ABR
-    lame_set_VBR( pv->lame, vbr_abr );
-    lame_set_VBR_mean_bitrate_kbps( pv->lame, audio->config.out.bitrate );
+    lame_set_scale( pv->lame, 32768.0 );
+    if( audio->config.out.compression_level >= 0 )
+    {
+        lame_set_quality( pv->lame, audio->config.out.compression_level );
+    }
+    if( audio->config.out.bitrate > 0 )
+    {
+        lame_set_VBR( pv->lame, vbr_abr );
+        lame_set_VBR_mean_bitrate_kbps( pv->lame, audio->config.out.bitrate );
+    }
+    else if( audio->config.out.quality >= 0 )
+    {
+        lame_set_brate( pv->lame, 0 );
+        lame_set_VBR( pv->lame, vbr_default );
+        lame_set_VBR_quality( pv->lame, audio->config.out.quality );
+    }
     lame_set_in_samplerate( pv->lame, audio->config.out.samplerate );
     lame_set_out_samplerate( pv->lame, audio->config.out.samplerate );
 
@@ -75,6 +89,7 @@ int enclameInit( hb_work_object_t * w, hb_job_t * job )
     pv->input_samples = 1152 * pv->out_discrete_channels;
     pv->output_bytes = LAME_MAXMP3BUFFER;
     pv->buf  = malloc( pv->input_samples * sizeof( float ) );
+    audio->config.out.samples_per_frame = 1152;
 
     pv->list = hb_list_init();
     pv->pts  = -1;
@@ -120,7 +135,6 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
     hb_list_getbytes( pv->list, pv->buf, pv->input_samples * sizeof( float ),
                       &pts, &pos);
 
-    memset(samples, 0, 2*1152*sizeof(float));
     for( i = 0; i < 1152; i++ )
     {
         for( j = 0; j < pv->out_discrete_channels; j++ )

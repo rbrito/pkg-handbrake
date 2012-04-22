@@ -11,8 +11,7 @@
  * any later version.
  */
 
-#include <gtk/gtk.h>
-#include <gdk/gdkkeysyms.h>
+#include "ghbcompat.h"
 #include <glib/gstdio.h>
 #include <gio/gio.h>
 #include "hb.h"
@@ -21,6 +20,7 @@
 #include "values.h"
 #include "callbacks.h"
 #include "presets.h"
+#include "audiohandler.h"
 #include "ghb-dvd.h"
 
 G_MODULE_EXPORT void
@@ -238,6 +238,8 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 	} break;
 	}
 	vqtype = ghb_settings_get_boolean(settings, "vquality_type_constant");
+	vcodec = ghb_settings_combo_option(settings, "VideoEncoder");
+	vcodec_abbr = ghb_settings_get_string(settings, "VideoEncoder");
 
 	gchar *vq_desc = "Error";
 	gchar *vq_units = "";
@@ -245,21 +247,10 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 	gdouble vqvalue;
 	if (!vqtype)
 	{
-		vqtype = ghb_settings_get_boolean(settings, "vquality_type_target");
-		if (!vqtype)
-		{
-			// Has to be bitrate
-			vqvalue = ghb_settings_get_int(settings, "VideoAvgBitrate");
-			vq_desc = "Bitrate:";
-			vq_units = "kbps";
-		}
-		else
-		{
-			// Target file size
-			vqvalue = ghb_settings_get_int(settings, "VideoTargetSize");
-			vq_desc = "Target Size:";
-			vq_units = "MB";
-		}
+        // Has to be bitrate
+        vqvalue = ghb_settings_get_int(settings, "VideoAvgBitrate");
+        vq_desc = "Bitrate:";
+        vq_units = "kbps";
 		vqstr = g_strdup_printf("%d", (gint)vqvalue);
 	}
 	else
@@ -268,7 +259,14 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 		vqvalue = ghb_settings_get_double(settings, "VideoQualitySlider");
 		vq_desc = "Constant Quality:";
 		vqstr = g_strdup_printf("%d", (gint)vqvalue);
-		vq_units = "(RF)";
+		if (strcmp(vcodec_abbr, "x264") == 0)
+		{
+			vq_units = "(RF)";
+		}
+		else
+		{
+			vq_units = "(QP)";
+		}
 	}
 	fps = ghb_settings_get_string(settings, "VideoFramerate");
 	if (strcmp("source", fps) == 0)
@@ -286,8 +284,6 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 		g_free(fps);
 		fps = tmp;
 	}
-	vcodec = ghb_settings_combo_option(settings, "VideoEncoder");
-	vcodec_abbr = ghb_settings_get_string(settings, "VideoEncoder");
 	source_width = ghb_settings_get_int(settings, "source_width");
 	source_height = ghb_settings_get_int(settings, "source_height");
 	g_string_append_printf(str,
@@ -389,12 +385,13 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 	{
 		g_string_append_printf(str, "<b>Turbo:</b> <small>On</small>\n");
 	}
-	if (strcmp(vcodec_abbr, "x264") == 0)
+	if (strcmp(vcodec_abbr, "x264") == 0 ||
+		strcmp(vcodec_abbr, "ffmpeg") == 0)
 	{
-		gchar *x264opts = ghb_build_x264opts_string(settings);
+		gchar *opts = ghb_build_advanced_opts_string(settings);
 		g_string_append_printf(str, 
-			"<b>x264 Options:</b> <small>%s</small>\n", x264opts);
-		g_free(x264opts);
+			"<b>Advanced Options:</b> <small>%s</small>\n", opts);
+		g_free(opts);
 	}
 	// Add the audios
 	gint count, ii;
@@ -404,7 +401,7 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 	count = ghb_array_len(audio_list);
 	for (ii = 0; ii < count; ii++)
 	{
-		gchar *bitrate, *samplerate, *track;
+		gchar *quality = NULL, *samplerate, *track;
 		const gchar *acodec, *mix;
 		GValue *asettings;
 		gdouble sr;
@@ -412,7 +409,19 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 		asettings = ghb_array_get_nth(audio_list, ii);
 
 		acodec = ghb_settings_combo_option(asettings, "AudioEncoderActual");
-		bitrate = ghb_settings_get_string(asettings, "AudioBitrate");
+		double q = ghb_settings_get_double(asettings, "AudioTrackQuality");
+		if (ghb_settings_get_boolean(asettings, "AudioTrackQualityEnable") &&
+			q != HB_INVALID_AUDIO_QUALITY)
+		{
+			int codec = ghb_settings_combo_int(asettings, "AudioEncoderActual");
+			quality = ghb_format_quality("Quality: ", codec, q);
+		}
+		else
+		{
+			const char *br;
+			br = ghb_settings_get_string(asettings, "AudioBitrate");
+			quality = g_strdup_printf("Bitrate: %s", br);
+		}
 		sr = ghb_settings_get_double(asettings, "AudioSamplerate");
 		samplerate = ghb_settings_get_string(asettings, "AudioSamplerate");
 		if ((int)sr == 0)
@@ -433,10 +442,10 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 			g_string_append_printf(str, "\t");
 
 		g_string_append_printf(str,
-			"<small> %s, Encoder: %s, Mixdown: %s, SampleRate: %s, Bitrate: %s</small>\n",
-			 track, acodec, mix, samplerate, bitrate);
+			"<small> %s, Encoder: %s, Mixdown: %s, SampleRate: %s, %s</small>\n",
+			 track, acodec, mix, samplerate, quality);
 		g_free(track);
-		g_free(bitrate);
+		g_free(quality);
 		g_free(samplerate);
 	}
 
@@ -509,65 +518,8 @@ add_to_queue_list(signal_user_data_t *ud, GValue *settings, GtkTreeIter *piter)
 	g_free(preset);
 }
 
-void
-audio_list_refresh(signal_user_data_t *ud)
-{
-	GtkTreeView *treeview;
-	GtkTreeIter iter;
-	GtkListStore *store;
-	gboolean done;
-	gint row = 0;
-	const GValue *audio_list;
-
-	g_debug("ghb_audio_list_refresh ()");
-	treeview = GTK_TREE_VIEW(GHB_WIDGET(ud->builder, "audio_list"));
-	store = GTK_LIST_STORE(gtk_tree_view_get_model(treeview));
-	if (gtk_tree_model_get_iter_first(GTK_TREE_MODEL(store), &iter))
-	{
-		do
-		{
-			const gchar *track, *codec, *br, *sr, *mix;
-			gchar *s_drc;
-			gint itrack;
-			gdouble drc;
-			GValue *asettings;
-
-			audio_list = ghb_settings_get_value(ud->settings, "audio_list");
-			if (row >= ghb_array_len(audio_list))
-				return;
-			asettings = ghb_array_get_nth(audio_list, row);
-
-			track = ghb_settings_combo_option(asettings, "AudioTrack");
-			itrack = ghb_settings_combo_int(asettings, "AudioTrack");
-			codec = ghb_settings_combo_option(asettings, "AudioEncoderActual");
-			br = ghb_settings_combo_option(asettings, "AudioBitrate");
-			sr = ghb_settings_combo_option(asettings, "AudioSamplerate");
-			mix = ghb_settings_combo_option(asettings, "AudioMixdown");
-
-			drc = ghb_settings_get_double(asettings, "AudioTrackDRCSlider");
-			if (drc < 1.0)
-				s_drc = g_strdup("Off");
-			else
-				s_drc = g_strdup_printf("%.1f", drc);
-
-			gtk_list_store_set(GTK_LIST_STORE(store), &iter, 
-				// These are displayed in list
-				0, track,
-				1, codec,
-				2, br,
-				3, sr,
-				4, mix,
-				5, s_drc,
-				-1);
-			g_free(s_drc);
-			done = !gtk_tree_model_iter_next(GTK_TREE_MODEL(store), &iter);
-			row++;
-		} while (!done);
-	}
-}
-
 static gboolean
-validate_settings(signal_user_data_t *ud)
+validate_settings(signal_user_data_t *ud, GValue *settings, gint batch)
 {
 	// Check to see if the dest file exists or is
 	// already in the queue
@@ -575,9 +527,9 @@ validate_settings(signal_user_data_t *ud)
 	gint count, ii;
 	gint titleindex;
 
-	titleindex = ghb_settings_combo_int(ud->settings, "title");
+	titleindex = ghb_settings_combo_int(settings, "title");
 	if (titleindex < 0) return FALSE;
-	dest = ghb_settings_get_string(ud->settings, "destination");
+	dest = ghb_settings_get_string(settings, "destination");
 	count = ghb_array_len(ud->queue);
 	for (ii = 0; ii < count; ii++)
 	{
@@ -633,41 +585,44 @@ validate_settings(signal_user_data_t *ud)
 		return FALSE;
 	}
 #endif
-	GFile *gfile;
-	GFileInfo *info;
-	guint64 size;
-	gchar *resolved = ghb_resolve_symlink(destdir);
-
-	gfile = g_file_new_for_path(resolved);
-	info = g_file_query_filesystem_info(gfile, 
-						G_FILE_ATTRIBUTE_FILESYSTEM_FREE, NULL, NULL);
-	if (info != NULL)
+	if (!batch)
 	{
-		if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+		GFile *gfile;
+		GFileInfo *info;
+		guint64 size;
+		gchar *resolved = ghb_resolve_symlink(destdir);
+
+		gfile = g_file_new_for_path(resolved);
+		info = g_file_query_filesystem_info(gfile, 
+							G_FILE_ATTRIBUTE_FILESYSTEM_FREE, NULL, NULL);
+		if (info != NULL)
 		{
-			size = g_file_info_get_attribute_uint64(info, 
-									G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
-			
-			gint64 fsize = (guint64)10 * 1024 * 1024 * 1024;
-			if (size < fsize)
+			if (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
 			{
-				message = g_strdup_printf(
-							"Destination filesystem is almost full: %uM free\n\n"
-							"Encode may be incomplete if you proceed.\n",
-							(guint)(size / (1024L*1024L)));
-				if (!ghb_message_dialog(GTK_MESSAGE_QUESTION, message, "Cancel", "Proceed"))
+				size = g_file_info_get_attribute_uint64(info, 
+										G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+				
+				gint64 fsize = (guint64)10 * 1024 * 1024 * 1024;
+				if (size < fsize)
 				{
-					g_free(dest);
+					message = g_strdup_printf(
+								"Destination filesystem is almost full: %uM free\n\n"
+								"Encode may be incomplete if you proceed.\n",
+								(guint)(size / (1024L*1024L)));
+					if (!ghb_message_dialog(GTK_MESSAGE_QUESTION, message, "Cancel", "Proceed"))
+					{
+						g_free(dest);
+						g_free(message);
+						return FALSE;
+					}
 					g_free(message);
-					return FALSE;
 				}
-				g_free(message);
 			}
+			g_object_unref(info);
 		}
-		g_object_unref(info);
+		g_object_unref(gfile);
+		g_free(resolved);
 	}
-	g_object_unref(gfile);
-	g_free(resolved);
 	g_free(destdir);
 	if (g_file_test(dest, G_FILE_TEST_EXISTS))
 	{
@@ -687,44 +642,42 @@ validate_settings(signal_user_data_t *ud)
 	}
 	g_free(dest);
 	// Validate video quality is in a reasonable range
-	if (!ghb_validate_vquality(ud->settings))
+	if (!ghb_validate_vquality(settings))
 	{
 		return FALSE;
 	}
 	// Validate audio settings
-	if (!ghb_validate_audio(ud))
+	if (!ghb_validate_audio(settings))
 	{
 		return FALSE;
 	}
 	// Validate audio settings
-	if (!ghb_validate_subtitles(ud))
+	if (!ghb_validate_subtitles(settings))
 	{
 		return FALSE;
 	}
 	// Validate video settings
-	if (!ghb_validate_video(ud))
+	if (!ghb_validate_video(settings))
 	{
 		return FALSE;
 	}
 	// Validate filter settings
-	if (!ghb_validate_filters(ud))
+	if (!ghb_validate_filters(settings))
 	{
 		return FALSE;
 	}
-	audio_list_refresh(ud);
 	return TRUE;
 }
 
-static gboolean
-queue_add(signal_user_data_t *ud)
+gboolean
+ghb_queue_add(signal_user_data_t *ud, GValue *settings, gint batch)
 {
 	// Add settings to the queue
-	GValue *settings;
 	gint titleindex;
 	gint titlenum;
 	
 	g_debug("queue_add ()");
-	if (!validate_settings(ud))
+	if (!validate_settings(ud, settings, batch))
 	{
 		return FALSE;
 	}
@@ -732,7 +685,6 @@ queue_add(signal_user_data_t *ud)
 	if (ud->queue == NULL)
 		ud->queue = ghb_array_value_new(32);
 	// Make a copy of current settings to be used for the new job
-	settings = ghb_value_dup(ud->settings);
 	ghb_settings_set_int(settings, "job_status", GHB_QUEUE_PENDING);
 	ghb_settings_set_int(settings, "job_unique_id", 0);
 	titleindex = ghb_settings_combo_int(settings, "title");
@@ -750,7 +702,18 @@ G_MODULE_EXPORT void
 queue_add_clicked_cb(GtkWidget *widget, signal_user_data_t *ud)
 {
 	g_debug("queue_add_clicked_cb ()");
-	queue_add(ud);
+	GValue *settings = ghb_value_dup(ud->settings);
+	if (!ghb_queue_add(ud, settings, 0))
+		ghb_value_free(settings);
+	// Validation of settings may have changed audio list
+	ghb_audio_list_refresh(ud);
+}
+
+G_MODULE_EXPORT void
+queue_add_all_clicked_cb(GtkWidget *widget, signal_user_data_t *ud)
+{
+	g_debug("queue_add_all_clicked_cb ()");
+	ghb_add_all_titles(ud);
 }
 
 G_MODULE_EXPORT void
@@ -1049,6 +1012,8 @@ ghb_queue_buttons_grey(signal_user_data_t *ud)
 	gtk_widget_set_sensitive(widget, show_start);
 	action = GHB_ACTION(ud->builder, "queue_add_menu");
 	gtk_action_set_sensitive(action, show_start);
+	action = GHB_ACTION(ud->builder, "queue_add_all_menu");
+	gtk_action_set_sensitive(action, show_start);
 
 	widget = GHB_WIDGET (ud->builder, "queue_start1");
 	if (show_stop)
@@ -1228,8 +1193,14 @@ queue_start_clicked_cb(GtkWidget *xwidget, signal_user_data_t *ud)
 	{
 		// The queue has no running or pending jobs.
 		// Add current settings to the queue, then run.
-		if (!queue_add(ud))
+		GValue *settings = ghb_value_dup(ud->settings);
+		if (!ghb_queue_add(ud, settings, 0))
+		{
+			ghb_value_free(settings);
 			return;
+		}
+		// Validation of settings may have changed audio list
+		ghb_audio_list_refresh(ud);
 	}
 	if (state == GHB_STATE_IDLE)
 	{
@@ -1343,7 +1314,7 @@ queue_key_press_cb(
 	gint status;
 
 	g_debug("queue_key_press_cb ()");
-	if (event->keyval != GDK_Delete)
+	if (event->keyval != GDK_KEY_Delete)
 		return FALSE;
 	treeview = GTK_TREE_VIEW(GHB_WIDGET(ud->builder, "queue_list"));
 	store = gtk_tree_view_get_model(treeview);

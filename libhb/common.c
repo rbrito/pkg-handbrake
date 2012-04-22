@@ -6,6 +6,7 @@
 
 #include <stdarg.h>
 #include <time.h>
+#include <ctype.h>
 #include <sys/time.h>
 
 #include "common.h"
@@ -41,14 +42,58 @@ int hb_audio_bitrates_count = sizeof( hb_audio_bitrates ) /
 static hb_error_handler_t *error_handler = NULL;
 
 hb_mixdown_t hb_audio_mixdowns[] =
-{ { "Mono",               "HB_AMIXDOWN_MONO",      "mono",   HB_AMIXDOWN_MONO      },
+{ { "None",               "HB_AMIXDOWN_NONE",      "none",   HB_AMIXDOWN_NONE      },
+  { "Mono",               "HB_AMIXDOWN_MONO",      "mono",   HB_AMIXDOWN_MONO      },
   { "Stereo",             "HB_AMIXDOWN_STEREO",    "stereo", HB_AMIXDOWN_STEREO    },
   { "Dolby Surround",     "HB_AMIXDOWN_DOLBY",     "dpl1",   HB_AMIXDOWN_DOLBY     },
   { "Dolby Pro Logic II", "HB_AMIXDOWN_DOLBYPLII", "dpl2",   HB_AMIXDOWN_DOLBYPLII },
-  { "6-channel discrete", "HB_AMIXDOWN_6CH",       "6ch",    HB_AMIXDOWN_6CH       }
-};
+  { "6-channel discrete", "HB_AMIXDOWN_6CH",       "6ch",    HB_AMIXDOWN_6CH       } };
 int hb_audio_mixdowns_count = sizeof( hb_audio_mixdowns ) /
                               sizeof( hb_mixdown_t );
+
+hb_encoder_t hb_video_encoders[] =
+{ { "H.264 (x264)",       "x264",       HB_VCODEC_X264,         HB_MUX_MP4|HB_MUX_MKV },
+  { "MPEG-4 (FFmpeg)",    "ffmpeg4",    HB_VCODEC_FFMPEG_MPEG4, HB_MUX_MP4|HB_MUX_MKV },
+  { "MPEG-2 (FFmpeg)",    "ffmpeg2",    HB_VCODEC_FFMPEG_MPEG2, HB_MUX_MP4|HB_MUX_MKV },
+  { "VP3 (Theora)",       "theora",     HB_VCODEC_THEORA,                  HB_MUX_MKV } };
+int hb_video_encoders_count = sizeof( hb_video_encoders ) /
+                              sizeof( hb_encoder_t );
+
+hb_encoder_t hb_audio_encoders[] =
+{
+#ifdef __APPLE__
+  { "AAC (CoreAudio)",    "ca_aac",     HB_ACODEC_CA_AAC,       HB_MUX_MP4|HB_MUX_MKV },
+  { "HE-AAC (CoreAudio)", "ca_haac",    HB_ACODEC_CA_HAAC,      HB_MUX_MP4|HB_MUX_MKV },
+#endif
+  { "AAC (faac)",         "faac",       HB_ACODEC_FAAC,         HB_MUX_MP4|HB_MUX_MKV },
+  { "AAC (ffmpeg)",       "ffaac",      HB_ACODEC_FFAAC,        HB_MUX_MP4|HB_MUX_MKV },
+  { "AAC Passthru",       "copy:aac",   HB_ACODEC_AAC_PASS,     HB_MUX_MP4|HB_MUX_MKV },
+  { "AC3 (ffmpeg)",       "ffac3",      HB_ACODEC_AC3,          HB_MUX_MP4|HB_MUX_MKV },
+  { "AC3 Passthru",       "copy:ac3",   HB_ACODEC_AC3_PASS,     HB_MUX_MP4|HB_MUX_MKV },
+  { "DTS Passthru",       "copy:dts",   HB_ACODEC_DCA_PASS,     HB_MUX_MP4|HB_MUX_MKV },
+  { "DTS-HD Passthru",    "copy:dtshd", HB_ACODEC_DCA_HD_PASS,  HB_MUX_MP4|HB_MUX_MKV },
+  { "MP3 (lame)",         "lame",       HB_ACODEC_LAME,         HB_MUX_MP4|HB_MUX_MKV },
+  { "MP3 Passthru",       "copy:mp3",   HB_ACODEC_MP3_PASS,     HB_MUX_MP4|HB_MUX_MKV },
+  { "Vorbis (vorbis)",    "vorbis",     HB_ACODEC_VORBIS,                  HB_MUX_MKV },
+  { "FLAC (ffmpeg)",      "ffflac",     HB_ACODEC_FFFLAC,                  HB_MUX_MKV },
+  { "Auto Passthru",      "copy",       HB_ACODEC_AUTO_PASS,    HB_MUX_MP4|HB_MUX_MKV } };
+int hb_audio_encoders_count = sizeof( hb_audio_encoders ) /
+                              sizeof( hb_encoder_t );
+
+/* Expose values for PInvoke */
+hb_rate_t* hb_get_video_rates() { return hb_video_rates; }
+int hb_get_video_rates_count() { return hb_video_rates_count; }
+hb_rate_t* hb_get_audio_rates() { return hb_audio_rates; }
+int hb_get_audio_rates_count() { return hb_audio_rates_count; }
+int hb_get_audio_rates_default() { return hb_audio_rates_default; }
+hb_rate_t* hb_get_audio_bitrates() { return hb_audio_bitrates; }
+int hb_get_audio_bitrates_count() { return hb_audio_bitrates_count; }
+hb_mixdown_t* hb_get_audio_mixdowns() { return hb_audio_mixdowns; }
+int hb_get_audio_mixdowns_count() { return hb_audio_mixdowns_count; }
+hb_encoder_t* hb_get_video_encoders() { return hb_video_encoders; }
+int hb_get_video_encoders_count() { return hb_video_encoders_count; }
+hb_encoder_t* hb_get_audio_encoders() { return hb_audio_encoders; }
+int hb_get_audio_encoders_count() { return hb_audio_encoders_count; }
 
 int hb_mixdown_get_mixdown_from_short_name( const char * short_name )
 {
@@ -76,11 +121,163 @@ const char * hb_mixdown_get_short_name_from_mixdown( int amixdown )
     return "";
 }
 
+void hb_autopassthru_apply_settings( hb_job_t * job, hb_title_t * title )
+{
+    int i, j, already_printed;
+    hb_audio_t * audio;
+    for( i = 0, already_printed = 0; i < hb_list_count( title->list_audio ); )
+    {
+        audio = hb_list_item( title->list_audio, i );
+        if( audio->config.out.codec == HB_ACODEC_AUTO_PASS )
+        {
+            if( !already_printed )
+                hb_autopassthru_print_settings( job );
+            already_printed = 1;
+            audio->config.out.codec = hb_autopassthru_get_encoder( audio->config.in.codec,
+                                                                   job->acodec_copy_mask,
+                                                                   job->acodec_fallback,
+                                                                   job->mux );
+            if( !( audio->config.out.codec & HB_ACODEC_PASS_FLAG ) &&
+                !( audio->config.out.codec & HB_ACODEC_MASK ) )
+            {
+                hb_log( "Auto Passthru: passthru not possible and no valid fallback specified, dropping track %d",
+                        audio->config.out.track );
+                hb_list_rem( title->list_audio, audio );
+                free( audio );
+                continue;
+            }
+            audio->config.out.samplerate = audio->config.in.samplerate;
+            if( !( audio->config.out.codec & HB_ACODEC_PASS_FLAG ) )
+            {
+                if( audio->config.out.codec == job->acodec_fallback )
+                {
+                    hb_log( "Auto Passthru: passthru not possible for track %d, using fallback",
+                            audio->config.out.track );
+                }
+                else
+                {
+                    hb_log( "Auto Passthru: passthru and fallback not possible for track %d, using default encoder",
+                            audio->config.out.track );
+                }
+                audio->config.out.mixdown = hb_get_default_mixdown( audio->config.out.codec,
+                                                                    audio->config.in.channel_layout );
+                audio->config.out.bitrate = hb_get_default_audio_bitrate( audio->config.out.codec,
+                                                                          audio->config.out.samplerate,
+                                                                          audio->config.out.mixdown );
+                audio->config.out.compression_level = hb_get_default_audio_compression( audio->config.out.codec );
+            }
+            else
+            {
+                for( j = 0; j < hb_audio_encoders_count; j++ )
+                {
+                    if( hb_audio_encoders[j].encoder == audio->config.out.codec )
+                    {
+                        hb_log( "Auto Passthru: using %s for track %d",
+                                hb_audio_encoders[j].human_readable_name,
+                                audio->config.out.track );
+                        break;
+                    }
+                }
+            }
+        }
+        /* Adjust output track number, in case we removed one.
+         * Output tracks sadly still need to be in sequential order.
+         * Note: out.track starts at 1, i starts at 0 */
+        audio->config.out.track = ++i;
+    }
+}
+
+void hb_autopassthru_print_settings( hb_job_t * job )
+{
+    int i, codec_len;
+    char *mask = NULL, *tmp, *fallback = NULL;
+    for( i = 0; i < hb_audio_encoders_count; i++ )
+    {
+        if( ( hb_audio_encoders[i].encoder & HB_ACODEC_PASS_FLAG ) &&
+            ( hb_audio_encoders[i].encoder != HB_ACODEC_AUTO_PASS ) &&
+            ( hb_audio_encoders[i].encoder & job->acodec_copy_mask ) )
+        {
+            if( mask )
+            {
+                tmp = hb_strncat_dup( mask, ", ", 2 );
+                if( tmp )
+                {
+                    free( mask );
+                    mask = tmp;
+                }
+            }
+            // passthru name without " Passthru"
+            codec_len = strlen( hb_audio_encoders[i].human_readable_name ) - 9;
+            tmp = hb_strncat_dup( mask, hb_audio_encoders[i].human_readable_name, codec_len );
+            if( tmp )
+            {
+                free( mask );
+                mask = tmp;
+            }
+        }
+        else if( !( hb_audio_encoders[i].encoder & HB_ACODEC_PASS_FLAG ) &&
+                  ( hb_audio_encoders[i].encoder == job->acodec_fallback ) )
+        {
+            fallback = hb_audio_encoders[i].human_readable_name;
+        }
+    }
+    if( !mask )
+        hb_log( "Auto Passthru: no codecs allowed" );
+    else
+        hb_log( "Auto Passthru: allowed codecs are %s", mask );
+    if( !fallback )
+        hb_log( "Auto Passthru: no valid fallback specified" );
+    else
+        hb_log( "Auto Passthru: fallback is %s", fallback );
+}
+
+int hb_autopassthru_get_encoder( int in_codec, int copy_mask, int fallback, int muxer )
+{
+    int i;
+    int out_codec = ( copy_mask & in_codec ) | HB_ACODEC_PASS_FLAG;
+    // sanitize fallback encoder and selected passthru
+    // note: invalid fallbacks are caught in hb_autopassthru_apply_settings
+    for( i = 0; i < hb_audio_encoders_count; i++ )
+    {
+        if( ( hb_audio_encoders[i].encoder == fallback ) &&
+           !( hb_audio_encoders[i].muxers & muxer ) )
+        {
+            // fallback not possible with current muxer
+            // use the default audio encoder instead
+#ifndef __APPLE__
+            if( muxer == HB_MUX_MKV )
+                // Lame is the default for MKV
+                fallback = HB_ACODEC_LAME;
+            else
+#endif          // Core Audio or faac
+                fallback = hb_audio_encoders[0].encoder;
+            break;
+        }
+    }
+    for( i = 0; i < hb_audio_encoders_count; i++ )
+    {
+        if( ( hb_audio_encoders[i].encoder == out_codec ) &&
+           !( hb_audio_encoders[i].muxers & muxer ) )
+        {
+            // selected passthru not possible with current muxer
+            out_codec = fallback;
+            break;
+        }
+    }
+    if( !( out_codec & HB_ACODEC_PASS_MASK ) )
+        return fallback;
+    return out_codec;
+}
+
 // Given an input bitrate, find closest match in the set of allowed bitrates
 int hb_find_closest_audio_bitrate(int bitrate)
 {
     int ii;
     int result;
+
+    // Check if bitrate mode was disabled
+    if( bitrate <= 0 )
+        return bitrate;
 
     // result is highest rate if none found during search.
     // rate returned will always be <= rate asked for.
@@ -118,15 +315,14 @@ ffac3
 24kHz       318 (320)           318 (320)           318 (320)
 48kHz       636 (640)           636 (640)           636 (640)
 
-Core Audio  (core audio api provides range of allowed bitrates)
-24kHz       16-64               32-128              80-320      
-44.1kHz                         64-320              160-768      
-48kHz       32-256              64-320              160-768                 
+Core Audio AAC (core audio api provides range of allowed bitrates)
+24kHz       16-64               32-128              80-320
+32kHz       24-96               48-192              128-448
+48kHz       32-256              64-320              160-768
 
-Core Audio  (minimum limits found in testing)
-24kHz       16                  32                  96
-44.1kHz     32                  64                  160
-48kHz       40                  80                  240
+Core Audio HE-AAC (core audio api provides range of allowed bitrates)
+32kHz       12-40               24-80               64-192
+48kHz       16-40               32-80               80-192
 */
 
 void hb_get_audio_bitrate_limits(uint32_t codec, int samplerate, int mixdown, int *low, int *high)
@@ -134,8 +330,19 @@ void hb_get_audio_bitrate_limits(uint32_t codec, int samplerate, int mixdown, in
     int channels;
 
     channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(mixdown);
-    switch (codec)
+    if( codec & HB_ACODEC_PASS_FLAG )
     {
+        // Bitrates don't apply to "lossless" audio (Passthru, FLAC)
+        *low = *high = -1;
+        return;
+    }
+    switch( codec )
+    {
+        case HB_ACODEC_FFFLAC:
+            // Bitrates don't apply to "lossless" audio (Passthru, FLAC)
+            *high = *low = -1;
+            break;
+
         case HB_ACODEC_AC3:
             *low = 32 * channels;
             if (samplerate > 24000)
@@ -149,21 +356,11 @@ void hb_get_audio_bitrate_limits(uint32_t codec, int samplerate, int mixdown, in
             break;
 
         case HB_ACODEC_CA_AAC:
-            if (samplerate > 44100)
-            {
-                *low = channels * 40;
-                *high = 256;
-                if (channels == 2)
-                    *high = 320;
-                if (channels == 6)
-                {
-                    *high = 768;
-                }
-            }
-            else if (samplerate > 24000)
+            if (samplerate > 32000)
             {
                 *low = channels * 32;
-                *high = 256;
+                if (channels == 1)
+                    *high = 256;
                 if (channels == 2)
                     *high = 320;
                 if (channels == 6)
@@ -172,18 +369,68 @@ void hb_get_audio_bitrate_limits(uint32_t codec, int samplerate, int mixdown, in
                     *high = 768;
                 }
             }
+            else if (samplerate > 24000)
+            {
+                *low = channels * 24;
+                *high = channels * 96;
+                if (channels == 6)
+                {
+                    *low = 128;
+                    *high = 448;
+                }
+            }
             else
             {
                 *low = channels * 16;
                 *high = channels * 64;
                 if (channels == 6)
                 {
+                    *low = 80;
                     *high = 320;
                 }
             }
             break;
 
+        case HB_ACODEC_CA_HAAC:
+            if (samplerate > 32000)
+            {
+                *low = channels * 16;
+                *high = channels * 40;
+                if (channels == 6)
+                {
+                    *low = 80;
+                    *high = 192;
+                }
+            }
+            else
+            {
+                *low = channels * 12;
+                *high = channels * 40;
+                if (channels == 6)
+                {
+                    *low = 64;
+                    *high = 192;
+                }
+            }
+            break;
+
         case HB_ACODEC_FAAC:
+            *low = 32 * channels;
+            if (samplerate > 24000)
+            {
+                *high = 160 * channels;
+                if (*high > 768)
+                    *high = 768;
+            }
+            else
+            {
+                *high = 96 * channels;
+                if (*high > 480)
+                    *high = 480;
+            }
+            break;
+
+        case HB_ACODEC_FFAAC:
             *low = 32 * channels;
             if (samplerate > 24000)
             {
@@ -264,6 +511,9 @@ int hb_get_default_audio_bitrate( uint32_t codec, int samplerate, int mixdown )
     int bitrate, channels;
     int sr_shift;
 
+    if( codec & HB_ACODEC_PASS_FLAG )
+        return -1;
+
     channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(mixdown);
 
     // Min bitrate is established such that we get good quality
@@ -272,6 +522,10 @@ int hb_get_default_audio_bitrate( uint32_t codec, int samplerate, int mixdown )
 
     switch ( codec )
     {
+        case HB_ACODEC_FFFLAC:
+            bitrate = -1;
+            sr_shift = 0;
+            break;
         case HB_ACODEC_AC3:
             if (channels == 1)
                 bitrate = 96;
@@ -280,12 +534,159 @@ int hb_get_default_audio_bitrate( uint32_t codec, int samplerate, int mixdown )
             else
                 bitrate = 640;
             break;
+        case HB_ACODEC_CA_HAAC:
+            bitrate = channels * 32;
+            break;
         default:
             bitrate = channels * 80;
+            break;
     }
     bitrate >>= sr_shift;
     bitrate = hb_get_best_audio_bitrate( codec, bitrate, samplerate, mixdown );
     return bitrate;
+}
+
+// Get limits and hints for the UIs.
+//
+// granularity sets the minimum step increments that should be used
+// (it's ok to round up to some nice multiple if you like)
+//
+// direction says whether 'low' limit is highest or lowest 
+// quality (direction 0 == lowest value is worst quality)
+void hb_get_audio_quality_limits(uint32_t codec, float *low, float *high, float *granularity, int *direction)
+{
+    switch( codec )
+    {
+        case HB_ACODEC_LAME:
+            *direction = 1;
+            *granularity = 0.5;
+            *low = 0.;
+            *high = 10.0;
+            break;
+
+        case HB_ACODEC_VORBIS:
+            *direction = 0;
+            *granularity = 0.5;
+            *low = -2.0;
+            *high = 10.0;
+            break;
+
+        case HB_ACODEC_CA_AAC:
+            *direction = 0;
+            *granularity = 9;
+            *low = 1.;
+            *high = 127.0;
+            break;
+
+        default:
+            *direction = 0;
+            *granularity = 1;
+            *low = *high = HB_INVALID_AUDIO_QUALITY;
+            break;
+    }
+}
+
+float hb_get_best_audio_quality( uint32_t codec, float quality)
+{
+    float low, high, granularity;
+    int direction;
+
+    hb_get_audio_quality_limits(codec, &low, &high, &granularity, &direction);
+    if (quality > high)
+        quality = high;
+    if (quality < low)
+        quality = low;
+    return quality;
+}
+
+float hb_get_default_audio_quality( uint32_t codec )
+{
+    float quality;
+    switch( codec )
+    {
+        case HB_ACODEC_LAME:
+            quality = 2.;
+            break;
+
+        case HB_ACODEC_VORBIS:
+            quality = 5.;
+            break;
+
+        case HB_ACODEC_CA_AAC:
+            quality = 91.;
+            break;
+
+        default:
+            quality = HB_INVALID_AUDIO_QUALITY;
+            break;
+    }
+    return quality;
+}
+
+// Get limits and hints for the UIs.
+//
+// granularity sets the minimum step increments that should be used
+// (it's ok to round up to some nice multiple if you like)
+//
+// direction says whether 'low' limit is highest or lowest 
+// compression level (direction 0 == lowest value is worst compression level)
+void hb_get_audio_compression_limits(uint32_t codec, float *low, float *high, float *granularity, int *direction)
+{
+    switch( codec )
+    {
+        case HB_ACODEC_FFFLAC:
+            *direction = 0;
+            *granularity = 1;
+            *high = 12;
+            *low = 0;
+            break;
+
+        case HB_ACODEC_LAME:
+            *direction = 1;
+            *granularity = 1;
+            *high = 9;
+            *low = 0;
+            break;
+
+        default:
+            *direction = 0;
+            *granularity = 1;
+            *low = *high = -1;
+            break;
+    }
+}
+
+float hb_get_best_audio_compression( uint32_t codec, float compression)
+{
+    float low, high, granularity;
+    int direction;
+
+    hb_get_audio_compression_limits( codec, &low, &high, &granularity, &direction );
+    if( compression > high )
+        compression = high;
+    if( compression < low )
+        compression = low;
+    return compression;
+}
+
+float hb_get_default_audio_compression( uint32_t codec )
+{
+    float compression;
+    switch( codec )
+    {
+        case HB_ACODEC_FFFLAC:
+            compression = 5;
+            break;
+
+        case HB_ACODEC_LAME:
+            compression = 2;
+            break;
+
+        default:
+            compression = -1;
+            break;
+    }
+    return compression;
 }
 
 int hb_get_best_mixdown( uint32_t codec, int layout, int mixdown )
@@ -296,7 +697,7 @@ int hb_get_best_mixdown( uint32_t codec, int layout, int mixdown )
     if (codec & HB_ACODEC_PASS_FLAG)
     {
         // Audio pass-thru.  No mixdown.
-        return 0;
+        return HB_AMIXDOWN_NONE;
     }
     switch (layout & HB_INPUT_CH_LAYOUT_DISCRETE_NO_LFE_MASK)
     {
@@ -344,6 +745,7 @@ int hb_get_best_mixdown( uint32_t codec, int layout, int mixdown )
                 switch (codec)
                 {
                     case HB_ACODEC_LAME:
+                    case HB_ACODEC_FFAAC:
                         best_mixdown = HB_AMIXDOWN_DOLBYPLII;
                         break;
 
@@ -356,7 +758,7 @@ int hb_get_best_mixdown( uint32_t codec, int layout, int mixdown )
     }
     // return the best that is not greater than the requested mixdown
     // 0 means the caller requested the best available mixdown
-    if( best_mixdown > mixdown && mixdown != 0 )
+    if( best_mixdown > mixdown && mixdown > 0 )
         best_mixdown = mixdown;
     
     return best_mixdown;
@@ -368,6 +770,7 @@ int hb_get_default_mixdown( uint32_t codec, int layout )
     switch (codec)
     {
         // the AC3 encoder defaults to the best mixdown up to 6-channel
+        case HB_ACODEC_FFFLAC:
         case HB_ACODEC_AC3:
             mixdown = HB_AMIXDOWN_6CH;
             break;
@@ -409,6 +812,62 @@ void hb_reduce( int *x, int *y, int num, int den )
         *x = num;
         *y = den;
     }
+}
+
+/**********************************************************************
+ * hb_reduce64
+ **********************************************************************
+ * Given a numerator (num) and a denominator (den), reduce them to an
+ * equivalent fraction and store the result in x and y.
+ *********************************************************************/
+void hb_reduce64( int64_t *x, int64_t *y, int64_t num, int64_t den )
+{
+    // find the greatest common divisor of num & den by Euclid's algorithm
+    int64_t n = num, d = den;
+    while ( d )
+    {
+        int64_t t = d;
+        d = n % d;
+        n = t;
+    }
+
+    // at this point n is the gcd. if it's non-zero remove it from num
+    // and den. Otherwise just return the original values.
+    if ( n )
+    {
+        num /= n;
+        den /= n;
+    }
+
+    *x = num;
+    *y = den;
+
+}
+
+void hb_limit_rational64( int64_t *x, int64_t *y, int64_t num, int64_t den, int64_t limit )
+{
+    hb_reduce64( &num, &den, num, den );
+    if ( num < limit && den < limit )
+    {
+        *x = num;
+        *y = den;
+        return;
+    }
+
+    if ( num > den )
+    {
+        double div = (double)limit / num;
+        num = limit;
+        den *= div;
+    }
+    else
+    {
+        double div = (double)limit / den;
+        den = limit;
+        num *= div;
+    }
+    *x = num;
+    *y = den;
 }
 
 /**********************************************************************
@@ -480,119 +939,6 @@ void hb_fix_aspect( hb_job_t * job, int keep )
 }
 
 /**********************************************************************
- * hb_calc_bitrate
- **********************************************************************
- * size: in megabytes
- *********************************************************************/
-int hb_calc_bitrate( hb_job_t * job, int size )
-{
-    int64_t avail = (int64_t) size * 1024 * 1024;
-    int64_t length;
-    int     overhead;
-    int     samples_per_frame;
-    int     i;
-
-    hb_title_t   * title = job->title;
-    hb_chapter_t * chapter;
-    hb_audio_t   * audio;
-
-    /* How many overhead bytes are used for each frame
-       (quite guessed) */
-    switch( job->mux )
-    {
-        case HB_MUX_MP4:
-        case HB_MUX_MKV:
-            overhead = 6;
-            break;
-        default:
-            return 0;
-    }
-
-    /* Get the duration in seconds */
-    length = 0;
-    for( i = job->chapter_start; i <= job->chapter_end; i++ )
-    {
-        chapter = hb_list_item( title->list_chapter, i - 1 );
-        length += chapter->duration;
-    }
-    length += 135000;
-    length /= 90000;
-
-    if( size == -1 )
-    {
-        hb_interjob_t * interjob = hb_interjob_get( job->h );
-        avail = job->vbitrate * 125 * length;
-        avail += length * interjob->vrate * overhead / interjob->vrate_base;
-    }
-
-    /* Video overhead */
-    avail -= length * job->vrate * overhead / job->vrate_base;
-
-    if( size == -1 )
-    {
-        goto ret;
-    }
-
-    for( i = 0; i < hb_list_count(job->list_audio); i++ )
-    {
-        /* Audio data */
-        int abitrate;
-        audio = hb_list_item( job->list_audio, i);
-
-        /* How many audio samples we put in each frame */
-        switch( audio->config.out.codec )
-        {
-            case HB_ACODEC_FAAC:
-            case HB_ACODEC_CA_AAC:
-            case HB_ACODEC_VORBIS:
-                samples_per_frame = 1024;
-                break;
-            case HB_ACODEC_LAME:
-                samples_per_frame = 1152;
-                break;
-            case HB_ACODEC_AC3_PASS:
-            case HB_ACODEC_DCA_PASS:
-            case HB_ACODEC_AC3:
-            case HB_ACODEC_DCA:
-                samples_per_frame = 1536;
-                break;
-            default:
-                return 0;
-        }
-
-        if( audio->config.out.codec == HB_ACODEC_AC3_PASS ||
-            audio->config.out.codec == HB_ACODEC_DCA_PASS)
-        {
-            /*
-             * For pass through we take the bitrate from the input audio
-             * bitrate as we are simply passing it through.
-             */
-            abitrate = audio->config.in.bitrate / 8;
-        }
-        else
-        {
-            /*
-             * Where we are transcoding the audio we use the destination
-             * bitrate.
-             */
-            abitrate = audio->config.out.bitrate * 1000 / 8;
-        }
-        avail -= length * abitrate;
-
-        /* Audio overhead */
-        avail -= length * audio->config.out.samplerate * overhead / samples_per_frame;
-    }
-
-ret:
-    if( avail < 0 )
-    {
-        return 0;
-    }
-
-    return ( avail / ( 125 * length ) );
-}
-
-/**********************************************************************
  * hb_list implementation
  **********************************************************************
  * Basic and slow, but enough for what we need
@@ -660,6 +1006,40 @@ void hb_list_add( hb_list_t * l, void * p )
     }
 
     l->items[l->items_count] = p;
+    (l->items_count)++;
+}
+
+/**********************************************************************
+ * hb_list_insert
+ **********************************************************************
+ * Adds an item at the specifiec position in the list, making it bigger
+ * if necessary.
+ * Can safely be called with a NULL pointer to add, it will be ignored.
+ *********************************************************************/
+void hb_list_insert( hb_list_t * l, int pos, void * p )
+{
+    if( !p )
+    {
+        return;
+    }
+
+    if( l->items_count == l->items_alloc )
+    {
+        /* We need a bigger boat */
+        l->items_alloc += HB_LIST_DEFAULT_SIZE;
+        l->items        = realloc( l->items,
+                                   l->items_alloc * sizeof( void * ) );
+    }
+
+    if ( l->items_count != pos )
+    {
+        /* Shift all items after it sizeof( void * ) bytes earlier */
+        memmove( &l->items[pos+1], &l->items[pos],
+                 ( l->items_count - pos ) * sizeof( void * ) );
+    }
+
+
+    l->items[pos] = p;
     (l->items_count)++;
 }
 
@@ -833,56 +1213,24 @@ void hb_list_close( hb_list_t ** _l )
     *_l = NULL;
 }
 
+int global_verbosity_level; //Necessary for hb_deep_log
 /**********************************************************************
- * hb_log
+ * hb_valog
  **********************************************************************
  * If verbose mode is one, print message with timestamp. Messages
  * longer than 180 characters are stripped ;p
  *********************************************************************/
-void hb_log( char * log, ... )
+void hb_valog( hb_debug_level_t level, const char * prefix, const char * log, va_list args)
 {
     char        string[362]; /* 360 chars + \n + \0 */
     time_t      _now;
     struct tm * now;
-    va_list     args;
 
     if( !getenv( "HB_DEBUG" ) )
     {
         /* We don't want to print it */
         return;
     }
-
-    /* Get the time */
-    _now = time( NULL );
-    now  = localtime( &_now );
-    sprintf( string, "[%02d:%02d:%02d] ",
-             now->tm_hour, now->tm_min, now->tm_sec );
-
-    /* Convert the message to a string */
-    va_start( args, log );
-    vsnprintf( string + 11, 349, log, args );
-    va_end( args );
-
-    /* Add the end of line */
-    strcat( string, "\n" );
-
-    /* Print it */
-    fprintf( stderr, "%s", string );
-}
-
-int global_verbosity_level; //Necessary for hb_deep_log
-/**********************************************************************
- * hb_deep_log
- **********************************************************************
- * If verbose mode is >= level, print message with timestamp. Messages
- * longer than 360 characters are stripped ;p
- *********************************************************************/
-void hb_deep_log( hb_debug_level_t level, char * log, ... )
-{
-    char        string[362]; /* 360 chars + \n + \0 */
-    time_t      _now;
-    struct tm * now;
-    va_list     args;
 
     if( global_verbosity_level < level )
     {
@@ -893,19 +1241,57 @@ void hb_deep_log( hb_debug_level_t level, char * log, ... )
     /* Get the time */
     _now = time( NULL );
     now  = localtime( &_now );
-    sprintf( string, "[%02d:%02d:%02d] ",
-             now->tm_hour, now->tm_min, now->tm_sec );
+    if ( prefix && *prefix )
+    {
+        // limit the prefix length
+        snprintf( string, 40, "[%02d:%02d:%02d] %s ",
+                 now->tm_hour, now->tm_min, now->tm_sec, prefix );
+    }
+    else
+    {
+        sprintf( string, "[%02d:%02d:%02d] ",
+                 now->tm_hour, now->tm_min, now->tm_sec );
+    }
+    int end = strlen( string );
 
     /* Convert the message to a string */
-    va_start( args, log );
-    vsnprintf( string + 11, 349, log, args );
-    va_end( args );
+    vsnprintf( string + end, 361 - end, log, args );
 
     /* Add the end of line */
     strcat( string, "\n" );
 
     /* Print it */
     fprintf( stderr, "%s", string );
+}
+
+/**********************************************************************
+ * hb_log
+ **********************************************************************
+ * If verbose mode is one, print message with timestamp. Messages
+ * longer than 180 characters are stripped ;p
+ *********************************************************************/
+void hb_log( char * log, ... )
+{
+    va_list     args;
+
+    va_start( args, log );
+    hb_valog( 0, NULL, log, args );
+    va_end( args );
+}
+
+/**********************************************************************
+ * hb_deep_log
+ **********************************************************************
+ * If verbose mode is >= level, print message with timestamp. Messages
+ * longer than 360 characters are stripped ;p
+ *********************************************************************/
+void hb_deep_log( hb_debug_level_t level, char * log, ... )
+{
+    va_list     args;
+
+    va_start( args, log );
+    hb_valog( level, NULL, log, args );
+    va_end( args );
 }
 
 /**********************************************************************
@@ -1024,6 +1410,7 @@ hb_title_t * hb_title_init( char * path, int index )
     t = calloc( sizeof( hb_title_t ), 1 );
 
     t->index         = index;
+    t->playlist      = -1;
     t->list_audio    = hb_list_init();
     t->list_chapter  = hb_list_init();
     t->list_subtitle = hb_list_init();
@@ -1032,6 +1419,9 @@ hb_title_t * hb_title_init( char * path, int index )
     // default to decoding mpeg2
     t->video_id      = 0xE0;
     t->video_codec   = WORK_DECMPEG2;
+    t->angle_count   = 1;
+    t->pixel_aspect_width = 1;
+    t->pixel_aspect_height = 1;
 
     return t;
 }
@@ -1101,6 +1491,11 @@ void hb_title_close( hb_title_t ** _t )
         free( t->metadata );
     }
 
+    if ( t->video_codec_name )
+    {
+        free( t->video_codec_name );
+    }
+
     free( t );
     *_t = NULL;
 }
@@ -1154,6 +1549,7 @@ void hb_audio_config_init(hb_audio_config_t * audiocfg)
     audiocfg->in.bitrate = -1;
     audiocfg->in.samplerate = -1;
     audiocfg->in.channel_layout = 0;
+    audiocfg->in.channel_map = NULL;
     audiocfg->in.version = 0;
     audiocfg->in.mode = 0;
     audiocfg->flags.ac3 = 0;
@@ -1164,11 +1560,14 @@ void hb_audio_config_init(hb_audio_config_t * audiocfg)
     /* Initalize some sensable defaults */
     audiocfg->in.track = audiocfg->out.track = 0;
     audiocfg->out.codec = HB_ACODEC_FAAC;
-    audiocfg->out.bitrate = 128;
-    audiocfg->out.samplerate = 44100;
-    audiocfg->out.mixdown = HB_AMIXDOWN_DOLBYPLII;
+    audiocfg->out.bitrate = -1;
+    audiocfg->out.quality = HB_INVALID_AUDIO_QUALITY;
+    audiocfg->out.compression_level = -1;
+    audiocfg->out.samplerate = -1;
+    audiocfg->out.mixdown = -1;
     audiocfg->out.dynamic_range_compression = 0;
     audiocfg->out.name = NULL;
+
 }
 
 /**********************************************************************
@@ -1191,24 +1590,32 @@ int hb_audio_add(const hb_job_t * job, const hb_audio_config_t * audiocfg)
     if( (audiocfg->in.bitrate != -1) && (audiocfg->in.codec != 0xDEADBEEF) )
     {
         /* This most likely means the client didn't call hb_audio_config_init
-         * so bail.
-         */
+         * so bail. */
         return 0;
     }
 
+    /* Set the job's "in track" to the value passed in audiocfg.
+     * HandBrakeCLI assumes this value is preserved in the jobs
+     * audio list, but in.track in the title's audio list is not 
+     * required to be the same. */
+    audio->config.in.track = audiocfg->in.track;
+
     /* Really shouldn't ignore the passed out track, but there is currently no
-     * way to handle duplicates or out-of-order track numbers.
-     */
+     * way to handle duplicates or out-of-order track numbers. */
     audio->config.out.track = hb_list_count(job->list_audio) + 1;
     audio->config.out.codec = audiocfg->out.codec;
-    if( (audiocfg->out.codec & HB_ACODEC_MASK) == audio->config.in.codec &&
-        (audiocfg->out.codec & HB_ACODEC_PASS_FLAG ) )
+    if((audiocfg->out.codec & HB_ACODEC_PASS_FLAG) &&
+       ((audiocfg->out.codec == HB_ACODEC_AUTO_PASS) ||
+        (audiocfg->out.codec & audio->config.in.codec & HB_ACODEC_PASS_MASK)))
     {
         /* Pass-through, copy from input. */
         audio->config.out.samplerate = audio->config.in.samplerate;
         audio->config.out.bitrate = audio->config.in.bitrate;
-        audio->config.out.dynamic_range_compression = 0;
         audio->config.out.mixdown = 0;
+        audio->config.out.dynamic_range_compression = 0;
+        audio->config.out.gain = 0;
+        audio->config.out.compression_level = -1;
+        audio->config.out.quality = HB_INVALID_AUDIO_QUALITY;
     }
     else
     {
@@ -1216,8 +1623,15 @@ int hb_audio_add(const hb_job_t * job, const hb_audio_config_t * audiocfg)
         audio->config.out.codec &= ~HB_ACODEC_PASS_FLAG;
         audio->config.out.samplerate = audiocfg->out.samplerate;
         audio->config.out.bitrate = audiocfg->out.bitrate;
+        audio->config.out.compression_level = audiocfg->out.compression_level;
+        audio->config.out.quality = audiocfg->out.quality;
         audio->config.out.dynamic_range_compression = audiocfg->out.dynamic_range_compression;
         audio->config.out.mixdown = audiocfg->out.mixdown;
+        audio->config.out.gain = audiocfg->out.gain;
+    }
+    if (audiocfg->out.name && *audiocfg->out.name)
+    {
+        audio->config.out.name = audiocfg->out.name;
     }
 
     hb_list_add(job->list_audio, audio);
@@ -1308,7 +1722,7 @@ int hb_srt_add( const hb_job_t * job,
     return retval;
 }
 
-char * hb_strdup_printf( char * fmt, ... )
+char * hb_strdup_printf( const char * fmt, ... )
 {
     int       len;
     va_list   ap;
@@ -1349,6 +1763,31 @@ char * hb_strdup_printf( char * fmt, ... )
     }
 }
 
+char * hb_strncat_dup( const char * s1, const char * s2, size_t n )
+{
+    size_t len;
+    char * str;
+
+    len = 0;
+    if( s1 )
+        len += strlen( s1 );
+    if( s2 )
+        len += MAX( strlen( s2 ), n );
+    if( !len )
+        return NULL;
+
+    str = malloc( len + 1 );
+    if( !str )
+        return NULL;
+
+    if( s1 )
+        strcpy( str, s1 );
+    else
+        strcpy( str, "" );
+    strncat( str, s2, n );
+    return str;
+}
+
 /**********************************************************************
  * hb_attachment_copy
  **********************************************************************
@@ -1378,7 +1817,7 @@ hb_attachment_t *hb_attachment_copy(const hb_attachment_t *src)
 /**********************************************************************
  * hb_yuv2rgb
  **********************************************************************
- * Converts a YCbCr pixel to an RGB pixel.
+ * Converts a YCrCb pixel to an RGB pixel.
  * 
  * This conversion is lossy (due to rounding and clamping).
  * 
@@ -1391,12 +1830,12 @@ int hb_yuv2rgb(int yuv)
     int r, g, b;
 
     y  = (yuv >> 16) & 0xff;
-    Cb = (yuv >>  8) & 0xff;
-    Cr = (yuv      ) & 0xff;
+    Cr = (yuv >>  8) & 0xff;
+    Cb = (yuv      ) & 0xff;
 
-    r = 1.164 * (y - 16)                      + 2.018 * (Cb - 128);
-    g = 1.164 * (y - 16) - 0.813 * (Cr - 128) - 0.391 * (Cb - 128);
-    b = 1.164 * (y - 16) + 1.596 * (Cr - 128);
+    r = 1.164 * (y - 16)                      + 1.596 * (Cr - 128);
+    g = 1.164 * (y - 16) - 0.392 * (Cb - 128) - 0.813 * (Cr - 128);
+    b = 1.164 * (y - 16) + 2.017 * (Cb - 128);
     
     r = (r < 0) ? 0 : r;
     g = (g < 0) ? 0 : g;
@@ -1412,7 +1851,7 @@ int hb_yuv2rgb(int yuv)
 /**********************************************************************
  * hb_rgb2yuv
  **********************************************************************
- * Converts an RGB pixel to a YCbCr pixel.
+ * Converts an RGB pixel to a YCrCb pixel.
  * 
  * This conversion is lossy (due to rounding and clamping).
  * 
@@ -1440,7 +1879,7 @@ int hb_rgb2yuv(int rgb)
     Cb = (Cb > 255) ? 255 : Cb;
     Cr = (Cr > 255) ? 255 : Cr;
     
-    return (y << 16) | (Cb << 8) | Cr;
+    return (y << 16) | (Cr << 8) | Cb;
 }
 
 const char * hb_subsource_name( int source )
@@ -1463,6 +1902,49 @@ const char * hb_subsource_name( int source )
             return "SSA";
         default:
             return "Unknown";
+    }
+}
+
+void hb_hexdump( hb_debug_level_t level, const char * label, const uint8_t * data, int len )
+{
+    int ii;
+    char line[80], ascii[19], *p;
+
+    ascii[18] = 0;
+    ascii[0] = '|';
+    ascii[17] = '|';
+    memset(&ascii[1], '.', 16);
+    p = line;
+    if( label )
+        hb_deep_log(level, "++++ %s ++++", label);
+    else
+        hb_deep_log(level, "++++++++++++");
+    for( ii = 0; ii < len; ii++ )
+    {
+        if( ( ii & 0x0f ) == 0x0f )
+        {
+            p += sprintf( p, "%02x", data[ii] );
+            hb_deep_log( level, "    %-50s%20s", line, ascii );
+            memset(&ascii[1], '.', 16);
+            p = line;
+        }
+        else if( ( ii & 0x07 ) == 0x07 )
+        {
+            p += sprintf( p, "%02x  ", data[ii] );
+        }
+        else
+        {
+            p += sprintf( p, "%02x ", data[ii] );
+        }
+        if( isgraph( data[ii] ) )
+            ascii[(ii & 0x0f) + 1] = data[ii];
+        else
+            ascii[(ii & 0x0f) + 1] = '.';
+    }
+    ascii[ii] = 0;
+    if( p != line )
+    {
+        hb_deep_log( level, "    %-50s%20s", line, ascii );
     }
 }
 
