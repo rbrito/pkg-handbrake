@@ -13,12 +13,6 @@ override_dh_auto_configure:
 	--gcc=/usr/lib/ccache/gcc \
 	CC="$(CC)" CXX="$(CXX)"
 
-#	perl -i -pe 's,rev0,rev3506,' build/libhb/project.h
-#	perl -i -pe 's,rev0,rev3506,' build/GNUmakefile
-#	perl -i -pe 's,rev0,rev3506,' build/project/handbrake.m4
-
-#	exit 1
-
 override_dh_builddeb:
 	dh_builddeb -- -Zbzip2
 
