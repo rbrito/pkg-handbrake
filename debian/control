@@ -2,7 +2,6 @@ Source: handbrake
 Section: graphics
 Priority: extra
 Maintainer: Christian Marillat <marillat@debian.org>
-Bugs: mailto:marillat@debian.org
 Homepage: http://www.handbrake.fr/
 Standards-Version: 3.9.3
 Build-Depends:
