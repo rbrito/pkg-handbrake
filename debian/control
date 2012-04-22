@@ -11,6 +11,7 @@ Build-Depends:
  intltool,
  libass-dev,
  libbz2-dev,
+ libdbus-glib-1-dev,
  libfaac-dev,
  libgstreamer-plugins-base0.10-dev,
  libgstreamer0.10-dev,
