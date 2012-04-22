@@ -10,8 +10,8 @@ override_dh_auto_configure:
 	cp make/variant/linux.defs make/variant/kfreebsd.defs
 
 	./configure --prefix=/usr --build build \
-	--gcc=/usr/lib/ccache/gcc \
-	CC="$(CC)" CXX="$(CXX)"
+		--gcc=/usr/lib/ccache/gcc \
+		CC="$(CC)" CXX="$(CXX)"
 
 override_dh_builddeb:
 	dh_builddeb -- -Zbzip2
