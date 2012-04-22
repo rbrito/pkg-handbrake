@@ -17,7 +17,7 @@ Build-Depends:
  libgudev-1.0-dev [linux-any],
  libmkv-dev (>= 0.6.5.1),
  libmp3lame-dev,
- libmp4v2-dev (>= 2:1.9.1-0.7),
+ libmp4v2-dev,
  libnotify-dev (>= 0.7.3),
  libsamplerate0-dev,
  libtheora-dev,
