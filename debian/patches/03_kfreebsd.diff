@@ -1,7 +1,5 @@
-Index: handbrake-0.9.6/libhb/ports.h
-===================================================================
---- handbrake-0.9.6.orig/libhb/ports.h	2012-02-29 12:38:40.325128187 +0100
-+++ handbrake-0.9.6/libhb/ports.h	2012-02-29 12:38:43.917250555 +0100
+--- a/libhb/ports.h
++++ b/libhb/ports.h
 @@ -51,7 +51,7 @@
  #elif defined( SYS_DARWIN )
  #  define HB_LOW_PRIORITY    0
@@ -11,10 +9,8 @@ Index: handbrake-0.9.6/libhb/ports.h
  #  define HB_LOW_PRIORITY    0
  #  define HB_NORMAL_PRIORITY 0
  #elif defined( SYS_CYGWIN )
-Index: handbrake-0.9.6/gtk/configure.ac
-===================================================================
---- handbrake-0.9.6.orig/gtk/configure.ac	2012-02-29 12:38:40.317127916 +0100
-+++ handbrake-0.9.6/gtk/configure.ac	2012-02-29 12:38:43.917250555 +0100
+--- a/gtk/configure.ac
++++ b/gtk/configure.ac
 @@ -93,6 +93,9 @@
  	fi
  	mingw_flag=yes
@@ -25,10 +21,8 @@ Index: handbrake-0.9.6/gtk/configure.ac
    *)
      if test "x$gst_disable" = "xyes" ; then
  	    GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gio-2.0 libnotify dbus-glib-1 gudev-1.0"
-Index: handbrake-0.9.6/gtk/src/callbacks.c
-===================================================================
---- handbrake-0.9.6.orig/gtk/src/callbacks.c	2012-02-29 12:38:40.309127642 +0100
-+++ handbrake-0.9.6/gtk/src/callbacks.c	2012-02-29 12:38:43.917250555 +0100
+--- a/gtk/src/callbacks.c
++++ b/gtk/src/callbacks.c
 @@ -28,7 +28,9 @@
  #if !defined(_WIN32)
  #include <poll.h>
@@ -75,10 +69,8 @@ Index: handbrake-0.9.6/gtk/src/callbacks.c
  	udev_ctx = g_udev_client_new(NULL);
  #endif
  }
-Index: handbrake-0.9.6/contrib/ffmpeg/A09-kfreebsd.patch
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ handbrake-0.9.6/contrib/ffmpeg/A09-kfreebsd.patch	2012-02-29 12:39:03.985934154 +0100
+--- /dev/null
++++ b/contrib/ffmpeg/A09-kfreebsd.patch
 @@ -0,0 +1,12 @@
 +--- a/libavdevice/v4l2.c      2011-11-03 12:29:48.000000000 +0100
 ++++ b/libavdevice/v4l2.c   2012-02-29 11:21:14.000000000 +0100

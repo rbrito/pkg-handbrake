@@ -1,7 +1,5 @@
-Index: handbrake-0.9.6/contrib/ffmpeg/A10-format-security.patch
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ handbrake-0.9.6/contrib/ffmpeg/A10-format-security.patch	2012-03-17 17:17:00.164068761 +0100
+--- /dev/null
++++ b/contrib/ffmpeg/A10-format-security.patch
 @@ -0,0 +1,20 @@
 +--- a/libavcodec/srtdec.c
 ++++ b/libavcodec/srtdec.c
