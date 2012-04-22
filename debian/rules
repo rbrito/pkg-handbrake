@@ -5,7 +5,7 @@ CC:=ccache $(CC)
 CXX:=ccache $(CXX)
 
 %:
-	dh $@ --with quilt --builddirectory=build
+	dh $@ --builddirectory=build
 
 override_dh_auto_configure:
 	cp make/variant/linux.defs make/variant/kfreebsd.defs

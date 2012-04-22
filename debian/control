@@ -28,7 +28,6 @@ Build-Depends:
  libx264-dev,
  libxvidcore-dev,
  python,
- quilt,
  wget,
  yasm
 
