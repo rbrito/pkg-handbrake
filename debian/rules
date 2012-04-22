@@ -1,5 +1,4 @@
 #!/usr/bin/make -f
-# -*- makefile -*-
 
 CC:=ccache $(CC)
 CXX:=ccache $(CXX)
