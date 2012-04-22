@@ -5,8 +5,7 @@
    It may be used under the terms of the GNU General Public License. */
 
 #include "hb.h"
-
-#include "libavcodec/avcodec.h"
+#include "hbffmpeg.h"
 
 struct hb_work_private_s
 {
@@ -107,22 +106,18 @@ int encavcodecInit( hb_work_object_t * w, hb_job_t * job )
     context->gop_size  = 10 * job->vrate / job->vrate_base;
     context->pix_fmt   = PIX_FMT_YUV420P;
 
-    if( job->pixel_ratio )
+    if( job->anamorphic.mode )
     {
-        context->sample_aspect_ratio.num = job->pixel_aspect_width;
-        context->sample_aspect_ratio.den = job->pixel_aspect_height;
+        context->sample_aspect_ratio.num = job->anamorphic.par_width;
+        context->sample_aspect_ratio.den = job->anamorphic.par_height;
 
         hb_log( "encavcodec: encoding with stored aspect %d/%d",
-                job->pixel_aspect_width, job->pixel_aspect_height );
+                job->anamorphic.par_width, job->anamorphic.par_height );
     }
 
-    if( job->mux & ( HB_MUX_MP4 | HB_MUX_PSP ) )
+    if( job->mux & HB_MUX_MP4 )
     {
         context->flags |= CODEC_FLAG_GLOBAL_HEADER;
-    }
-    if( job->mux & HB_MUX_PSP )
-    {
-        context->flags |= CODEC_FLAG_BITEXACT;
     }
     if( job->grayscale )
     {
@@ -159,13 +154,13 @@ int encavcodecInit( hb_work_object_t * w, hb_job_t * job )
         }
     }
 
-    if( avcodec_open( context, codec ) )
+    if( hb_avcodec_open( context, codec ) )
     {
         hb_log( "hb_work_encavcodec_init: avcodec_open failed" );
     }
     pv->context = context;
 
-    if( ( job->mux & ( HB_MUX_MP4 | HB_MUX_PSP ) ) && job->pass != 1 )
+    if( ( job->mux & HB_MUX_MP4 ) && job->pass != 1 )
     {
 #if 0
         /* Hem hem */
@@ -194,7 +189,7 @@ void encavcodecClose( hb_work_object_t * w )
     {
         hb_deep_log( 2, "encavcodec: closing libavcodec" );
         avcodec_flush_buffers( pv->context );
-        avcodec_close( pv->context );
+        hb_avcodec_close( pv->context );
     }
     if( pv->file )
     {
@@ -236,13 +231,22 @@ int encavcodecWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
     // doesn't do the trick.  It must be set in the AVFrame.
     frame->quality = pv->context->global_quality;
 
-    /* Should be way too large */
-    buf = hb_video_buffer_init( job->width, job->height );
-    buf->size = avcodec_encode_video( pv->context, buf->data, buf->alloc,
-                                      frame );
-    buf->start = in->start;
-    buf->stop  = in->stop;
-    buf->frametype   = pv->context->coded_frame->key_frame ? HB_FRAME_KEY : HB_FRAME_REF;
+    if ( pv->context->codec )
+    {
+        /* Should be way too large */
+        buf = hb_video_buffer_init( job->width, job->height );
+        buf->size = avcodec_encode_video( pv->context, buf->data, buf->alloc,
+                                          frame );
+        buf->start = in->start;
+        buf->stop  = in->stop;
+        buf->frametype   = pv->context->coded_frame->key_frame ? HB_FRAME_KEY : HB_FRAME_REF;
+    }
+    else
+    {
+        buf = NULL;
+        
+        hb_error( "encavcodec: codec context has uninitialized codec; skipping frame" );
+    }
 
     av_free( frame );
 

@@ -3,7 +3,7 @@ dnl Created by Anjuta application wizard.
 
 AC_INIT(ghb, 0.1)
 
-AM_INIT_AUTOMAKE(AC_PACKAGE_NAME, AC_PACKAGE_VERSION)
+AM_INIT_AUTOMAKE([1.7.9 foreign dist-bzip2 dist-zip])
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE
 
@@ -13,11 +13,21 @@ AC_PROG_CXX
 AM_PROG_CC_STDC
 AC_HEADER_STDC
 
+if test x"$CC_FOR_BUILD" = x; then
+	if test x"$cross_compiling" = x"yes"; then
+		AC_CHECK_PROGS(CC_FOR_BUILD, gcc, cc)
+	else
+		CC_FOR_BUILD="$CC"
+	fi
+fi
+
+AC_SUBST(CC_FOR_BUILD)
+
 # introduce the optional configure parameter for the path of libXXX.a
 AC_ARG_WITH(hb,
 	AC_HELP_STRING(
 	    [--with-hb=prefix],
-	    [try this for the bh-library prefix install directory]
+	    [try this for the hb-library prefix install directory]
 	  ),
 	  hb_PATHSET=1,
 	  hb_PATHSET=0
@@ -45,6 +55,18 @@ else
 	AC_SUBST(HB_DIR, '$(top_srcdir)/'"..")
 fi
 
+AC_ARG_ENABLE(dl,
+	AS_HELP_STRING([--enable-dl], [enable libdl]),
+	use_libdl=yes, use_libdl=no)
+
+AC_ARG_ENABLE(gst,
+	AS_HELP_STRING([--enable-gst], [enable gstreamer on Win32]),
+	w32_gst=yes, w32_gst=no)
+
+AC_ARG_ENABLE(update-checks,
+	AS_HELP_STRING([--disable-update-checks], [disable update checks]),
+	update_checks=no, update_checks=yes)
+
 # overwrite global variable (used for Makefile generation)
 AC_SUBST(GLOBALCXXFLAGS, $CXXFLAGS )
 AC_SUBST(GLOBALLDFLAGS, $LDFLAGS )
@@ -60,22 +82,70 @@ AC_DEFINE_UNQUOTED(GETTEXT_PACKAGE,"$GETTEXT_PACKAGE", [GETTEXT package name])
 AM_GLIB_GNU_GETTEXT
 IT_PROG_INTLTOOL([0.35.0])
 
-
-
 AM_PROG_LIBTOOL
 
+case $host in
+  *-*-mingw*)
+    if test "x$w32_gst" = "xyes" ; then
+		GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0"
+	else
+        GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gio-2.0"
+	fi
+	mingw_flag=yes
+    ;;
+  *)
+	GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify gudev-1.0"
+	mingw_flag=no
+    ;;
+esac
 
+if test "x$w32_gst" = "xyes" -o  "x$mingw_flag" != "xyes" ; then
+	CXXFLAGS="$CXXFLAGS -D_ENABLE_GST"
+	CFLAGS="$CFLAGS -D_ENABLE_GST"
+fi
 
-PKG_CHECK_MODULES(GHBTOOLS, [glib-2.0 gobject-2.0 gdk-pixbuf-2.0])
-AC_SUBST(GHBTOOLS_CFLAGS)
-AC_SUBST(GHBTOOLS_LIBS)
+PKG_PROG_PKG_CONFIG
+if test "x$update_checks" = "xyes" ; then
+	PKG_CHECK_MODULES(OldWebKitGtk, WebKitGtk, old_webkit=yes, old_webkit=no)
+	if test "x$old_webkit" = "xyes" ; then
+		if test "x$mingw_flag" = "xno" ; then
+			GHB_PACKAGES="$GHB_PACKAGES WebKitGtk"
+			CXXFLAGS="$CXXFLAGS -D_OLD_WEBKIT"
+			CFLAGS="$CFLAGS -D_OLD_WEBKIT"
+		fi
+	else
+		if test "x$mingw_flag" = "xno" ; then
+			GHB_PACKAGES="$GHB_PACKAGES webkit-1.0"
+		fi
+	fi
+else
+	CFLAGS="$CFLAGS -D_NO_UPDATE_CHECK"
+fi
 
-PKG_CHECK_MODULES(GHB, [gtk+-2.0 >= 2.8 gio-2.0 hal hal-storage libgtkhtml-3.14])
+AM_CONDITIONAL([MINGW], [test "x$mingw_flag" = "xyes"])
+
+PKG_CHECK_MODULES(GHB, [$GHB_PACKAGES])
+
+AC_PATH_PROG(BUILD_PKG_CONFIG, pkg-config, no)
+if test x"$BUILD_PKG_CONFIG" = x"no"; then
+	AC_MSG_ERROR([You need to install pkg-config])
+fi
+
+GHB_TOOLS_CFLAGS=`$BUILD_PKG_CONFIG --cflags glib-2.0 gdk-pixbuf-2.0`
+GHB_TOOLS_LIBS=`$BUILD_PKG_CONFIG --libs glib-2.0 gdk-pixbuf-2.0`
+
+case $host in
+  *-*-mingw*)
+    if test "x$use_libdl" = "xyes" ; then
+		GHB_LIBS="$GHB_LIBS -ldl"
+	fi
+    ;;
+esac
+
+AC_SUBST(GHB_TOOLS_CFLAGS)
+AC_SUBST(GHB_TOOLS_LIBS)
 AC_SUBST(GHB_CFLAGS)
 AC_SUBST(GHB_LIBS)
-
-
-
 
 AC_OUTPUT([
 Makefile

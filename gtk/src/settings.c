@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * settings.c
- * Copyright (C) John Stebbins 2008 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
  * 
  * settings.c is free software.
  * 
@@ -98,7 +98,7 @@ ghb_settings_set_boolean(GValue *settings, const gchar *key, gboolean bval)
 }
 
 GValue*
-ghb_settings_get_value(GValue *settings, const gchar *key)
+ghb_settings_get_value(const GValue *settings, const gchar *key)
 {
 	GValue *value;
 	value = ghb_dict_lookup(settings, key);
@@ -108,7 +108,7 @@ ghb_settings_get_value(GValue *settings, const gchar *key)
 }
 
 gboolean
-ghb_settings_get_boolean(GValue *settings, const gchar *key)
+ghb_settings_get_boolean(const GValue *settings, const gchar *key)
 {
 	const GValue* value;
 	value = ghb_settings_get_value(settings, key);
@@ -117,7 +117,7 @@ ghb_settings_get_boolean(GValue *settings, const gchar *key)
 }
 
 gint64
-ghb_settings_get_int64(GValue *settings, const gchar *key)
+ghb_settings_get_int64(const GValue *settings, const gchar *key)
 {
 	const GValue* value;
 	value = ghb_settings_get_value(settings, key);
@@ -126,7 +126,7 @@ ghb_settings_get_int64(GValue *settings, const gchar *key)
 }
 
 gint
-ghb_settings_get_int(GValue *settings, const gchar *key)
+ghb_settings_get_int(const GValue *settings, const gchar *key)
 {
 	const GValue* value;
 	value = ghb_settings_get_value(settings, key);
@@ -135,7 +135,7 @@ ghb_settings_get_int(GValue *settings, const gchar *key)
 }
 
 gdouble
-ghb_settings_get_double(GValue *settings, const gchar *key)
+ghb_settings_get_double(const GValue *settings, const gchar *key)
 {
 	const GValue* value;
 	value = ghb_settings_get_value(settings, key);
@@ -144,7 +144,7 @@ ghb_settings_get_double(GValue *settings, const gchar *key)
 }
 
 gchar*
-ghb_settings_get_string(GValue *settings, const gchar *key)
+ghb_settings_get_string(const GValue *settings, const gchar *key)
 {
 	const GValue* value;
 	value = ghb_settings_get_value(settings, key);
@@ -153,31 +153,40 @@ ghb_settings_get_string(GValue *settings, const gchar *key)
 }
 
 gint
-ghb_settings_combo_int(GValue *settings, const gchar *key)
+ghb_settings_combo_int(const GValue *settings, const gchar *key)
 {
 	return ghb_lookup_combo_int(key, ghb_settings_get_value(settings, key));
 }
 
+gdouble
+ghb_settings_combo_double(const GValue *settings, const gchar *key)
+{
+	return ghb_lookup_combo_double(key, ghb_settings_get_value(settings, key));
+}
+
 const gchar*
-ghb_settings_combo_option(GValue *settings, const gchar *key)
+ghb_settings_combo_option(const GValue *settings, const gchar *key)
 {
 	return ghb_lookup_combo_option(key, ghb_settings_get_value(settings, key));
+}
+
+const gchar*
+ghb_settings_combo_string(const GValue *settings, const gchar *key)
+{
+	return ghb_lookup_combo_string(key, ghb_settings_get_value(settings, key));
 }
 
 // Map widget names to setting keys
 // Widgets that map to settings have names
 // of this format: s_<setting key>
-static const gchar*
-get_setting_key(GtkWidget *widget)
+const gchar*
+ghb_get_setting_key(GtkWidget *widget)
 {
 	const gchar *name;
 	
 	g_debug("get_setting_key ()\n");
 	if (widget == NULL) return NULL;
-	if (GTK_IS_ACTION(widget))
-		name = gtk_action_get_name(GTK_ACTION(widget));
-	else
-		name = gtk_widget_get_name(widget);
+	name = gtk_buildable_get_name(GTK_BUILDABLE(widget));
 		
 	if (name == NULL)
 	{
@@ -202,10 +211,7 @@ ghb_widget_value(GtkWidget *widget)
 	}
 
 	type = GTK_WIDGET_TYPE(widget);
-	if (GTK_IS_ACTION(widget))
-		name = gtk_action_get_name(GTK_ACTION(widget));
-	else
-		name = gtk_widget_get_name(widget);
+	name = ghb_get_setting_key(widget);
 	g_debug("ghb_widget_value widget (%s)\n", name);
 	if (type == GTK_TYPE_ENTRY)
 	{
@@ -222,6 +228,20 @@ ghb_widget_value(GtkWidget *widget)
 	else if (type == GTK_TYPE_CHECK_BUTTON)
 	{
 		g_debug("\tcheck_button");
+		gboolean bval;
+		bval = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+		value = ghb_boolean_value_new(bval);
+	}
+	else if (type == GTK_TYPE_TOGGLE_TOOL_BUTTON)
+	{
+		g_debug("\ttoggle_tool_button");
+		gboolean bval;
+		bval = gtk_toggle_tool_button_get_active(GTK_TOGGLE_TOOL_BUTTON(widget));
+		value = ghb_boolean_value_new(bval);
+	}
+	else if (type == GTK_TYPE_TOGGLE_BUTTON)
+	{
+		g_debug("\ttoggle_button");
 		gboolean bval;
 		bval = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
 		value = ghb_boolean_value_new(bval);
@@ -303,6 +323,13 @@ ghb_widget_value(GtkWidget *widget)
 			value = ghb_int_value_new(dval);
 		}
 	}
+	else if (type == GTK_TYPE_SCALE_BUTTON)
+	{
+		gdouble dval;
+
+		dval = gtk_scale_button_get_value(GTK_SCALE_BUTTON(widget));
+		value = ghb_double_value_new(dval);
+	}
 	else if (type == GTK_TYPE_TEXT_VIEW)
 	{
 		GtkTextBuffer *buffer;
@@ -320,6 +347,16 @@ ghb_widget_value(GtkWidget *widget)
 		const gchar *str;
 		str = gtk_label_get_text (GTK_LABEL(widget));
 		value = ghb_string_value_new(str);
+	}
+	else if (type == GTK_TYPE_FILE_CHOOSER_BUTTON)
+	{
+		gchar *str;
+		str = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER(widget));
+		if (str == NULL)
+			str = gtk_file_chooser_get_current_folder(GTK_FILE_CHOOSER(widget));
+		value = ghb_string_value_new(str);
+		if (str != NULL)
+			g_free(str);
 	}
 	else
 	{
@@ -399,7 +436,7 @@ ghb_widget_to_setting(GValue *settings, GtkWidget *widget)
 	if (widget == NULL) return;
 	g_debug("ghb_widget_to_setting");
 	// Find corresponding setting
-	key = get_setting_key(widget);
+	key = ghb_get_setting_key(widget);
 	if (key == NULL) return;
 	value = ghb_widget_value(widget);
 	if (value != NULL)
@@ -444,6 +481,16 @@ update_widget(GtkWidget *widget, const GValue *value)
 		g_debug("check button");
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), ival);
 	}
+	else if (type == GTK_TYPE_TOGGLE_TOOL_BUTTON)
+	{
+		g_debug("toggle button");
+		gtk_toggle_tool_button_set_active(GTK_TOGGLE_TOOL_BUTTON(widget), ival);
+	}
+	else if (type == GTK_TYPE_TOGGLE_BUTTON)
+	{
+		g_debug("toggle button");
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), ival);
+	}
 	else if (type == GTK_TYPE_TOGGLE_ACTION)
 	{
 		g_debug("toggle action");
@@ -459,7 +506,7 @@ update_widget(GtkWidget *widget, const GValue *value)
 		GtkTreeModel *store;
 		GtkTreeIter iter;
 		gchar *shortOpt;
-		gint ivalue;
+		gdouble ivalue;
 		gboolean foundit = FALSE;
 
 		g_debug("combo (%s)", str);
@@ -485,7 +532,7 @@ update_widget(GtkWidget *widget, const GValue *value)
 			do
 			{
 				gtk_tree_model_get(store, &iter, 3, &ivalue, -1);
-				if (ivalue == ival)
+				if ((gint)ivalue == ival || ivalue == dval)
 				{
 					gtk_combo_box_set_active_iter (
 						GTK_COMBO_BOX(widget), &iter);
@@ -504,7 +551,7 @@ update_widget(GtkWidget *widget, const GValue *value)
 		GtkTreeModel *store;
 		GtkTreeIter iter;
 		gchar *shortOpt;
-		gint ivalue;
+		gdouble ivalue;
 		gboolean foundit = FALSE;
 
 		g_debug("GTK_COMBO_BOX_ENTRY");
@@ -530,7 +577,7 @@ update_widget(GtkWidget *widget, const GValue *value)
 			do
 			{
 				gtk_tree_model_get(store, &iter, 3, &ivalue, -1);
-				if (ivalue == ival)
+				if ((gint)ivalue == ival || ivalue == dval)
 				{
 					gtk_combo_box_set_active_iter (
 						GTK_COMBO_BOX(widget), &iter);
@@ -558,6 +605,11 @@ update_widget(GtkWidget *widget, const GValue *value)
 		g_debug("hscale");
 		gtk_range_set_value(GTK_RANGE(widget), dval);
 	}
+	else if (type == GTK_TYPE_SCALE_BUTTON)
+	{
+		g_debug("scale_button");
+		gtk_scale_button_set_value(GTK_SCALE_BUTTON(widget), dval);
+	}
 	else if (type == GTK_TYPE_TEXT_VIEW)
 	{
 		g_debug("textview (%s)", str);
@@ -567,7 +619,47 @@ update_widget(GtkWidget *widget, const GValue *value)
 	}
 	else if (type == GTK_TYPE_LABEL)
 	{
-		gtk_label_set_text (GTK_LABEL(widget), str);
+		gtk_label_set_markup (GTK_LABEL(widget), str);
+	}
+	else if (type == GTK_TYPE_FILE_CHOOSER_BUTTON)
+	{
+		GtkFileChooserAction act;
+		act = gtk_file_chooser_get_action(GTK_FILE_CHOOSER(widget));
+		if (str[0] == 0)
+		{
+			// Do nothing
+			;
+		}
+		else if (act == GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER ||
+			act == GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER)
+		{
+			gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(widget), str);
+		}
+		else if (act == GTK_FILE_CHOOSER_ACTION_SAVE)
+		{
+			gtk_file_chooser_set_filename (GTK_FILE_CHOOSER(widget), str);
+		}
+		else
+		{
+			if (g_file_test(str, G_FILE_TEST_IS_DIR))
+			{
+				gtk_file_chooser_set_current_folder(
+					GTK_FILE_CHOOSER(widget), str);
+			}
+			else if (g_file_test(str, G_FILE_TEST_EXISTS))
+			{
+				gtk_file_chooser_set_filename (GTK_FILE_CHOOSER(widget), str);
+			}
+			else
+			{
+				gchar *dirname;
+
+				dirname = g_path_get_dirname(str);
+				gtk_file_chooser_set_current_folder(
+					GTK_FILE_CHOOSER(widget), dirname);
+				g_free(dirname);
+			}
+		}
 	}
 	else
 	{

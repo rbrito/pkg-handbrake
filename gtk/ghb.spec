@@ -1,64 +1,86 @@
-Name:		handbrake
-Version:	0.9.2
-Release:	1%{?dist}
-Summary:	A program to rip and encode DVDs and other sources to MPEG-4
+
+Name:		%{name}
+Version:	%{version}
+Release:	%{release}%{?dist}
+Summary:	A program to transcode DVDs and other sources to MPEG-4
 
 Group:		Applications/Multimedia
-License:	GPL
+License:	GPLv2
 URL:		http://handbrake.fr/
-Source0:	HandBrake.tgz
-BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+Source0:	%{name}-%{version}.tar.bz2
+Prefix:		%{_prefix}
+BuildRoot:	%(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
+BuildRequires: glib2-devel, gtk2-devel, webkitgtk-devel
+BuildRequires: gstreamer-devel, gstreamer-plugins-base-devel, libgudev1-devel
+Requires:	gtk2, coreutils
 
-Requires:	glib2 >= 2.16, gtk2 >= 2.12, hal-libs
+%define debug_package %{nil}
 
 %description
-HandBrake is an open-source, GPL-licensed, multiplatform, multithreaded 
-DVD to MPEG-4 converter, available for MacOS X, Linux and Windows.
+HandBrake is an open-source, GPL-licensed, multi-platform, multi-threaded 
+transcoder, available for MacOS X, Linux and Windows.
+
+%package gui
+Summary:	A program to transcode DVDs and other sources to MPEG-4
+Group:		Applications/Multimedia
+
+%package cli
+Summary:	A program to transcode DVDs and other sources to MPEG-4
+Group:		Applications/Multimedia
+
+%description gui
+HandBrake is an open-source, GPL-licensed, multi-platform, multi-threaded 
+transcoder, available for MacOS X, Linux and Windows.
+
+%description cli
+HandBrake is an open-source, GPL-licensed, multi-platform, multi-threaded 
+transcoder, available for MacOS X, Linux and Windows.
 
 %prep
 %setup -q
+cd %{_builddir}/%{name}-%{version}
 
 
 %build
-%configure
-jam
+./configure --debug=std --prefix=%{_prefix}
+make %{?_smp_mflags} -C build
 
 
 %install
-rm -rf $RPM_BUILD_ROOT
-DESTDIR=$RPM_BUILD_ROOT jam install 
+make -C build DESTDIR=$RPM_BUILD_ROOT install-strip
 
 ## blow away stuff we don't want
-/bin/rm $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/icon-theme.cache
+/bin/rm -f $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/icon-theme.cache
 
 %clean
-rm -rf $RPM_BUILD_ROOT
+rm -rf %{buildroot}
 
-%post
+%post gui
 touch --no-create %{_datadir}/icons/hicolor
 if [ -x /usr/bin/gtk-update-icon-cache ]; then
   gtk-update-icon-cache -q %{_datadir}/icons/hicolor
 fi
 
-%postun
-/sbin/ldconfig
+%postun gui
 touch --no-create %{_datadir}/icons/hicolor
 if [ -x /usr/bin/gtk-update-icon-cache ]; then
   gtk-update-icon-cache -q %{_datadir}/icons/hicolor
 fi
 
-%files
+%files gui
 %defattr(-,root,root,-)
-%doc %{_datadir}/doc
-%{_datadir}/ghb
-%{_datadir}/icons
-%{_datadir}/locale
+%doc NEWS AUTHORS CREDITS THANKS COPYING
+%{_datadir}/icons/hicolor
 %{_datadir}/applications
-%{_bindir}
+%{_bindir}/ghb
 
+%files cli
+%defattr(-,root,root,-)
+%doc NEWS AUTHORS CREDITS THANKS COPYING
+%{_bindir}/HandBrakeCLI
 
 %changelog
-* Sat May 31 2008 John Stebbins <jstebbins@jetheaddev.com> 
-- Initial release
+* Sun Apr 11 2010 John Stebbins <jstebbins@jetheaddev.com> - svn
+- Snapshot release
 
 

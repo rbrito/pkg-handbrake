@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * appcast.c
- * Copyright (C) John Stebbins 2008 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
  * 
  * appcast.c is free software.
  * 
@@ -35,7 +35,7 @@ typedef struct
 
 static tag_map_t tag_map[] =
 {
-	{"description", A_DESCRIPTION},
+	{"sparkle:releaseNotesLink", A_DESCRIPTION},
 	{"enclosure", A_ENCLOSURE},
 	{"item", A_ITEM},
 };

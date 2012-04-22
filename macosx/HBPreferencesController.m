@@ -23,12 +23,17 @@
 @interface HBPreferencesController (Private)
 
 - (void) setPrefView: (id) sender;
+- (NSToolbarItem *)toolbarItemWithIdentifier: (NSString *)identifier
+                                       label: (NSString *)label
+                                       image: (NSImage *)image;
 
 @end
 
 @implementation HBPreferencesController
 
 /**
+ * +[HBPreferencesController registerUserDefaults]
+ *
  * Registers default values to user defaults. This is called immediately
  * when HandBrake starts, from [HBController init].
  */
@@ -38,9 +43,11 @@
 
     [[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:
         @"YES",             @"CheckForUpdates",
+        @"Open Source",     @"LaunchSourceBehavior",
         @"English",         @"DefaultLanguage",
-        @"NO",              @"DefaultMpegName",
-        @"YES",             @"DefaultCrf",
+        @"YES",             @"UseCoreAudio",
+        @"YES",              @"DefaultMpegName",
+        @"YES",             @"UseDvdNav",
         @"",                @"DefAdvancedx264Flags",
         @"YES",             @"DefaultPresetsDrawerShow",
         desktopDirectory,   @"LastDestinationDirectory",
@@ -48,14 +55,24 @@
         @"NO",              @"DefaultAutoNaming",
         @"NO",              @"DisableDvdAutoDetect",
         @"Alert Window",    @"AlertWhenDone",
+        @"YES",             @"AlertWhenDoneSound",
         @"1",               @"LoggingLevel",
-        @"4:10:15:9:10:35:9",    @"DecombCustomString",
-        @"NO",    @"EncodeLogLocation",
+        @"NO",              @"EncodeLogLocation",
+        @"10",              @"MinTitleScanSeconds",
+        @"10",              @"PreviewsNumber",
+        @"",                @"Drawer Size",
+        @"0.25",            @"x264CqSliderFractional",
+        @"YES",             @"AlertBuiltInPresetUpdate",
+        @"MetaX",           @"SendCompletedEncodeToApp",
+		@"YES",				@"AC3PassthruDefaultsToAC3",
         nil]];
 }
 
 /**
+ * -[HBPreferencesController init]
+ *
  * Initializes the preferences controller by loading Preferences.nib file.
+ *
  */
 - (id)init
 {
@@ -66,6 +83,13 @@
     return self;
 }
 
+/**
+ * -[HBPreferencesController awakeFromNib]
+ *
+ * Called after all the outlets in the nib file have been attached. Sets up the
+ * toolbar and shows the "General" pane.
+ *
+ */
 - (void) awakeFromNib
 {
     NSToolbar * toolbar = [[[NSToolbar alloc] initWithIdentifier: @"Preferences Toolbar"] autorelease];
@@ -79,50 +103,36 @@
     [self setPrefView:nil];
 }
 
-- (NSToolbarItem *) toolbar: (NSToolbar *) toolbar itemForItemIdentifier: (NSString *) ident
-                    willBeInsertedIntoToolbar: (BOOL) flag
+- (NSToolbarItem *)toolbar: (NSToolbar *)toolbar
+     itemForItemIdentifier: (NSString *)ident
+ willBeInsertedIntoToolbar: (BOOL)flag
 {
-    NSToolbarItem * item;
-    item = [[[NSToolbarItem alloc] initWithItemIdentifier: ident] autorelease];
-
-    if ([ident isEqualToString: TOOLBAR_GENERAL])
+    if ( [ident isEqualToString:TOOLBAR_GENERAL] )
     {
-        [item setLabel: NSLocalizedString(@"General", "General")];
-        [item setImage: [NSImage imageNamed: @"NSPreferencesGeneral"]];
-        [item setTarget: self];
-        [item setAction: @selector(setPrefView:)];
-        [item setAutovalidates: NO];
+        return [self toolbarItemWithIdentifier:ident
+                                         label:NSLocalizedString(@"General", @"Preferences General Toolbar Item")
+                                         image:[NSImage imageNamed:NSImageNamePreferencesGeneral]];
     }
-    else if ([ident isEqualToString: TOOLBAR_PICTURE])
+    else if ( [ident isEqualToString:TOOLBAR_PICTURE] )
     {
-        [item setLabel: NSLocalizedString(@"Picture", "Picture")];
-        [item setImage: [NSImage imageNamed: @"pref-picture"]];
-        [item setTarget: self];
-        [item setAction: @selector(setPrefView:)];
-        [item setAutovalidates: NO];
+        return [self toolbarItemWithIdentifier:ident
+                                         label:NSLocalizedString(@"Picture", @"Preferences Picture Toolbar Item")
+                                         image:[NSImage imageNamed:@"pref-picture"]];
     }
-    else if ([ident isEqualToString: TOOLBAR_AUDIO])
+    else if ( [ident isEqualToString:TOOLBAR_AUDIO] )
     {
-        [item setLabel: NSLocalizedString(@"Audio", "Audio")];
-        [item setImage: [NSImage imageNamed: @"pref-audio"]];
-        [item setTarget: self];
-        [item setAction: @selector(setPrefView:)];
-        [item setAutovalidates: NO];
+        return [self toolbarItemWithIdentifier:ident
+                                         label:NSLocalizedString(@"Audio", @"Preferences Audio Toolbar Item")
+                                         image:[NSImage imageNamed:@"pref-audio"]];
     }
-    else if ([ident isEqualToString: TOOLBAR_ADVANCED])
+    else if ( [ident isEqualToString:TOOLBAR_ADVANCED] )
     {
-        [item setLabel: NSLocalizedString(@"Advanced", "Advanced")];
-        [item setImage: [NSImage imageNamed: @"NSAdvanced"]];
-        [item setTarget: self];
-        [item setAction: @selector(setPrefView:)];
-        [item setAutovalidates: NO];
-    }
-    else
-    {
-        return nil;
+        return [self toolbarItemWithIdentifier:ident
+                                         label:NSLocalizedString(@"Advanced", @"Preferences Advanced Toolbar Item")
+                                         image:[NSImage imageNamed:NSImageNameAdvanced]];
     }
 
-    return item;
+    return nil;
 }
 
 - (NSArray *) toolbarSelectableItemIdentifiers: (NSToolbar *) toolbar
@@ -137,9 +147,53 @@
 
 - (NSArray *) toolbarAllowedItemIdentifiers: (NSToolbar *) toolbar
 {
-    return [NSArray arrayWithObjects: TOOLBAR_GENERAL, TOOLBAR_PICTURE,
+    return [NSArray arrayWithObjects: TOOLBAR_GENERAL, /*TOOLBAR_PICTURE, */
                                         TOOLBAR_AUDIO, TOOLBAR_ADVANCED, nil];
 }
+
+/* Manage the send encode to xxx.app windows and field */
+/*Opens the app browse window*/
+- (IBAction) browseSendToApp: (id) sender
+{
+    NSOpenPanel * panel;
+	
+    panel = [NSOpenPanel openPanel];
+    [panel setAllowsMultipleSelection: NO];
+    [panel setCanChooseFiles: YES];
+    [panel setCanChooseDirectories: NO ];
+    NSString * sendToAppDirectory;
+	if ([[NSUserDefaults standardUserDefaults] stringForKey:@"LastSendToAppDirectory"])
+	{
+		sendToAppDirectory = [[NSUserDefaults standardUserDefaults] stringForKey:@"LastSendToAppDirectory"];
+	}
+	else
+	{
+		sendToAppDirectory = @"/Applications";
+	}
+    [panel beginSheetForDirectory: sendToAppDirectory file: nil types: nil
+                   modalForWindow: [self window] modalDelegate: self
+                   didEndSelector: @selector( browseSendToAppDone:returnCode:contextInfo: )
+                      contextInfo: sender]; 
+}
+
+- (void) browseSendToAppDone: (NSOpenPanel *) sheet
+                  returnCode: (int) returnCode contextInfo: (void *) contextInfo
+{
+    if( returnCode == NSOKButton )
+    {
+        NSString *sendToAppPath = [[sheet filenames] objectAtIndex: 0];
+        NSString *sendToAppDirectory = [sendToAppPath stringByDeletingLastPathComponent];
+        [[NSUserDefaults standardUserDefaults] setObject:sendToAppDirectory forKey:@"LastSendToAppDirectory"];
+        [sheet orderOut: self];
+        NSString *sendToAppName;
+        sendToAppName = [[sendToAppPath lastPathComponent] stringByDeletingPathExtension];
+        /* we set the name of the app to send to in the display field */
+        [fSendEncodeToAppField setStringValue:sendToAppName];
+        [[NSUserDefaults standardUserDefaults] setObject:[fSendEncodeToAppField stringValue] forKey:@"SendCompletedEncodeToApp"];
+        
+    }
+}
+
 
 @end
 
@@ -188,6 +242,24 @@
                 break;
             }
     }
+}
+
+/**
+ * -[HBPreferencesController(Private) toolbarItemWithIdentifier:label:image:]
+ *
+ * Shared code for creating the NSToolbarItems for the Preferences toolbar.
+ *
+ */
+- (NSToolbarItem *)toolbarItemWithIdentifier: (NSString *)identifier
+                                       label: (NSString *)label
+                                       image: (NSImage *)image
+{
+    NSToolbarItem *item = [[NSToolbarItem alloc] initWithItemIdentifier:identifier];
+    [item setLabel:label];
+    [item setImage:image];
+    [item setAction:@selector(setPrefView:)];
+    [item setAutovalidates:NO];
+    return [item autorelease];
 }
 
 @end

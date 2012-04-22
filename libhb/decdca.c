@@ -15,6 +15,7 @@ struct hb_work_private_s
     dca_state_t * state;
 
     double        next_pts;
+    int64_t       last_buf_pts;
     int           flags_in;
     int           flags_out;
     int           rate;
@@ -32,7 +33,7 @@ struct hb_work_private_s
 
     hb_list_t   * list;
 
-	int           out_discrete_channels;
+    int           out_discrete_channels;
 
 };
 
@@ -74,13 +75,15 @@ static int decdcaInit( hb_work_object_t * w, hb_job_t * job )
     pv->list      = hb_list_init();
     pv->state     = dca_init( 0 );
 
-	/* Decide what format we want out of libdca
-	work.c has already done some of this deduction for us in do_job() */
+    /* Decide what format we want out of libdca
+    work.c has already done some of this deduction for us in do_job() */
 
-	pv->flags_out = HB_AMIXDOWN_GET_DCA_FORMAT(audio->config.out.mixdown);
+    pv->flags_out = HB_AMIXDOWN_GET_DCA_FORMAT(audio->config.out.mixdown);
+    if ( audio->config.out.codec == HB_ACODEC_LAME )
+        pv->flags_out |= DCA_ADJUST_LEVEL;
 
-	/* pass the number of channels used into the private work data */
-	/* will only be actually used if we're not doing AC3 passthru */
+    /* pass the number of channels used into the private work data */
+    /* will only be actually used if we're not doing AC3 passthru */
     pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
 
     pv->level     = 32768.0;
@@ -122,6 +125,13 @@ static int decdcaWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
         return HB_WORK_DONE;
     }
 
+    if ( (*buf_in)->start < -1 && pv->next_pts == 0 )
+    {
+        // discard buffers that start before video time 0
+        *buf_out = NULL;
+        return HB_WORK_OK;
+    }
+
     hb_list_add( pv->list, *buf_in );
     *buf_in = NULL;
 
@@ -145,8 +155,10 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
 {
     hb_work_private_t * pv = w->private_data;
     hb_buffer_t * buf;
+    hb_audio_t  * audio = w->audio;
     int           i, j, k;
     int64_t       pts, pos;
+    uint64_t      upts, upos;
     int           num_blocks;
 
     /* Get a frame header if don't have one yet */
@@ -189,7 +201,46 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
     }
 
     /* Get the whole frame */
-    hb_list_getbytes( pv->list, pv->frame, pv->size, &pts, &pos );
+    hb_list_getbytes( pv->list, pv->frame, pv->size, &upts, &upos );
+    pts = (int64_t)upts;
+    pos = (int64_t)upos;
+
+    if ( pts != pv->last_buf_pts )
+    {
+        pv->last_buf_pts = pts;
+    }
+    else
+    {
+        // spec says that the PTS is the start time of the first frame
+        // that starts in the PES frame so we only use the PTS once then
+        // get the following frames' PTS from the frame length.
+        pts = -1;
+    }
+
+    // mkv files typically use a 1ms timebase which results in a lot of
+    // truncation error in their timestamps. Also, TSMuxer or something
+    // in the m2ts-to-mkv toolchain seems to take a very casual attitude
+    // about time - timestamps seem to randomly offset by ~40ms for a few
+    // seconds then recover. So, if the pts we got is within 50ms of the
+    // pts computed from the data stream, use the data stream pts.
+    if ( pts == -1 || ( pv->next_pts && fabs( pts - pv->next_pts ) < 50.*90. ) )
+    {
+        pts = pv->next_pts;
+    }
+
+    double frame_dur = (double)(pv->frame_length & ~0xFF) / (double)pv->rate * 90000.;
+
+    /* DCA passthrough: don't decode the DCA frame */
+    if( audio->config.out.codec == HB_ACODEC_DCA_PASS )
+    {
+        buf = hb_buffer_init( pv->size );
+        memcpy( buf->data, pv->frame, pv->size );
+        buf->start = pts;
+        pv->next_pts = pts + frame_dur;
+        buf->stop  = pv->next_pts;
+        pv->sync = 0;
+        return buf;
+    }
 
     /* Feed libdca */
     dca_frame( pv->state, pv->frame, &pv->flags_out, &pv->level, 0 );
@@ -201,18 +252,8 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
     int nsamp = num_blocks * 256;
     buf = hb_buffer_init( nsamp * pv->out_discrete_channels * sizeof( float ) );
 
-    // mkv files typically use a 1ms timebase which results in a lot of
-    // truncation error in their timestamps. Also, TSMuxer or something
-    // in the m2ts-to-mkv toolchain seems to take a very casual attitude
-    // about time - timestamps seem to randomly offset by ~40ms for a few
-    // seconds then recover. So, if the pts we got is within 50ms of the
-    // pts computed from the data stream, use the data stream pts.
-    if ( pts < 0 || fabs( (double)pts - pv->next_pts ) < 50.*90. )
-    {
-        pts = pv->next_pts;
-    }
     buf->start = pts;
-    pv->next_pts += (double)nsamp / (double)pv->rate * 90000.;
+    pv->next_pts = pts + (double)nsamp / (double)pv->rate * 90000.;
     buf->stop  = pv->next_pts;
 
     for( i = 0; i < num_blocks; i++ )
@@ -227,10 +268,10 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
         /* Interleave */
         for( j = 0; j < 256; j++ )
         {
-			for ( k = 0; k < pv->out_discrete_channels; k++ )
-			{
-				samples_out[(pv->out_discrete_channels*j)+k]   = samples_in[(256*k)+j] * 16384;
-			}
+            for ( k = 0; k < pv->out_discrete_channels; k++ )
+            {
+                samples_out[(pv->out_discrete_channels*j)+k]   = samples_in[(256*k)+j] * 16384;
+            }
         }
 
     }

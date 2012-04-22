@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * x264handler.h
- * Copyright (C) John Stebbins 2008 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
  * 
  * x264handler.h is free software.
  * 
@@ -28,5 +28,6 @@
 #include "settings.h"
 
 void ghb_x264_parse_options(signal_user_data_t *ud, const gchar *options);
+gint ghb_lookup_badapt(const gchar *options);
 
 #endif // _X264HANDLER_H_

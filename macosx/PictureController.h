@@ -6,24 +6,45 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "hb.h"
+#include "hb.h" 
 
-#define HB_NUM_HBLIB_PICTURES      10   // hbilb generates 10 preview pictures
+@class HBController;
+@class PreviewController;
+
+
+
+//#define HB_NUM_HBLIB_PICTURES      20   // # of preview pictures libhb should generate
 
 @interface PictureController : NSWindowController
 {
     hb_handle_t              * fHandle;
     hb_title_t               * fTitle;
 
+    HBController             *fHBController;
+    PreviewController        *fPreviewController;        // reference to HBController
+    
+    IBOutlet NSWindow        * fPictureWindow;
+    
+    IBOutlet NSTabView       * fSizeFilterView;
+    IBOutlet NSTabViewItem   * fSizeTabView;
+    IBOutlet NSTabViewItem   * fFilterTabView;
+    
+    /* Picture Sizing */
+    
     NSMutableDictionary      * fPicturePreviews;        // NSImages, one for each preview libhb creates, created lazily
     int                        fPicture;
 
-    IBOutlet NSImageView     * fPictureView;
-    IBOutlet NSBox           * fPictureViewArea;
+
+    IBOutlet NSBox           * fPictureSizeBox;
+    IBOutlet NSBox           * fPictureCropBox;
+    
+    IBOutlet NSTextField     * fWidthLabel;
     IBOutlet NSTextField     * fWidthField;
     IBOutlet NSStepper       * fWidthStepper;
     IBOutlet NSTextField     * fHeightField;
     IBOutlet NSStepper       * fHeightStepper;
+    IBOutlet NSTextField     * fRatioLabel;
+    IBOutlet NSTextField     * fRatioLabel2; // shown for capuj
     IBOutlet NSButton        * fRatioCheck;
     IBOutlet NSMatrix        * fCropMatrix;
     IBOutlet NSTextField     * fCropTopField;
@@ -34,79 +55,179 @@
     IBOutlet NSStepper       * fCropLeftStepper;
     IBOutlet NSTextField     * fCropRightField;
     IBOutlet NSStepper       * fCropRightStepper;
-    IBOutlet NSPopUpButton   * fDeinterlacePopUp;
-    IBOutlet NSPopUpButton   * fDecombPopUp;
-	IBOutlet NSButton        * fDetelecineCheck;
-    IBOutlet NSButton        * fDeblockCheck;
-    IBOutlet NSTextField     * fDeblockField;
-    IBOutlet NSSlider        * fDeblockSlider;
-	IBOutlet NSPopUpButton   * fDenoisePopUp;
+    
+    IBOutlet NSTextField     * fModulusLabel;
+    IBOutlet NSPopUpButton   * fModulusPopUp;
+    /* linkers for capuj */
+    IBOutlet NSBox           * fStorageLinkBox;
+    IBOutlet NSSlider        * fStorageLinkSlider;
+    IBOutlet NSTextField     * fStorageLinkParLabel;
+    IBOutlet NSTextField     * fStorageLinkDisplayLabel;
+    
+    IBOutlet NSSlider        * fParLinkSlider;
+    IBOutlet NSTextField     * fParLinkStorageLabel;
+    IBOutlet NSTextField     * fParLinkDisplayLabel;
+    
+    IBOutlet NSSlider        * fDisplayLinkSlider;
+    IBOutlet NSTextField     * fDisplayLinkStorageLabel;
+    IBOutlet NSTextField     * fDisplayLinkParLabel;
+    
+    
+    IBOutlet NSTextField     * fDisplayWidthField;
+    IBOutlet NSTextField     * fDisplayWidthLabel;
+    
+    IBOutlet NSTextField     * fParWidthField;
+    IBOutlet NSTextField     * fParHeightField;
+    IBOutlet NSTextField     * fParWidthLabel;
+    IBOutlet NSTextField     * fParHeightLabel;
+
+    /* for now we setup some values to remember our pars and dars
+     * from scan
+    */
+    float titleDarWidth;
+    float titleDarHeight;
+    
+    int titleParWidth;
+    int titleParHeight;
+    float dar;
+    IBOutlet NSButton        * fResetParDarButton;
+    
 	IBOutlet NSPopUpButton   * fAnamorphicPopUp;
-    IBOutlet NSButton        * fPrevButton;
-    IBOutlet NSButton        * fNextButton;
-    IBOutlet NSTextField     * fInfoField;
+    IBOutlet NSTextField     * fSizeInfoField;
 	
+    IBOutlet NSButton        * fPreviewOpenButton;
+    IBOutlet NSButton        * fPictureFiltersOpenButton;
+        
     int     MaxOutputWidth;
     int     MaxOutputHeight;
     BOOL    autoCrop;
-    BOOL    allowLooseAnamorphic;
+    
     int output_width, output_height, output_par_width, output_par_height;
     int display_width;
+    
+    int modulus;
+    
     /* used to track the previous state of the keep aspect
     ratio checkbox when turning anamorphic on, so it can be
     returned to the previous state when anamorphic is turned
     off */
-    BOOL    keepAspectRatioPreviousState; 
+    BOOL    keepAspectRatioPreviousState;
     
-    struct {
+    
+    /* Video Filters */
+    
+    IBOutlet NSBox           * fPictureFilterBox;
+
+    IBOutlet NSBox           * fDetelecineBox;
+    IBOutlet NSPopUpButton   * fDetelecinePopUp;
+    IBOutlet NSTextField     * fDetelecineField;
+    
+    IBOutlet NSBox           * fDecombDeinterlaceBox;
+    IBOutlet NSSlider        * fDecombDeinterlaceSlider;
+    
+    IBOutlet NSBox           * fDecombBox;
+    IBOutlet NSPopUpButton   * fDecombPopUp;
+    IBOutlet NSTextField     * fDecombField;
+    
+    IBOutlet NSBox           * fDeinterlaceBox;
+    IBOutlet NSPopUpButton   * fDeinterlacePopUp;
+    IBOutlet NSTextField     * fDeinterlaceField;
+
+    IBOutlet NSBox           * fDenoiseBox;
+    IBOutlet NSPopUpButton   * fDenoisePopUp;
+    IBOutlet NSTextField     * fDenoiseField;
+	
+    
+    IBOutlet NSBox           * fDeblockBox; // also holds the grayscale box
+    IBOutlet NSButton        * fDeblockCheck;
+    IBOutlet NSTextField     * fDeblockField;
+    IBOutlet NSSlider        * fDeblockSlider;
+    
+    IBOutlet NSButton        * fGrayscaleCheck;
+
+    IBOutlet NSTextField     * fInfoField;
+	
+
+    
+        struct {
         int     detelecine;
         int     deinterlace;
         int     decomb;
+        int     usedecomb;
         int     denoise;
         int     deblock;
+        int     grayscale;
     } fPictureFilterSettings;
-
-    id delegate;
+    
 }
-- (id)initWithDelegate:(id)del;
+- (id)init;
 
 - (void) SetHandle: (hb_handle_t *) handle;
 - (void) SetTitle:  (hb_title_t *)  title;
-- (void) setInitialPictureFilters;
-- (void) displayPreview;
+- (void)setHBController: (HBController *)controller;
+- (IBAction) showPictureWindow: (id)sender;
+- (void)tabView:(NSTabView *)tabView didSelectTabViewItem:(NSTabViewItem *)tabViewItem;
+- (IBAction) resizeInspectorForTab: (id)sender;
+- (IBAction) showPreviewWindow: (id)sender;
+
+- (void) enablePreviewHudControls;
+- (void) disablePreviewHudControls;
+
+- (IBAction) adjustSizingDisplay: (id) sender;
+
 
 - (IBAction) SettingsChanged: (id) sender;
-- (IBAction) PreviousPicture: (id) sender;
-- (IBAction) NextPicture: (id) sender;
-- (IBAction) ClosePanel: (id) sender;
+
+- (NSString*) getPictureSizeInfoString;
+- (void)reloadStillPreview;
 
 - (BOOL) autoCrop;
 - (void) setAutoCrop: (BOOL) setting;
 
-- (BOOL) allowLooseAnamorphic;
-- (void) setAllowLooseAnamorphic: (BOOL) setting;
+- (IBAction)showPreviewPanel: (id)sender forTitle: (hb_title_t *)title;
+- (IBAction) storageLinkChanged: (id) sender;
+- (IBAction) parLinkChanged: (id) sender;
+- (IBAction) displayLinkChanged: (id) sender;
+
+- (void) setToWindowedMode;
+
+/* Filter Actions */
+- (void) setInitialPictureFilters;
+- (IBAction) FilterSettingsChanged: (id) sender;
+- (IBAction) adjustFilterDisplay: (id) sender;
+- (IBAction) modeDecombDeinterlaceSliderChanged: (id) sender;
 - (IBAction) deblockSliderChanged: (id) sender;
+
 - (int) detelecine;
+- (NSString*) detelecineCustomString;
 - (void) setDetelecine: (int) setting;
-- (int) deinterlace;
-- (void) setDeinterlace: (int) setting;
+- (void) setDetelecineCustomString: (NSString*) string;
+
+- (int) useDecomb;
+- (void) setUseDecomb: (int) setting;
+
 - (int) decomb;
+- (NSString*) decombCustomString;
 - (void) setDecomb: (int) setting;
+- (void) setDecombCustomString: (NSString*) string;
+
+- (int) deinterlace;
+- (NSString*) deinterlaceCustomString;
+- (void) setDeinterlace: (int) setting;
+- (void) setDeinterlaceCustomString: (NSString*) string; 
+
 - (int) denoise;
+- (NSString*) denoiseCustomString;
 - (void) setDenoise: (int) setting;
+- (void) setDenoiseCustomString: (NSString*) string;
+
 - (int) deblock;
 - (void) setDeblock: (int) setting;
 
-- (void)showPanelInWindow: (NSWindow *)fWindow forTitle: (hb_title_t *)title;
+- (int) grayscale;
+- (void) setGrayscale: (int) setting;
 
-+ (NSImage *) makeImageForPicture: (int)pictureIndex
-                libhb:(hb_handle_t*)handle
-                title:(hb_title_t*)title
-                removeBorders:(BOOL)removeBorders;
-- (NSImage *) imageForPicture: (int) pictureIndex;
-- (void) purgeImageCache;
+
+
 @end
 
-@interface NSObject (PictureControllertDelegateMethod)
-- (void)pictureSettingsDidChange;
-@end

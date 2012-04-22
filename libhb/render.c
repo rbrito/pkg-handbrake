@@ -5,9 +5,7 @@
    It may be used under the terms of the GNU General Public License. */
 
 #include "hb.h"
-
-#include "libavcodec/avcodec.h"
-#include "libswscale/swscale.h"
+#include "hbffmpeg.h"
 
 struct hb_work_private_s
 {
@@ -29,6 +27,11 @@ struct hb_work_private_s
     uint64_t             total_gained_time;
     int64_t              chapter_time;
     int                  chapter_val;
+    int                  count_frames;      // frames output so far
+    double               frame_rate;        // 90KHz ticks per frame (for CFR/PFR)
+    double               out_last_stop;     // where last frame ended (for CFR/PFR)
+    int                  drops;             // frames dropped (for CFR/PFR)
+    int                  dups;              // frames duped (for CFR/PFR)
 };
 
 int  renderInit( hb_work_object_t *, hb_job_t * );
@@ -199,6 +202,132 @@ static void ApplySub( hb_job_t * job, hb_buffer_t * buf,
     hb_buffer_close( _sub );
 }
 
+// delete the buffer 'out' from the chain of buffers whose head is 'buf_out'.
+// out & buf_out must be non-null (checks prior to anywhere this routine
+// can be called guarantee this) and out must be on buf_out's chain
+// (all places that call this get 'out' while traversing the chain).
+// 'out' is freed and its predecessor is returned.
+static hb_buffer_t *delete_buffer_from_chain( hb_buffer_t **buf_out, hb_buffer_t *out)
+{
+    hb_buffer_t *succ = out->next;
+    hb_buffer_t *pred = *buf_out;
+    if ( pred == out )
+    {
+        // we're deleting the first buffer
+        *buf_out = succ;
+    }
+    else
+    {
+        // target isn't the first buf so search for its predecessor.
+        while ( pred->next != out )
+        {
+            pred = pred->next;
+        }
+        // found 'out' - remove it from the chain
+        pred->next = succ;
+    }
+    out->next = 0;
+    hb_buffer_close( &out );
+    return succ;
+}
+
+// insert buffer 'succ' after buffer chain element 'pred'.
+// caller must guarantee that 'pred' and 'succ' are non-null.
+static hb_buffer_t *insert_buffer_in_chain( hb_buffer_t *pred, hb_buffer_t *succ )
+{
+    succ->next = pred->next;
+    pred->next = succ;
+    return succ;
+}
+
+// This section of the code implements video frame rate control.
+// Since filters are allowed to duplicate and drop frames (which
+// changes the timing), this has to be the last thing done in render.
+//
+// There are three options, selected by the value of job->cfr:
+//   0 - Variable Frame Rate (VFR) or 'same as source': frame times
+//       are left alone
+//   1 - Constant Frame Rate (CFR): Frame timings are adjusted so that all
+//       frames are exactly job->vrate_base ticks apart. Frames are dropped
+//       or duplicated if necessary to maintain this spacing.
+//   2 - Peak Frame Rate (PFR): job->vrate_base is treated as the peak
+//       average frame rate. I.e., the average frame rate (current frame
+//       end time divided by number of frames so far) is never allowed to be
+//       greater than job->vrate_base and frames are dropped if necessary
+//       to keep the average under this value. Other than those drops, frame
+//       times are left alone.
+//
+
+static void adjust_frame_rate( hb_work_private_t *pv, hb_buffer_t **buf_out )
+{
+    hb_buffer_t *out = *buf_out;
+
+    while ( out && out->size > 0 )
+    {
+        // this frame has to start where the last one stopped.
+        out->start = pv->out_last_stop;
+
+        // compute where this frame would stop if the frame rate were constant
+        // (this is our target stopping time for CFR and earliest possible
+        // stopping time for PFR).
+        double cfr_stop = pv->frame_rate * ( pv->count_frames + 1 );
+
+        if ( cfr_stop - (double)out->stop >= pv->frame_rate )
+        {
+            // This frame stops a frame time or more in the past - drop it
+            // but don't lose its chapter mark.
+            if ( out->new_chap )
+            {
+                pv->chapter_time = out->start;
+                pv->chapter_val = out->new_chap;
+            }
+            ++pv->drops;
+            out = delete_buffer_from_chain( buf_out, out );
+            continue;
+        }
+
+        // at this point we know that this frame doesn't push the average
+        // rate over the limit so we just pass it on for PFR. For CFR we're
+        // going to return it (with its start & stop times modified) and
+        // we may have to dup it.
+        ++pv->count_frames;
+        if ( pv->job->cfr > 1 )
+        {
+            // PFR - we're going to keep the frame but may need to
+            // adjust it's stop time to meet the average rate constraint.
+            if ( out->stop <= cfr_stop )
+            {
+                out->stop = cfr_stop;
+            }
+        }
+        else
+        {
+            // we're doing CFR so we have to either trim some time from a
+            // buffer that ends too far in the future or, if the buffer is
+            // two or more frame times long, split it into multiple pieces,
+            // each of which is a frame time long.
+            double excess_dur = (double)out->stop - cfr_stop;
+            out->stop = cfr_stop;
+            for ( ; excess_dur >= pv->frame_rate; excess_dur -= cfr_stop )
+            {
+                /* next frame too far ahead - dup current frame */
+                hb_buffer_t *dup = hb_buffer_init( out->size );
+                memcpy( dup->data, out->data, out->size );
+                hb_buffer_copy_settings( dup, out );
+                dup->new_chap = 0;
+                dup->start = cfr_stop;
+                cfr_stop += pv->frame_rate;
+                dup->stop = cfr_stop;
+                out = insert_buffer_in_chain( out, dup );
+                ++pv->dups;
+                ++pv->count_frames;
+            }
+        }
+        pv->out_last_stop = out->stop;
+        out = out->next;
+    }
+}
+
 int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
                 hb_buffer_t ** buf_out )
 {
@@ -210,11 +339,47 @@ int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
 
     if( in->size <= 0 )
     {
+        hb_buffer_t *head = NULL, *tail = NULL, *next;
+        int counter = 2;
+
         /* If the input buffer is end of stream, send out an empty one
-         * to the next stage as well. Note that this will result in us
-         * losing the current contents of the delay queue.
-         */
-        *buf_out = in;
+         * to the next stage as well. To avoid losing the contents of
+         * the delay queue connect the buffers in the delay queue in 
+         * the correct order, and add the end of stream buffer to the
+         * end.
+         */     
+        while( ( next = hb_fifo_get( pv->delay_queue ) ) != NULL )
+        {
+            
+            /* We can't use the given time stamps. Previous frames
+               might already have been extended, throwing off the
+               raw values fed to render.c. Instead, their
+               stop and start times are stored in arrays.
+               The 4th cached frame will be the to use.
+               If it needed its duration extended to make up
+               lost time, it will have happened above. */
+            next->start = pv->last_start[counter];
+            next->stop = pv->last_stop[counter--];
+            
+            if( !head && !tail )
+            {
+                head = tail = next;
+            } else {
+                tail->next = next;
+                tail = next;
+            }
+        }
+        if( tail )
+        {
+            tail->next = in;
+            *buf_out = head;
+            if ( job->cfr )
+            {
+                adjust_frame_rate( pv, buf_out );
+            }
+        } else {
+            *buf_out = in;
+        }     
         *buf_in = NULL;
         return HB_WORK_DONE;
     }
@@ -240,7 +405,7 @@ int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
     }
 
     /* If there's a chapter mark remember it in case we delay or drop its frame */
-    if( in->new_chap && job->vfr )
+    if( in->new_chap )
     {
         pv->chapter_time = in->start;
         pv->chapter_val = in->new_chap;
@@ -291,33 +456,32 @@ int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
             }
             else if( result == FILTER_DROP )
             {
-                if( job->vfr )
-                {
-                    /* We need to compensate for the time lost by dropping this frame.
-                       Spread its duration out in quarters, because usually dropped frames
-                       maintain a 1-out-of-5 pattern and this spreads it out amongst the remaining ones.
-                       Store these in the lost_time array, which has 4 slots in it.
-                       Because not every frame duration divides evenly by 4, and we can't lose the
-                       remainder, we have to go through an awkward process to preserve it in the 4th array index. */
-                    uint64_t temp_duration = buf_tmp_out->stop - buf_tmp_out->start;
-                    pv->lost_time[0] += (temp_duration / 4);
-                    pv->lost_time[1] += (temp_duration / 4);
-                    pv->lost_time[2] += (temp_duration / 4);
-                    pv->lost_time[3] += ( temp_duration - (temp_duration / 4) - (temp_duration / 4) - (temp_duration / 4) );
+                /* We need to compensate for the time lost by dropping this frame.
+                   Spread its duration out in quarters, because usually dropped frames
+                   maintain a 1-out-of-5 pattern and this spreads it out amongst the remaining ones.
+                   Store these in the lost_time array, which has 4 slots in it.
+                   Because not every frame duration divides evenly by 4, and we can't lose the
+                   remainder, we have to go through an awkward process to preserve it in the 4th array index. */
+                uint64_t temp_duration = buf_tmp_out->stop - buf_tmp_out->start;
+                pv->lost_time[0] += (temp_duration / 4);
+                pv->lost_time[1] += (temp_duration / 4);
+                pv->lost_time[2] += (temp_duration / 4);
+                pv->lost_time[3] += ( temp_duration - (temp_duration / 4) - (temp_duration / 4) - (temp_duration / 4) );
 
-                    pv->total_lost_time += temp_duration;
-                    pv->dropped_frames++;
+                pv->total_lost_time += temp_duration;
+                pv->dropped_frames++;
 
-                    /* Pop the frame's subtitle and dispose of it. */
-                    hb_buffer_t * subtitles = hb_fifo_get( pv->subtitle_queue );
-                    hb_buffer_close( &subtitles );
-                    buf_tmp_in = NULL;
-                    break;
-                }
-                else
+                /* Pop the frame's subtitle and dispose of it. */
+                hb_buffer_t * subpicture_list = hb_fifo_get( pv->subtitle_queue );
+                hb_buffer_t * subpicture;
+                hb_buffer_t * subpicture_next;
+                for ( subpicture = subpicture_list; subpicture; subpicture = subpicture_next )
                 {
-                    buf_tmp_in = buf_tmp_out;
+                    subpicture_next = subpicture->next_subpicture;
+                    hb_buffer_close( &subpicture );
                 }
+                buf_tmp_in = NULL;
+                break;
             }
         }
     }
@@ -336,16 +500,19 @@ int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
         /* In order to make sure we have continuous time stamps, store
            the current frame's duration as starting when the last one stopped. */
         pv->last_start[0] = pv->last_stop[1];
-        pv->last_stop[0] = pv->last_start[0] + (in->stop - in->start);
+        pv->last_stop[0] = pv->last_start[0] + (buf_tmp_in->stop - buf_tmp_in->start);
     }
 
     /* Apply subtitles */
     if( buf_tmp_in )
     {
-        hb_buffer_t * subtitles = hb_fifo_get( pv->subtitle_queue );
-        if( subtitles )
+        hb_buffer_t * subpicture_list = hb_fifo_get( pv->subtitle_queue );
+        hb_buffer_t * subpicture;
+        hb_buffer_t * subpicture_next;
+        for ( subpicture = subpicture_list; subpicture; subpicture = subpicture_next )
         {
-            ApplySub( job, buf_tmp_in, &subtitles );
+            subpicture_next = subpicture->next_subpicture;
+            ApplySub( job, buf_tmp_in, &subpicture );
         }
     }
 
@@ -399,7 +566,7 @@ int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
         hb_buffer_copy_settings( buf_render, buf_tmp_in );
     }
 
-    if (*buf_out && job->vfr)
+    if (*buf_out )
     {
         hb_fifo_push( pv->delay_queue, *buf_out );
         *buf_out = NULL;
@@ -410,15 +577,12 @@ int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
      * two always in there should we need to rewrite the durations on them.
      */
 
-    if( job->vfr )
+    if( hb_fifo_size( pv->delay_queue ) >= 4 )
     {
-        if( hb_fifo_size( pv->delay_queue ) >= 4 )
-        {
-            *buf_out = hb_fifo_get( pv->delay_queue );
-        }
+        *buf_out = hb_fifo_get( pv->delay_queue );
     }
 
-    if( *buf_out && job->vfr)
+    if( *buf_out )
     {
         /* The current frame exists. That means it hasn't been dropped by a filter.
            Make it accessible as ivtc_buffer so we can edit its duration if needed. */
@@ -497,6 +661,10 @@ int renderWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
 
     }
 
+    if ( buf_out && *buf_out && job->cfr )
+    {
+        adjust_frame_rate( pv, buf_out );
+    }
     return HB_WORK_OK;
 }
 
@@ -504,10 +672,21 @@ void renderClose( hb_work_object_t * w )
 {
     hb_work_private_t * pv = w->private_data;
 
-    hb_log("render: lost time: %lld (%i frames)", pv->total_lost_time, pv->dropped_frames);
-    hb_log("render: gained time: %lld (%i frames) (%lld not accounted for)", pv->total_gained_time, pv->extended_frames, pv->total_lost_time - pv->total_gained_time);
+    if ( pv->job->cfr )
+    {
+        hb_log("render: %d frames output, %d dropped and %d duped for CFR/PFR",
+               pv->count_frames, pv->drops, pv->dups );
+    }
+
+    hb_interjob_t * interjob = hb_interjob_get( w->private_data->job->h );
+    
+    /* Preserve dropped frame count for more accurate framerates in 2nd passes. */
+    interjob->render_dropped = pv->dropped_frames;
+
+    hb_log("render: lost time: %"PRId64" (%i frames)", pv->total_lost_time, pv->dropped_frames);
+    hb_log("render: gained time: %"PRId64" (%i frames) (%"PRId64" not accounted for)", pv->total_gained_time, pv->extended_frames, pv->total_lost_time - pv->total_gained_time);
     if (pv->dropped_frames)
-        hb_log("render: average dropped frame duration: %lld", (pv->total_lost_time / pv->dropped_frames) );
+        hb_log("render: average dropped frame duration: %"PRId64, (pv->total_lost_time / pv->dropped_frames) );
 
     /* Cleanup subtitle queue */
     if( pv->subtitle_queue )
@@ -533,10 +712,7 @@ int renderInit( hb_work_object_t * w, hb_job_t * job )
     w->private_data = pv;
     uint32_t    swsflags;
 
-    swsflags = SWS_LANCZOS;
-#ifndef __x86_64__
-    swsflags |= SWS_ACCURATE_RND;
-#endif  /* __x86_64__ */
+    swsflags = SWS_LANCZOS | SWS_ACCURATE_RND;
 
     /* Get title and title size */
     hb_title_t * title = job->title;
@@ -545,16 +721,16 @@ int renderInit( hb_work_object_t * w, hb_job_t * job )
     if( job->crop[0] || job->crop[1] || job->crop[2] || job->crop[3] ||
         job->width != title->width || job->height != title->height )
     {
-        pv->context = sws_getContext(title->width  - (job->crop[2] + job->crop[3]),
+        pv->context = hb_sws_get_context(title->width  - (job->crop[2] + job->crop[3]),
                                      title->height - (job->crop[0] + job->crop[1]),
                                      PIX_FMT_YUV420P,
                                      job->width, job->height, PIX_FMT_YUV420P,
-                                     swsflags, NULL, NULL, NULL);
+                                     swsflags);
     }
 
     /* Setup FIFO queue for subtitle cache */
-    pv->subtitle_queue = hb_fifo_init( 8 );
-    pv->delay_queue = hb_fifo_init( 8 );
+    pv->subtitle_queue = hb_fifo_init( 8, 1 );
+    pv->delay_queue = hb_fifo_init( 8, 1 );
 
     /* VFR IVTC needs a bunch of time-keeping variables to track
       how many frames are dropped, how many are extended, what the
@@ -571,6 +747,8 @@ int renderInit( hb_work_object_t * w, hb_job_t * job )
     pv->lost_time[0] = 0; pv->lost_time[1] = 0; pv->lost_time[2] = 0; pv->lost_time[3] = 0;
     pv->chapter_time = 0;
     pv->chapter_val  = 0;
+
+    pv->frame_rate = (double)job->vrate_base * (1./300.);
 
     /* Setup filters */
     /* TODO: Move to work.c? */

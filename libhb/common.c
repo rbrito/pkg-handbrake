@@ -9,6 +9,8 @@
 #include <sys/time.h>
 
 #include "common.h"
+#include "lang.h"
+#include "hb.h"
 
 /**********************************************************************
  * Global variables
@@ -31,10 +33,10 @@ hb_rate_t hb_audio_bitrates[] =
 { {  "32",  32 }, {  "40",  40 }, {  "48",  48 }, {  "56",  56 },
   {  "64",  64 }, {  "80",  80 }, {  "96",  96 }, { "112", 112 },
   { "128", 128 }, { "160", 160 }, { "192", 192 }, { "224", 224 },
-  { "256", 256 }, { "320", 320 }, { "384", 384 } };
+  { "256", 256 }, { "320", 320 }, { "384", 384 }, { "448", 448 },
+  { "512", 512 }, { "576", 576 }, { "640", 640 }, { "768", 768 } };
 int hb_audio_bitrates_count = sizeof( hb_audio_bitrates ) /
                               sizeof( hb_rate_t );
-int hb_audio_bitrates_default = 8; /* 128 kbps */
 
 static hb_error_handler_t *error_handler = NULL;
 
@@ -72,6 +74,310 @@ const char * hb_mixdown_get_short_name_from_mixdown( int amixdown )
         }
     }
     return "";
+}
+
+// Given an input bitrate, find closest match in the set of allowed bitrates
+int hb_find_closest_audio_bitrate(int bitrate)
+{
+    int ii;
+    int result;
+
+    // result is highest rate if none found during search.
+    // rate returned will always be <= rate asked for.
+    result = hb_audio_bitrates[0].rate;
+    for (ii = hb_audio_bitrates_count-1; ii >= 0; ii--)
+    {
+        if (bitrate >= hb_audio_bitrates[ii].rate)
+        {
+            result = hb_audio_bitrates[ii].rate;
+            break;
+        }
+    }
+    return result;
+}
+
+// Get the bitrate low and high limits for a codec/samplerate/mixdown triplet
+// The limits have been empirically determined through testing.  Max bitrates
+// in table below. Numbers in parenthesis are the target bitrate chosen.
+/*
+Encoder     1 channel           2 channels          6 channels
+
+faac
+24kHz       86 (128)            173 (256)           460 (768)
+48kHz       152 (160)           304 (320)           759 (768)
+
+Vorbis
+24kHz       97 (80)             177 (160)           527 (512)
+48kHz       241 (224)           465 (448)           783 (768)
+
+Lame
+24kHz       146 (768)           138 (768)
+48kHz       318 (768)           318 (768)
+
+ffac3
+24kHz       318 (320)           318 (320)           318 (320)
+48kHz       636 (640)           636 (640)           636 (640)
+
+Core Audio  (core audio api provides range of allowed bitrates)
+24kHz       16-64               32-128              80-320      
+44.1kHz                         64-320              160-768      
+48kHz       32-256              64-320              160-768                 
+
+Core Audio  (minimum limits found in testing)
+24kHz       16                  32                  96
+44.1kHz     32                  64                  160
+48kHz       40                  80                  240
+*/
+
+void hb_get_audio_bitrate_limits(uint32_t codec, int samplerate, int mixdown, int *low, int *high)
+{
+    int channels;
+
+    channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(mixdown);
+    switch (codec)
+    {
+        case HB_ACODEC_AC3:
+            *low = 32 * channels;
+            if (samplerate > 24000)
+            {
+                *high = 640;
+            }
+            else
+            {
+                *high = 320;
+            }
+            break;
+
+        case HB_ACODEC_CA_AAC:
+            if (samplerate > 44100)
+            {
+                *low = channels * 40;
+                *high = 256;
+                if (channels == 2)
+                    *high = 320;
+                if (channels == 6)
+                {
+                    *high = 768;
+                }
+            }
+            else if (samplerate > 24000)
+            {
+                *low = channels * 32;
+                *high = 256;
+                if (channels == 2)
+                    *high = 320;
+                if (channels == 6)
+                {
+                    *low = 160;
+                    *high = 768;
+                }
+            }
+            else
+            {
+                *low = channels * 16;
+                *high = channels * 64;
+                if (channels == 6)
+                {
+                    *high = 320;
+                }
+            }
+            break;
+
+        case HB_ACODEC_FAAC:
+            *low = 32 * channels;
+            if (samplerate > 24000)
+            {
+                *high = 160 * channels;
+                if (*high > 768)
+                    *high = 768;
+            }
+            else
+            {
+                *high = 96 * channels;
+                if (*high > 480)
+                    *high = 480;
+            }
+            break;
+
+        case HB_ACODEC_VORBIS:
+            *high = channels * 80;
+            if (samplerate > 24000)
+            {
+                if (channels > 2)
+                {
+                    // Vorbis minimum is around 30kbps/ch for 6ch 
+                    // at rates > 24k (32k/44.1k/48k) 
+                    *low = 32 * channels;
+                    *high = 128 * channels;
+                }
+                else
+                {
+                    // Allow 24kbps mono and 48kbps stereo at rates > 24k 
+                    // (32k/44.1k/48k)
+                    *low = 24 * channels;
+                    if (samplerate > 32000)
+                        *high = channels * 224;
+                    else
+                        *high = channels * 160;
+                }
+            }
+            else
+            {
+                *low = channels * 16;
+                *high = 80 * channels;
+            }
+            break;
+
+        case HB_ACODEC_LAME:
+            *low = hb_audio_bitrates[0].rate;
+            if (samplerate > 24000)
+                *high = 320;
+            else
+                *high = 160;
+            break;
+        
+        default:
+            *low = hb_audio_bitrates[0].rate;
+            *high = hb_audio_bitrates[hb_audio_bitrates_count-1].rate;
+            break;
+    }
+}
+
+// Given an input bitrate, sanitize it.  Check low and high limits and
+// make sure it is in the set of allowed bitrates.
+int hb_get_best_audio_bitrate( uint32_t codec, int bitrate, int samplerate, int mixdown)
+{
+    int low, high;
+
+    hb_get_audio_bitrate_limits(codec, samplerate, mixdown, &low, &high);
+    if (bitrate > high)
+        bitrate = high;
+    if (bitrate < low)
+        bitrate = low;
+    bitrate = hb_find_closest_audio_bitrate(bitrate);
+    return bitrate;
+}
+
+// Get the default bitrate for a given codec/samplerate/mixdown triplet.
+int hb_get_default_audio_bitrate( uint32_t codec, int samplerate, int mixdown )
+{
+    int bitrate, channels;
+    int sr_shift;
+
+    channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(mixdown);
+
+    // Min bitrate is established such that we get good quality
+    // audio as a minimum.
+    sr_shift = (samplerate <= 24000) ? 1 : 0;
+
+    switch ( codec )
+    {
+        case HB_ACODEC_AC3:
+            if (channels == 1)
+                bitrate = 96;
+            else if (channels <= 2)
+                bitrate = 224;
+            else
+                bitrate = 640;
+            break;
+        default:
+            bitrate = channels * 80;
+    }
+    bitrate >>= sr_shift;
+    bitrate = hb_get_best_audio_bitrate( codec, bitrate, samplerate, mixdown );
+    return bitrate;
+}
+
+int hb_get_best_mixdown( uint32_t codec, int layout, int mixdown )
+{
+
+    int best_mixdown;
+    
+    if (codec & HB_ACODEC_PASS_FLAG)
+    {
+        // Audio pass-thru.  No mixdown.
+        return 0;
+    }
+    switch (layout & HB_INPUT_CH_LAYOUT_DISCRETE_NO_LFE_MASK)
+    {
+        // stereo input or something not handled below
+        default:
+        case HB_INPUT_CH_LAYOUT_STEREO:
+            // mono gets mixed up to stereo & more than stereo gets mixed down
+            best_mixdown = HB_AMIXDOWN_STEREO;
+            break;
+
+        // mono input
+        case HB_INPUT_CH_LAYOUT_MONO:
+            // everything else passes through
+            best_mixdown = HB_AMIXDOWN_MONO;
+            break;
+
+        // dolby (DPL1 aka Dolby Surround = 4.0 matrix-encoded) input
+        // the A52 flags don't allow for a way to distinguish between DPL1 and
+        // DPL2 on a DVD so we always assume a DPL1 source for A52_DOLBY.
+        case HB_INPUT_CH_LAYOUT_DOLBY:
+            best_mixdown = HB_AMIXDOWN_DOLBY;
+            break;
+
+        // 4 channel discrete
+        case HB_INPUT_CH_LAYOUT_2F2R:
+        case HB_INPUT_CH_LAYOUT_3F1R:
+            // a52dec and libdca can't upmix to 6ch, 
+            // so we must downmix these.
+            best_mixdown = HB_AMIXDOWN_DOLBYPLII;
+            break;
+
+        // 5, 6, 7, or 8 channel discrete
+        case HB_INPUT_CH_LAYOUT_4F2R:
+        case HB_INPUT_CH_LAYOUT_3F4R:
+        case HB_INPUT_CH_LAYOUT_3F2R:
+            if ( ! ( layout & HB_INPUT_CH_LAYOUT_HAS_LFE ) )
+            {
+                // we don't do 5 channel discrete so mixdown to DPLII
+                // a52dec and libdca can't upmix to 6ch, 
+                // so we must downmix this.
+                best_mixdown = HB_AMIXDOWN_DOLBYPLII;
+            }
+            else
+            {
+                switch (codec)
+                {
+                    case HB_ACODEC_LAME:
+                        best_mixdown = HB_AMIXDOWN_DOLBYPLII;
+                        break;
+
+                    default:
+                        best_mixdown = HB_AMIXDOWN_6CH;
+                        break;
+                }
+            }
+            break;
+    }
+    // return the best that is not greater than the requested mixdown
+    // 0 means the caller requested the best available mixdown
+    if( best_mixdown > mixdown && mixdown != 0 )
+        best_mixdown = mixdown;
+    
+    return best_mixdown;
+}
+
+int hb_get_default_mixdown( uint32_t codec, int layout )
+{
+    int mixdown;
+    switch (codec)
+    {
+        // the AC3 encoder defaults to the best mixdown up to 6-channel
+        case HB_ACODEC_AC3:
+            mixdown = HB_AMIXDOWN_6CH;
+            break;
+        // other encoders default to the best mixdown up to DPLII
+        default:
+            mixdown = HB_AMIXDOWN_DOLBYPLII;
+            break;
+    }
+    // return the best available mixdown up to the selected default
+    return hb_get_best_mixdown( codec, layout, mixdown );
 }
 
 /**********************************************************************
@@ -116,54 +422,60 @@ void hb_fix_aspect( hb_job_t * job, int keep )
 {
     hb_title_t * title = job->title;
     int          i;
+    int  min_width;
+    int min_height;
+    int    modulus;
 
     /* don't do anything unless the title has complete size info */
     if ( title->height == 0 || title->width == 0 || title->aspect == 0 )
     {
         hb_log( "hb_fix_aspect: incomplete info for title %d: "
-                "height = %d, width = %d, aspect = %d",
-                title->height, title->width, title->aspect );
+                "height = %d, width = %d, aspect = %.3f",
+                title->index, title->height, title->width, title->aspect );
         return;
     }
 
-    /* Sanity checks:
-       Widths and heights must be multiples of 16 and greater than or
-       equal to 16
-       Crop values must be multiples of 2, greater than or equal to 0
-       and less than half of the dimension */
-    job->width   = MULTIPLE_16( job->width );
-    job->height  = MULTIPLE_16( job->height );
-    job->width   = MAX( 16, job->width );
-    job->height  = MAX( 16, job->height );
+    // min_width and min_height should be multiples of modulus
+    min_width    = 32;
+    min_height   = 32;
+    modulus      = job->modulus ? job->modulus : 16;
+
     for( i = 0; i < 4; i++ )
     {
-        job->crop[i] = EVEN( job->crop[i] );
-        job->crop[i] = MAX( 0, job->crop[i] );
+        // Sanity check crop values are zero or positive multiples of 2
         if( i < 2 )
         {
-            /* Top, bottom */
-            job->crop[i] = MIN( job->crop[i], ( title->height / 2 ) - 2 );
+            // Top, bottom
+            job->crop[i] = MIN( EVEN( job->crop[i] ), EVEN( ( title->height / 2 ) - ( min_height / 2 ) ) );
+            job->crop[i] = MAX( 0, job->crop[i] );
         }
         else
         {
-            /* Left, right */
-            job->crop[i] = MIN( job->crop[i], ( title->width / 2 ) - 2 );
+            // Left, right
+            job->crop[i] = MIN( EVEN( job->crop[i] ), EVEN( ( title->width / 2 ) - ( min_width / 2 ) ) );
+            job->crop[i] = MAX( 0, job->crop[i] );
         }
     }
 
     double par = (double)title->width / ( (double)title->height * title->aspect );
     double cropped_sar = (double)( title->height - job->crop[0] - job->crop[1] ) /
-                         (double)(title->width - job->crop[2] - job->crop[3] );
+                         (double)( title->width - job->crop[2] - job->crop[3] );
     double ar = par * cropped_sar;
+
+    // Dimensions must be greater than minimum and multiple of modulus
     if( keep == HB_KEEP_WIDTH )
     {
-        job->height = MULTIPLE_16( (uint64_t)( (double)job->width * ar ) );
-        job->height = MAX( 16, job->height );
+        job->width  = MULTIPLE_MOD( job->width, modulus );
+        job->width  = MAX( min_width, job->width );
+        job->height = MULTIPLE_MOD( (uint64_t)( (double)job->width * ar ), modulus );
+        job->height = MAX( min_height, job->height );
     }
     else
     {
-        job->width = MULTIPLE_16( (uint64_t)( (double)job->height / ar ) );
-        job->width = MAX( 16, job->width );
+        job->height = MULTIPLE_MOD( job->height, modulus );
+        job->height = MAX( min_height, job->height );
+        job->width  = MULTIPLE_MOD( (uint64_t)( (double)job->height / ar ), modulus );
+        job->width  = MAX( min_width, job->width );
     }
 }
 
@@ -188,16 +500,8 @@ int hb_calc_bitrate( hb_job_t * job, int size )
        (quite guessed) */
     switch( job->mux )
     {
-       case HB_MUX_MP4:
-       case HB_MUX_PSP:
-		case HB_MUX_IPOD:
-		case HB_MUX_MKV:
-            overhead = 6;
-            break;
-        case HB_MUX_AVI:
-            overhead = 24;
-            break;
-        case HB_MUX_OGM:
+        case HB_MUX_MP4:
+        case HB_MUX_MKV:
             overhead = 6;
             break;
         default:
@@ -214,8 +518,20 @@ int hb_calc_bitrate( hb_job_t * job, int size )
     length += 135000;
     length /= 90000;
 
+    if( size == -1 )
+    {
+        hb_interjob_t * interjob = hb_interjob_get( job->h );
+        avail = job->vbitrate * 125 * length;
+        avail += length * interjob->vrate * overhead / interjob->vrate_base;
+    }
+
     /* Video overhead */
     avail -= length * job->vrate * overhead / job->vrate_base;
+
+    if( size == -1 )
+    {
+        goto ret;
+    }
 
     for( i = 0; i < hb_list_count(job->list_audio); i++ )
     {
@@ -227,21 +543,25 @@ int hb_calc_bitrate( hb_job_t * job, int size )
         switch( audio->config.out.codec )
         {
             case HB_ACODEC_FAAC:
+            case HB_ACODEC_CA_AAC:
             case HB_ACODEC_VORBIS:
                 samples_per_frame = 1024;
                 break;
             case HB_ACODEC_LAME:
                 samples_per_frame = 1152;
                 break;
+            case HB_ACODEC_AC3_PASS:
+            case HB_ACODEC_DCA_PASS:
             case HB_ACODEC_AC3:
+            case HB_ACODEC_DCA:
                 samples_per_frame = 1536;
                 break;
             default:
                 return 0;
         }
 
-        if( audio->config.out.codec == HB_ACODEC_AC3 ||
-            audio->config.out.codec == HB_ACODEC_DCA)
+        if( audio->config.out.codec == HB_ACODEC_AC3_PASS ||
+            audio->config.out.codec == HB_ACODEC_DCA_PASS)
         {
             /*
              * For pass through we take the bitrate from the input audio
@@ -263,6 +583,7 @@ int hb_calc_bitrate( hb_job_t * job, int size )
         avail -= length * audio->config.out.samplerate * overhead / samples_per_frame;
     }
 
+ret:
     if( avail < 0 )
     {
         return 0;
@@ -595,12 +916,83 @@ void hb_deep_log( hb_debug_level_t level, char * log, ... )
 void hb_error( char * log, ... )
 {
     char        string[181]; /* 180 chars + \0 */
+    char        rep_string[181];
+    static char last_string[181];
+    static int  last_error_count = 0;
+    static uint64_t last_series_error_time = 0;
+    static hb_lock_t *mutex = 0;
     va_list     args;
+    uint64_t time_now;
 
     /* Convert the message to a string */
     va_start( args, log );
     vsnprintf( string, 180, log, args );
     va_end( args );
+
+    if( !mutex )
+    {
+        mutex = hb_lock_init();
+    }
+
+    hb_lock( mutex );
+
+    time_now = hb_get_date();
+
+    if( strcmp( string, last_string) == 0 )
+    {
+        /*
+         * The last error and this one are the same, don't log it
+         * just count it instead, unless it was more than one second
+         * ago.
+         */
+        last_error_count++;
+        if( last_series_error_time + ( 1000 * 1 ) > time_now )
+        {
+            hb_unlock( mutex );
+            return;
+        } 
+    }
+    
+    /*
+     * A new error, or the same one more than 10sec since the last one
+     * did we have any of the same counted up?
+     */
+    if( last_error_count > 0 )
+    {
+        /*
+         * Print out the last error to ensure context for the last 
+         * repeated message.
+         */
+        if( error_handler )
+        {
+            error_handler( last_string );
+        } else {
+            hb_log( "%s", last_string );
+        }
+        
+        if( last_error_count > 1 )
+        {
+            /*
+             * Only print out the repeat message for more than 2 of the
+             * same, since we just printed out two of them already.
+             */
+            snprintf( rep_string, 180, "Last error repeated %d times", 
+                      last_error_count - 1 );
+            
+            if( error_handler )
+            {
+                error_handler( rep_string );
+            } else {
+                hb_log( "%s", rep_string );
+            }
+        }
+        
+        last_error_count = 0;
+    }
+
+    last_series_error_time = time_now;
+
+    strcpy( last_string, string );
 
     /*
      * Got the error in a single string, send it off to be dispatched.
@@ -609,8 +1001,10 @@ void hb_error( char * log, ... )
     {
         error_handler( string );
     } else {
-        hb_log( string );
+        hb_log( "%s", string );
     }
+
+    hb_unlock( mutex );
 }
 
 void hb_register_error_handler( hb_error_handler_t * handler )
@@ -623,7 +1017,7 @@ void hb_register_error_handler( hb_error_handler_t * handler )
  **********************************************************************
  *
  *********************************************************************/
-hb_title_t * hb_title_init( char * dvd, int index )
+hb_title_t * hb_title_init( char * path, int index )
 {
     hb_title_t * t;
 
@@ -633,7 +1027,8 @@ hb_title_t * hb_title_init( char * dvd, int index )
     t->list_audio    = hb_list_init();
     t->list_chapter  = hb_list_init();
     t->list_subtitle = hb_list_init();
-    strcat( t->dvd, dvd );
+    t->list_attachment = hb_list_init();
+    strcat( t->path, path );
     // default to decoding mpeg2
     t->video_id      = 0xE0;
     t->video_codec   = WORK_DECMPEG2;
@@ -652,6 +1047,7 @@ void hb_title_close( hb_title_t ** _t )
     hb_audio_t * audio;
     hb_chapter_t * chapter;
     hb_subtitle_t * subtitle;
+    hb_attachment_t * attachment;
 
     while( ( audio = hb_list_item( t->list_audio, 0 ) ) )
     {
@@ -670,9 +1066,40 @@ void hb_title_close( hb_title_t ** _t )
     while( ( subtitle = hb_list_item( t->list_subtitle, 0 ) ) )
     {
         hb_list_rem( t->list_subtitle, subtitle );
+        if ( subtitle->extradata )
+        {
+            free( subtitle->extradata );
+            subtitle->extradata = NULL;
+        }
         free( subtitle );
     }
     hb_list_close( &t->list_subtitle );
+    
+    while( ( attachment = hb_list_item( t->list_attachment, 0 ) ) )
+    {
+        hb_list_rem( t->list_attachment, attachment );
+        if ( attachment->name )
+        {
+            free( attachment->name );
+            attachment->name = NULL;
+        }
+        if ( attachment->data )
+        {
+            free( attachment->data );
+            attachment->data = NULL;
+        }
+        free( attachment );
+    }
+    hb_list_close( &t->list_attachment );
+
+    if( t->metadata )
+    {
+        if( t->metadata->coverart )
+        {
+            free( t->metadata->coverart );
+        }
+        free( t->metadata );
+    }
 
     free( t );
     *_t = NULL;
@@ -774,7 +1201,8 @@ int hb_audio_add(const hb_job_t * job, const hb_audio_config_t * audiocfg)
      */
     audio->config.out.track = hb_list_count(job->list_audio) + 1;
     audio->config.out.codec = audiocfg->out.codec;
-    if( audiocfg->out.codec == audio->config.in.codec )
+    if( (audiocfg->out.codec & HB_ACODEC_MASK) == audio->config.in.codec &&
+        (audiocfg->out.codec & HB_ACODEC_PASS_FLAG ) )
     {
         /* Pass-through, copy from input. */
         audio->config.out.samplerate = audio->config.in.samplerate;
@@ -785,6 +1213,7 @@ int hb_audio_add(const hb_job_t * job, const hb_audio_config_t * audiocfg)
     else
     {
         /* Non pass-through, use what is given. */
+        audio->config.out.codec &= ~HB_ACODEC_PASS_FLAG;
         audio->config.out.samplerate = audiocfg->out.samplerate;
         audio->config.out.bitrate = audiocfg->out.bitrate;
         audio->config.out.dynamic_range_compression = audiocfg->out.dynamic_range_compression;
@@ -804,3 +1233,236 @@ hb_audio_config_t * hb_list_audio_config_item(hb_list_t * list, int i)
 
     return NULL;
 }
+
+/**********************************************************************
+ * hb_subtitle_copy
+ **********************************************************************
+ *
+ *********************************************************************/
+hb_subtitle_t *hb_subtitle_copy(const hb_subtitle_t *src)
+{
+    hb_subtitle_t *subtitle = NULL;
+
+    if( src )
+    {
+        subtitle = calloc(1, sizeof(*subtitle));
+        memcpy(subtitle, src, sizeof(*subtitle));
+        if ( src->extradata )
+        {
+            subtitle->extradata = malloc( src->extradata_size );
+            memcpy( subtitle->extradata, src->extradata, src->extradata_size );
+        }
+    }
+    return subtitle;
+}
+
+/**********************************************************************
+ * hb_subtitle_add
+ **********************************************************************
+ *
+ *********************************************************************/
+int hb_subtitle_add(const hb_job_t * job, const hb_subtitle_config_t * subtitlecfg, int track)
+{
+    hb_title_t *title = job->title;
+    hb_subtitle_t *subtitle;
+
+    subtitle = hb_subtitle_copy( hb_list_item( title->list_subtitle, track ) );
+    if( subtitle == NULL )
+    {
+        /* We fail! */
+        return 0;
+    }
+    subtitle->config = *subtitlecfg;
+    hb_list_add(job->list_subtitle, subtitle);
+    return 1;
+}
+
+int hb_srt_add( const hb_job_t * job, 
+                const hb_subtitle_config_t * subtitlecfg, 
+                const char *lang )
+{
+    hb_subtitle_t *subtitle;
+    iso639_lang_t *language = NULL;
+    int retval = 0;
+
+    subtitle = calloc( 1, sizeof( *subtitle ) );
+    
+    subtitle->id = (hb_list_count(job->list_subtitle) << 8) | 0xFF;
+    subtitle->format = TEXTSUB;
+    subtitle->source = SRTSUB;
+
+    language = lang_for_code2( lang );
+
+    if( language )
+    {
+
+        strcpy( subtitle->lang, language->eng_name );
+        strncpy( subtitle->iso639_2, lang, 4 );
+        
+        subtitle->config = *subtitlecfg;
+        subtitle->config.dest = PASSTHRUSUB;
+
+        hb_list_add(job->list_subtitle, subtitle);
+        retval = 1;
+    }
+    return retval;
+}
+
+char * hb_strdup_printf( char * fmt, ... )
+{
+    int       len;
+    va_list   ap;
+    int       size = 256;
+    char    * str;
+    char    * tmp;
+
+    str = malloc( size );
+    if ( str == NULL )
+        return NULL;
+
+    while (1) 
+    {
+        /* Try to print in the allocated space. */
+        va_start( ap, fmt );
+        len = vsnprintf( str, size, fmt, ap );
+        va_end( ap );
+
+        /* If that worked, return the string. */
+        if ( len > -1 && len < size )
+        {
+            return str;
+        }
+
+        /* Else try again with more space. */
+        if ( len > -1 )     /* glibc 2.1 */
+            size = len + 1; /* precisely what is needed */
+        else                /* glibc 2.0 */
+            size *= 2;      /* twice the old size */
+        tmp = realloc( str, size );
+        if ( tmp == NULL )
+        {
+            free( str );
+            return NULL;
+        }
+        else
+            str = tmp;
+    }
+}
+
+/**********************************************************************
+ * hb_attachment_copy
+ **********************************************************************
+ *
+ *********************************************************************/
+hb_attachment_t *hb_attachment_copy(const hb_attachment_t *src)
+{
+    hb_attachment_t *attachment = NULL;
+
+    if( src )
+    {
+        attachment = calloc(1, sizeof(*attachment));
+        memcpy(attachment, src, sizeof(*attachment));
+        if ( src->name )
+        {
+            attachment->name = strdup( src->name );
+        }
+        if ( src->data )
+        {
+            attachment->data = malloc( src->size );
+            memcpy( attachment->data, src->data, src->size );
+        }
+    }
+    return attachment;
+}
+
+/**********************************************************************
+ * hb_yuv2rgb
+ **********************************************************************
+ * Converts a YCbCr pixel to an RGB pixel.
+ * 
+ * This conversion is lossy (due to rounding and clamping).
+ * 
+ * Algorithm:
+ *   http://en.wikipedia.org/w/index.php?title=YCbCr&oldid=361987695#Technical_details
+ *********************************************************************/
+int hb_yuv2rgb(int yuv)
+{
+    double y, Cr, Cb;
+    int r, g, b;
+
+    y  = (yuv >> 16) & 0xff;
+    Cb = (yuv >>  8) & 0xff;
+    Cr = (yuv      ) & 0xff;
+
+    r = 1.164 * (y - 16)                      + 2.018 * (Cb - 128);
+    g = 1.164 * (y - 16) - 0.813 * (Cr - 128) - 0.391 * (Cb - 128);
+    b = 1.164 * (y - 16) + 1.596 * (Cr - 128);
+    
+    r = (r < 0) ? 0 : r;
+    g = (g < 0) ? 0 : g;
+    b = (b < 0) ? 0 : b;
+    
+    r = (r > 255) ? 255 : r;
+    g = (g > 255) ? 255 : g;
+    b = (b > 255) ? 255 : b;
+    
+    return (r << 16) | (g << 8) | b;
+}
+
+/**********************************************************************
+ * hb_rgb2yuv
+ **********************************************************************
+ * Converts an RGB pixel to a YCbCr pixel.
+ * 
+ * This conversion is lossy (due to rounding and clamping).
+ * 
+ * Algorithm:
+ *   http://en.wikipedia.org/w/index.php?title=YCbCr&oldid=361987695#Technical_details
+ *********************************************************************/
+int hb_rgb2yuv(int rgb)
+{
+    double r, g, b;
+    int y, Cr, Cb;
+    
+    r = (rgb >> 16) & 0xff;
+    g = (rgb >>  8) & 0xff;
+    b = (rgb      ) & 0xff;
+
+    y  =  16. + ( 0.257 * r) + (0.504 * g) + (0.098 * b);
+    Cb = 128. + (-0.148 * r) - (0.291 * g) + (0.439 * b);
+    Cr = 128. + ( 0.439 * r) - (0.368 * g) - (0.071 * b);
+    
+    y = (y < 0) ? 0 : y;
+    Cb = (Cb < 0) ? 0 : Cb;
+    Cr = (Cr < 0) ? 0 : Cr;
+    
+    y = (y > 255) ? 255 : y;
+    Cb = (Cb > 255) ? 255 : Cb;
+    Cr = (Cr > 255) ? 255 : Cr;
+    
+    return (y << 16) | (Cb << 8) | Cr;
+}
+
+const char * hb_subsource_name( int source )
+{
+    switch (source)
+    {
+        case VOBSUB:
+            return "VOBSUB";
+        case SRTSUB:
+            return "SRT";
+        case CC608SUB:
+            return "CC";
+        case CC708SUB:
+            return "CC";
+        case UTF8SUB:
+            return "UTF-8";
+        case TX3GSUB:
+            return "TX3G";
+        case SSASUB:
+            return "SSA";
+        default:
+            return "Unknown";
+    }
+}
+

@@ -1,8 +1,8 @@
 /*  frmAbout.Designer.cs 
  	
- 	   This file is part of the HandBrake source code.
- 	   Homepage: <http://handbrake.fr>.
- 	   It may be used under the terms of the GNU General Public License. */
+    This file is part of the HandBrake source code.
+    Homepage: <http://handbrake.fr>.
+    It may be used under the terms of the GNU General Public License. */
 
 namespace Handbrake
 {
@@ -35,118 +35,115 @@ namespace Handbrake
         private void InitializeComponent()
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(frmAbout));
-            this.Label4 = new System.Windows.Forms.Label();
-            this.btn_close = new System.Windows.Forms.Button();
-            this.Version = new System.Windows.Forms.Label();
             this.Label3 = new System.Windows.Forms.Label();
+            this.label1 = new System.Windows.Forms.Label();
             this.PictureBox1 = new System.Windows.Forms.PictureBox();
-            this.label5 = new System.Windows.Forms.Label();
-            this.lbl_build = new System.Windows.Forms.Label();
-            this.groupBox1 = new System.Windows.Forms.GroupBox();
+            this.btn_close = new System.Windows.Forms.Button();
+            this.richTextBox1 = new System.Windows.Forms.RichTextBox();
+            this.label2 = new System.Windows.Forms.Label();
+            this.lbl_GUIBuild = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.PictureBox1)).BeginInit();
             this.SuspendLayout();
-            // 
-            // Label4
-            // 
-            this.Label4.AutoSize = true;
-            this.Label4.Font = new System.Drawing.Font("Verdana", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.Label4.Location = new System.Drawing.Point(168, 58);
-            this.Label4.Name = "Label4";
-            this.Label4.Size = new System.Drawing.Size(346, 26);
-            this.Label4.TabIndex = 28;
-            this.Label4.Text = "HandBrake is a GPL-licensed, multiplatform, multithreaded \r\nvideo transcoder. ";
-            // 
-            // btn_close
-            // 
-            this.btn_close.FlatAppearance.BorderColor = System.Drawing.Color.Black;
-            this.btn_close.Font = new System.Drawing.Font("Verdana", 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.btn_close.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(255)))), ((int)(((byte)(128)))), ((int)(((byte)(0)))));
-            this.btn_close.Location = new System.Drawing.Point(402, 114);
-            this.btn_close.Name = "btn_close";
-            this.btn_close.Size = new System.Drawing.Size(115, 22);
-            this.btn_close.TabIndex = 27;
-            this.btn_close.Text = "Close";
-            this.btn_close.UseVisualStyleBackColor = true;
-            this.btn_close.Click += new System.EventHandler(this.btn_close_Click);
-            // 
-            // Version
-            // 
-            this.Version.AutoSize = true;
-            this.Version.Font = new System.Drawing.Font("Verdana", 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.Version.Location = new System.Drawing.Point(266, 13);
-            this.Version.Name = "Version";
-            this.Version.Size = new System.Drawing.Size(72, 13);
-            this.Version.TabIndex = 26;
-            this.Version.Text = "{Version}";
             // 
             // Label3
             // 
             this.Label3.AutoSize = true;
-            this.Label3.Font = new System.Drawing.Font("Verdana", 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.Label3.Location = new System.Drawing.Point(168, 13);
+            this.Label3.Font = new System.Drawing.Font("Tahoma", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.Label3.Location = new System.Drawing.Point(124, 12);
+            this.Label3.Margin = new System.Windows.Forms.Padding(3, 3, 3, 1);
             this.Label3.Name = "Label3";
-            this.Label3.Size = new System.Drawing.Size(78, 13);
+            this.Label3.Size = new System.Drawing.Size(99, 19);
             this.Label3.TabIndex = 25;
             this.Label3.Text = "HandBrake";
+            this.Label3.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            // 
+            // label1
+            // 
+            this.label1.AutoSize = true;
+            this.label1.Location = new System.Drawing.Point(125, 36);
+            this.label1.Margin = new System.Windows.Forms.Padding(3);
+            this.label1.Name = "label1";
+            this.label1.Size = new System.Drawing.Size(224, 13);
+            this.label1.TabIndex = 33;
+            this.label1.Text = "Copyright  2003-2011 HandBrake Developers";
+            this.label1.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // PictureBox1
             // 
+            this.PictureBox1.BackgroundImageLayout = System.Windows.Forms.ImageLayout.Center;
             this.PictureBox1.Image = global::Handbrake.Properties.Resources.logo128;
             this.PictureBox1.InitialImage = null;
-            this.PictureBox1.Location = new System.Drawing.Point(8, 8);
+            this.PictureBox1.Location = new System.Drawing.Point(9, 9);
+            this.PictureBox1.Margin = new System.Windows.Forms.Padding(0);
             this.PictureBox1.Name = "PictureBox1";
-            this.PictureBox1.Size = new System.Drawing.Size(153, 132);
-            this.PictureBox1.TabIndex = 23;
+            this.PictureBox1.Size = new System.Drawing.Size(96, 96);
+            this.PictureBox1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.StretchImage;
+            this.PictureBox1.TabIndex = 33;
             this.PictureBox1.TabStop = false;
             // 
-            // label5
+            // btn_close
             // 
-            this.label5.AutoSize = true;
-            this.label5.Font = new System.Drawing.Font("Verdana", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.label5.Location = new System.Drawing.Point(168, 30);
-            this.label5.Name = "label5";
-            this.label5.Size = new System.Drawing.Size(40, 13);
-            this.label5.TabIndex = 29;
-            this.label5.Text = "Build:";
+            this.btn_close.DialogResult = System.Windows.Forms.DialogResult.OK;
+            this.btn_close.Location = new System.Drawing.Point(468, 270);
+            this.btn_close.Name = "btn_close";
+            this.btn_close.Size = new System.Drawing.Size(75, 23);
+            this.btn_close.TabIndex = 35;
+            this.btn_close.Text = "OK";
+            this.btn_close.UseVisualStyleBackColor = true;
+            this.btn_close.Click += new System.EventHandler(this.btn_close_Click);
             // 
-            // lbl_build
+            // richTextBox1
             // 
-            this.lbl_build.AutoSize = true;
-            this.lbl_build.Font = new System.Drawing.Font("Verdana", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.lbl_build.Location = new System.Drawing.Point(266, 30);
-            this.lbl_build.Name = "lbl_build";
-            this.lbl_build.Size = new System.Drawing.Size(64, 13);
-            this.lbl_build.TabIndex = 30;
-            this.lbl_build.Text = "{Version}";
+            this.richTextBox1.Location = new System.Drawing.Point(128, 102);
+            this.richTextBox1.Name = "richTextBox1";
+            this.richTextBox1.Size = new System.Drawing.Size(415, 162);
+            this.richTextBox1.TabIndex = 36;
+            this.richTextBox1.Text = resources.GetString("richTextBox1.Text");
             // 
-            // groupBox1
+            // label2
             // 
-            this.groupBox1.Location = new System.Drawing.Point(171, 45);
-            this.groupBox1.Name = "groupBox1";
-            this.groupBox1.Size = new System.Drawing.Size(346, 10);
-            this.groupBox1.TabIndex = 31;
-            this.groupBox1.TabStop = false;
+            this.label2.AutoSize = true;
+            this.label2.Location = new System.Drawing.Point(125, 83);
+            this.label2.Margin = new System.Windows.Forms.Padding(3);
+            this.label2.Name = "label2";
+            this.label2.Size = new System.Drawing.Size(46, 13);
+            this.label2.TabIndex = 37;
+            this.label2.Text = "License:";
+            this.label2.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // lbl_GUIBuild
+            // 
+            this.lbl_GUIBuild.Font = new System.Drawing.Font("Tahoma", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lbl_GUIBuild.Location = new System.Drawing.Point(229, 17);
+            this.lbl_GUIBuild.Margin = new System.Windows.Forms.Padding(3, 1, 3, 3);
+            this.lbl_GUIBuild.Name = "lbl_GUIBuild";
+            this.lbl_GUIBuild.Size = new System.Drawing.Size(224, 13);
+            this.lbl_GUIBuild.TabIndex = 38;
+            this.lbl_GUIBuild.Text = "{GUI Version}";
+            this.lbl_GUIBuild.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
             // frmAbout
             // 
             this.AcceptButton = this.btn_close;
-            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 13F);
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(530, 148);
-            this.Controls.Add(this.groupBox1);
-            this.Controls.Add(this.lbl_build);
-            this.Controls.Add(this.label5);
-            this.Controls.Add(this.Label4);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
+            this.CancelButton = this.btn_close;
+            this.ClientSize = new System.Drawing.Size(555, 302);
+            this.Controls.Add(this.lbl_GUIBuild);
+            this.Controls.Add(this.label2);
+            this.Controls.Add(this.richTextBox1);
             this.Controls.Add(this.btn_close);
-            this.Controls.Add(this.Version);
-            this.Controls.Add(this.Label3);
+            this.Controls.Add(this.label1);
             this.Controls.Add(this.PictureBox1);
-            this.Font = new System.Drawing.Font("Verdana", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.Controls.Add(this.Label3);
+            this.Font = new System.Drawing.Font("Tahoma", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.Name = "frmAbout";
+            this.ShowIcon = false;
+            this.ShowInTaskbar = false;
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "About HandBrake";
             ((System.ComponentModel.ISupportInitialize)(this.PictureBox1)).EndInit();
@@ -157,13 +154,12 @@ namespace Handbrake
 
         #endregion
 
-        internal System.Windows.Forms.Label Label4;
-        internal System.Windows.Forms.Button btn_close;
-        internal System.Windows.Forms.Label Version;
         internal System.Windows.Forms.Label Label3;
+        internal System.Windows.Forms.Label label1;
         internal System.Windows.Forms.PictureBox PictureBox1;
-        internal System.Windows.Forms.Label label5;
-        internal System.Windows.Forms.Label lbl_build;
-        private System.Windows.Forms.GroupBox groupBox1;
+        private System.Windows.Forms.Button btn_close;
+        private System.Windows.Forms.RichTextBox richTextBox1;
+        internal System.Windows.Forms.Label label2;
+        internal System.Windows.Forms.Label lbl_GUIBuild;
     }
 }

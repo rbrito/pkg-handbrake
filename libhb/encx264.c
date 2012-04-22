@@ -48,11 +48,13 @@ struct hb_work_private_s
     hb_job_t       * job;
     x264_t         * x264;
     x264_picture_t   pic_in;
-    uint8_t         *x264_allocated_pic;
+    uint8_t        * grey_data;
 
+    uint32_t       frames_in;
+    uint32_t       frames_out;
+    uint32_t       frames_split; // number of frames we had to split
     int            chap_mark;   // saved chap mark when we're propagating it
     int64_t        last_stop;   // Debugging - stop time of previous input frame
-    int64_t        init_delay;
     int64_t        next_chap;
 
     struct {
@@ -72,7 +74,6 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     x264_param_t       param;
     x264_nal_t       * nal;
     int                nal_count;
-    int                nal_size;
 
     hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
     w->private_data = pv;
@@ -83,31 +84,60 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     hb_get_tempory_filename( job->h, pv->filename, "x264.log" );
 
     x264_param_default( &param );
+    
+    /* Enable metrics */
+    param.analyse.b_psnr = 1;
+    param.analyse.b_ssim = 1;
 
+    /* QuickTime has trouble with very low QPs (resulting in visual artifacts).
+     * Known to affect QuickTime 7, QuickTime X and iTunes.
+     * Testing shows that a qpmin of 3 works.
+     */
+    param.rc.i_qp_min = 3;
+    
     param.i_threads    = ( hb_get_cpu_count() * 3 / 2 );
     param.i_width      = job->width;
     param.i_height     = job->height;
     param.i_fps_num    = job->vrate;
     param.i_fps_den    = job->vrate_base;
+    if ( job->cfr == 1 )
+    {
+        param.i_timebase_num   = 0;
+        param.i_timebase_den   = 0;
+        param.b_vfr_input = 0;
+    }
+    else
+    {
+        param.i_timebase_num   = 1;
+        param.i_timebase_den   = 90000;
+    }
 
+    /* Disable annexb. Inserts size into nal header instead of start code */
+    param.b_annexb     = 0;
+
+    /* Set min:max key intervals ratio to 1:10 of fps.
+     * This section is skipped if fps=25 (default).
+     */
     if (job->vrate_base != 1080000)
     {
-        /* If the fps isn't 25, adjust the key intervals. Add 1 because
-           we want 24, not 23 with a truncated remainder.               */
-        param.i_keyint_min     = (job->vrate / job->vrate_base) + 1;
-        param.i_keyint_max = (10 * job->vrate / job->vrate_base) + 1;
-        hb_log("encx264: keyint-min: %i, keyint-max: %i", param.i_keyint_min, param.i_keyint_max);
+        if (job->pass == 2 && !job->cfr )
+        {
+            /* Even though the framerate might be different due to VFR,
+               we still want the same keyframe intervals as the 1st pass,
+               so the 1st pass stats won't conflict on frame decisions.    */
+            hb_interjob_t * interjob = hb_interjob_get( job->h );
+            param.i_keyint_max = 10 * (int)( (double)interjob->vrate / (double)interjob->vrate_base + 0.5 );
+        }
+        else
+        {
+            /* adjust +0.5 for when fps has remainder to bump
+               { 23.976, 29.976, 59.94 } to { 24, 30, 60 } */
+            param.i_keyint_max = 10 * (int)( (double)job->vrate / (double)job->vrate_base + 0.5 );
+        }
     }
 
     param.i_log_level  = X264_LOG_INFO;
-    if( job->h264_level )
-    {
-        param.b_cabac     = 0;
-        param.i_level_idc = job->h264_level;
-        hb_log( "encx264: encoding at level %i",
-                param.i_level_idc );
-    }
-
+    
     /*
        	This section passes the string x264opts to libx264 for parsing into
         parameter names and values.
@@ -149,38 +179,6 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
                 value++;
             }
 
-            /*
-               When B-frames are enabled, the max frame count increments
-               by 1 (regardless of the number of B-frames). If you don't
-               change the duration of the video track when you mux, libmp4
-               barfs.  So, check if the x264opts are using B-frames, and
-               when they are, set the boolean job->areBframes as true.
-             */
-
-            if( !( strcmp( name, "bframes" ) ) )
-            {
-                if( atoi( value ) > 0 )
-                {
-                    job->areBframes = 1;
-                }
-            }
-
-            /* Note b-pyramid here, so the initial delay can be doubled */
-            if( !( strcmp( name, "b-pyramid" ) ) )
-            {
-                if( value != NULL )
-                {
-                    if( atoi( value ) > 0 )
-                    {
-                        job->areBframes = 2;
-                    }
-                }
-                else
-                {
-                    job->areBframes = 2;
-                }
-            }
-
             /* Here's where the strings are passed to libx264 for parsing. */
             ret = x264_param_parse( &param, name, value );
 
@@ -191,6 +189,47 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
                 hb_log( "x264 options: Bad argument %s=%s", name, value ? value : "(null)" );
         }
         free(x264opts_start);
+    }
+    
+    /* B-frames are on by default.*/
+    job->areBframes = 1;
+    
+    if( param.i_bframe && param.i_bframe_pyramid )
+    {
+        /* Note b-pyramid here, so the initial delay can be doubled */
+        job->areBframes = 2;
+    }
+    else if( !param.i_bframe )
+    {
+        /*
+         When B-frames are enabled, the max frame count increments
+         by 1 (regardless of the number of B-frames). If you don't
+         change the duration of the video track when you mux, libmp4
+         barfs.  So, check if the x264opts aren't using B-frames, and
+         when they aren't, set the boolean job->areBframes as false.
+         */
+        job->areBframes = 0;
+    }
+    
+    if( param.i_keyint_min != X264_KEYINT_MIN_AUTO || param.i_keyint_max != 250 )
+    {
+        int min_auto;
+
+        if ( param.i_fps_num / param.i_fps_den < param.i_keyint_max / 10 )
+            min_auto = param.i_fps_num / param.i_fps_den;
+        else
+            min_auto = param.i_keyint_max / 10;
+
+        char min[40], max[40];
+        param.i_keyint_min == X264_KEYINT_MIN_AUTO ? 
+            snprintf( min, 40, "auto (%d)", min_auto ) : 
+            snprintf( min, 40, "%d", param.i_keyint_min );
+
+        param.i_keyint_max == X264_KEYINT_MAX_INFINITE ? 
+            snprintf( max, 40, "infinite" ) : 
+            snprintf( max, 40, "%d", param.i_keyint_max );
+
+        hb_log( "encx264: min-keyint: %s, keyint: %s", min, max );
     }
 
     /* set up the VUI color model & gamma to match what the COLR atom
@@ -224,10 +263,10 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
         param.vui.i_colmatrix = 6;
     }
 
-    if( job->pixel_ratio )
+    if( job->anamorphic.mode )
     {
-        param.vui.i_sar_width = job->pixel_aspect_width;
-        param.vui.i_sar_height = job->pixel_aspect_height;
+        param.vui.i_sar_width  = job->anamorphic.par_width;
+        param.vui.i_sar_height = job->anamorphic.par_height;
 
         hb_log( "encx264: encoding with stored aspect %d/%d",
                 param.vui.i_sar_width, param.vui.i_sar_height );
@@ -236,47 +275,19 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
 
     if( job->vquality > 0.0 && job->vquality < 1.0 )
     {
-        switch( job->crf )
-        {
-            case 1:
-                /*Constant RF*/
-                param.rc.i_rc_method = X264_RC_CRF;
-                param.rc.f_rf_constant = 51 - job->vquality * 51;
-                hb_log( "encx264: Encoding at constant RF %f",
-                        param.rc.f_rf_constant );
-                break;
-
-            case 0:
-                /*Constant QP*/
-                param.rc.i_rc_method = X264_RC_CQP;
-                param.rc.i_qp_constant = 51 - job->vquality * 51;
-                hb_log( "encx264: encoding at constant QP %d",
-                        param.rc.i_qp_constant );
-                break;
-        }
+        /*Constant RF*/
+        param.rc.i_rc_method = X264_RC_CRF;
+        param.rc.f_rf_constant = 51 - job->vquality * 51;
+        hb_log( "encx264: Encoding at constant RF %f", param.rc.f_rf_constant );
     }
     else if( job->vquality == 0 || job->vquality >= 1.0 )
     {
         /* Use the vquality as a raw RF or QP
           instead of treating it like a percentage. */
-        switch( job->crf )
-        {
-            case 1:
-                /*Constant RF*/
-                param.rc.i_rc_method = X264_RC_CRF;
-                param.rc.f_rf_constant = job->vquality;
-                hb_log( "encx264: Encoding at constant RF %f",
-                        param.rc.f_rf_constant );
-                break;
-
-            case 0:
-                /*Constant QP*/
-                param.rc.i_rc_method = X264_RC_CQP;
-                param.rc.i_qp_constant = job->vquality;
-                hb_log( "encx264: encoding at constant QP %d",
-                        param.rc.i_qp_constant );
-                break;
-        }        
+        /*Constant RF*/
+        param.rc.i_rc_method = X264_RC_CRF;
+        param.rc.f_rf_constant = job->vquality;
+        hb_log( "encx264: Encoding at constant RF %f", param.rc.f_rf_constant );
     }
     else
     {
@@ -302,52 +313,27 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
     x264_encoder_headers( pv->x264, &nal, &nal_count );
 
     /* Sequence Parameter Set */
-    x264_nal_encode( w->config->h264.sps, &nal_size, 0, &nal[1] );
-    w->config->h264.sps_length = nal_size;
+    memcpy(w->config->h264.sps, nal[0].p_payload + 4, nal[0].i_payload - 4);
+    w->config->h264.sps_length = nal[0].i_payload - 4;
 
     /* Picture Parameter Set */
-    x264_nal_encode( w->config->h264.pps, &nal_size, 0, &nal[2] );
-    w->config->h264.pps_length = nal_size;
+    memcpy(w->config->h264.pps, nal[1].p_payload + 4, nal[1].i_payload - 4);
+    w->config->h264.pps_length = nal[1].i_payload - 4;
 
-    x264_picture_alloc( &pv->pic_in, X264_CSP_I420,
-                        job->width, job->height );
+    x264_picture_init( &pv->pic_in );
 
+    pv->pic_in.img.i_csp = X264_CSP_I420;
+    pv->pic_in.img.i_plane = 3;
+    pv->pic_in.img.i_stride[0] = job->width;
     pv->pic_in.img.i_stride[2] = pv->pic_in.img.i_stride[1] = ( ( job->width + 1 ) >> 1 );
-    pv->x264_allocated_pic = pv->pic_in.img.plane[0];
 
-    if (job->areBframes)
+    if( job->grayscale )
     {
-        /* Basic initDelay value is the clockrate divided by the FPS
-           -- the length of one frame in clockticks.                  */
-        pv->init_delay = 90000. / ((double)job->vrate / (double)job->vrate_base);
-
-        /* 23.976-length frames are 3753.75 ticks long on average but the DVD
-           creates that average rate by repeating 59.95 fields so the max
-           frame size is actually 4504.5 (3 field times). The field durations
-           are computed based on quantized times (see below) so we need an extra
-           two ticks to account for the rounding. */
-        if (pv->init_delay == 3753)
-            pv->init_delay = 4507;
-
-        /* frame rates are not exact in the DVD 90KHz PTS clock (they are
-           exact in the DVD 27MHz system clock but we never see that) so the
-           rates computed above are all +-1 due to quantization. Worst case
-           is when a clock-rounded-down frame is adjacent to a rounded-up frame
-           which makes one of the frames 2 ticks longer than the nominal
-           frame time. */
-        pv->init_delay += 2;
-
-        /* For VFR, libhb sees the FPS as 29.97, but the longest frames
-           will use the duration of frames running at 23.976fps instead.. */
-        if (job->vfr)
-        {
-            pv->init_delay = 7506;
-        }
-
-        /* The delay is 1 frames for regular b-frames, 2 for b-pyramid. */
-        pv->init_delay *= job->areBframes;
+        int uvsize = ( (job->width + 1) >> 1 ) * ( (job->height + 1) >> 1 );
+        pv->grey_data = malloc( uvsize );
+        memset( pv->grey_data, 0x80, uvsize );
+        pv->pic_in.img.plane[1] = pv->pic_in.img.plane[2] = pv->grey_data;
     }
-    w->config->h264.init_delay = pv->init_delay;
 
     return 0;
 }
@@ -355,12 +341,13 @@ int encx264Init( hb_work_object_t * w, hb_job_t * job )
 void encx264Close( hb_work_object_t * w )
 {
     hb_work_private_t * pv = w->private_data;
-    /*
-     * Patch the x264 allocated data back in so that x264 can free it
-     * we have been using our own buffers during the encode to avoid copying.
-     */
-    pv->pic_in.img.plane[0] = pv->x264_allocated_pic;
-    x264_picture_clean( &pv->pic_in );
+
+    if ( pv->frames_split )
+    {
+        hb_log( "encx264: %u frames had to be split (%u in, %u out)",
+                pv->frames_split, pv->frames_in, pv->frames_out );
+    }
+    free( pv->grey_data );
     x264_encoder_close( pv->x264 );
     free( pv );
     w->private_data = NULL;
@@ -400,6 +387,11 @@ static hb_buffer_t *nal_encode( hb_work_object_t *w, x264_picture_t *pic_out,
     int64_t duration  = get_frame_duration( pv, pic_out->i_pts );
     buf->start = pic_out->i_pts;
     buf->stop  = pic_out->i_pts + duration;
+    buf->renderOffset = pic_out->i_dts;
+    if ( !w->config->h264.init_delay && pic_out->i_dts < 0 )
+    {
+        w->config->h264.init_delay = -pic_out->i_dts;
+    }
 
     /* Encode all the NALs we were given into buf.
        NOTE: This code assumes one video frame per NAL (but there can
@@ -409,37 +401,29 @@ static hb_buffer_t *nal_encode( hb_work_object_t *w, x264_picture_t *pic_out,
     int i;
     for( i = 0; i < i_nal; i++ )
     {
-        int data = buf->alloc - buf->size;
-        int size = x264_nal_encode( buf->data + buf->size, &data, 1, &nal[i] );
+        int size = nal[i].i_payload;
+        memcpy(buf->data + buf->size, nal[i].p_payload, size);
         if( size < 1 )
         {
             continue;
         }
 
-        if( job->mux & HB_MUX_AVI )
-        {
-            if( nal[i].i_ref_idc == NAL_PRIORITY_HIGHEST )
-            {
-                buf->frametype = HB_FRAME_KEY;
-            }
-            buf->size += size;
-            continue;
-        }
-
         /* H.264 in .mp4 or .mkv */
-        int naltype = buf->data[buf->size+4] & 0x1f;
-        if ( naltype == 0x7 || naltype == 0x8 )
+        switch( nal[i].i_type )
         {
-            // Sequence Parameter Set & Program Parameter Set go in the
-            // mp4 header so skip them here
-            continue;
-        }
+            /* Sequence Parameter Set & Program Parameter Set go in the
+             * mp4 header so skip them here
+             */
+            case NAL_SPS:
+            case NAL_PPS:
+                continue;
 
-        /* H.264 in mp4 (stolen from mp4creator) */
-        buf->data[buf->size+0] = ( ( size - 4 ) >> 24 ) & 0xFF;
-        buf->data[buf->size+1] = ( ( size - 4 ) >> 16 ) & 0xFF;
-        buf->data[buf->size+2] = ( ( size - 4 ) >>  8 ) & 0xFF;
-        buf->data[buf->size+3] = ( ( size - 4 ) >>  0 ) & 0xFF;
+            case NAL_SLICE:
+            case NAL_SLICE_IDR:
+            case NAL_SEI:
+            default:
+                break;
+        }
 
         /* Decide what type of frame we have. */
         switch( pic_out->i_type )
@@ -487,6 +471,12 @@ static hb_buffer_t *nal_encode( hb_work_object_t *w, x264_picture_t *pic_out,
             (nal[i].i_ref_idc != NAL_PRIORITY_DISPOSABLE) )
             buf->frametype = HB_FRAME_BREF;
 
+        /* Expose disposable bit to muxer. */
+        if( nal[i].i_ref_idc == NAL_PRIORITY_DISPOSABLE )
+            buf->flags &= ~HB_FRAME_REF;
+        else
+            buf->flags |= HB_FRAME_REF;
+
         buf->size += size;
     }
     // make sure we found at least one video frame
@@ -507,13 +497,7 @@ static hb_buffer_t *x264_encode( hb_work_object_t *w, hb_buffer_t *in )
     pv->pic_in.img.plane[0] = in->data;
 
     int uvsize = ( (job->width + 1) >> 1 ) * ( (job->height + 1) >> 1 );
-    if( job->grayscale )
-    {
-        /* XXX x264 has currently no option for grayscale encoding */
-        memset( pv->pic_in.img.plane[1], 0x80, uvsize );
-        memset( pv->pic_in.img.plane[2], 0x80, uvsize );
-    }
-    else
+    if( !job->grayscale )
     {
         /* Point x264 at our buffers (Y)UV data */
         pv->pic_in.img.plane[1] = in->data + job->width * job->height;
@@ -539,7 +523,6 @@ static hb_buffer_t *x264_encode( hb_work_object_t *w, hb_buffer_t *in )
     {
         pv->pic_in.i_type = X264_TYPE_AUTO;
     }
-    pv->pic_in.i_qpplus1 = 0;
 
     /* XXX this is temporary debugging code to check that the upstream
      * modules (render & sync) have generated a continuous, self-consistent
@@ -548,7 +531,7 @@ static hb_buffer_t *x264_encode( hb_work_object_t *w, hb_buffer_t *in )
      */
     if( pv->last_stop != in->start )
     {
-        hb_log("encx264 input continuity err: last stop %lld  start %lld",
+        hb_log("encx264 input continuity err: last stop %"PRId64"  start %"PRId64,
                 pv->last_stop, in->start);
     }
     pv->last_stop = in->stop;
@@ -589,15 +572,18 @@ int encx264Work( hb_work_object_t * w, hb_buffer_t ** buf_in,
         x264_nal_t *nal;
         hb_buffer_t *last_buf = NULL;
 
-        while (1)
+        while ( x264_encoder_delayed_frames( pv->x264 ) )
         {
             x264_encoder_encode( pv->x264, &nal, &i_nal, NULL, &pic_out );
-            if ( i_nal <= 0 )
+            if ( i_nal == 0 )
+                continue;
+            if ( i_nal < 0 )
                 break;
 
             hb_buffer_t *buf = nal_encode( w, &pic_out, i_nal, nal );
             if ( buf )
             {
+                ++pv->frames_out;
                 if ( last_buf == NULL )
                     *buf_out = buf;
                 else
@@ -616,59 +602,8 @@ int encx264Work( hb_work_object_t * w, hb_buffer_t ** buf_in,
     }
 
     // Not EOF - encode the packet & wrap it in a NAL
-
-    // if we're re-ordering frames, check if this frame is too large to reorder
-    if ( pv->init_delay && in->stop - in->start > pv->init_delay )
-    {
-        // This frame's duration is larger than the time allotted for b-frame
-        // reordering. That means that if it's used as a reference the decoder
-        // won't be able to move it early enough to render it in correct
-        // sequence & the playback will have odd jumps & twitches. To make
-        // sure this doesn't happen we pretend this frame is multiple
-        // frames, each with duration <= init_delay. Since each of these
-        // new frames contains the same image the visual effect is identical
-        // to the original but the resulting stream can now be coded without
-        // error. We take advantage of the fact that x264 buffers frame
-        // data internally to feed the same image into the encoder multiple
-        // times, just changing its start & stop times each time.
-        int64_t orig_stop = in->stop;
-        int64_t new_stop = in->start;
-        hb_buffer_t *last_buf = NULL;
-
-        // We want to spread the new frames uniformly over the total time
-        // so that we don't end up with a very short frame at the end.
-        // In the number of pieces calculation we add in init_delay-1 to
-        // round up but not add an extra piece if the frame duration is
-        // a multiple of init_delay. The final increment of frame_dur is
-        // to restore the bits that got truncated by the divide on the
-        // previous line. If we don't do this we end up with an extra tiny
-        // frame at the end whose duration is npieces-1.
-        int64_t frame_dur = orig_stop - new_stop;
-        int64_t npieces = ( frame_dur + pv->init_delay - 1 ) / pv->init_delay;
-        frame_dur /= npieces;
-        ++frame_dur;
-
-        while ( in->start < orig_stop )
-        {
-            new_stop += frame_dur;
-            if ( new_stop > orig_stop )
-                new_stop = orig_stop;
-            in->stop = new_stop;
-            hb_buffer_t *buf = x264_encode( w, in );
-            if ( buf )
-            {
-                if ( last_buf == NULL )
-                    *buf_out = buf;
-                else
-                    last_buf->next = buf;
-                last_buf = buf;
-            }
-            in->start = new_stop;
-        }
-    }
-    else
-    {
-        *buf_out = x264_encode( w, in );
-    }
+    ++pv->frames_in;
+    ++pv->frames_out;
+    *buf_out = x264_encode( w, in );
     return HB_WORK_OK;
 }

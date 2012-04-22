@@ -1,37 +1,41 @@
 /*  frmAbout.cs $
- 	
- 	   This file is part of the HandBrake source code.
- 	   Homepage: <http://handbrake.fr>.
- 	   It may be used under the terms of the GNU General Public License. */
-
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Text;
-using System.Windows.Forms;
-using System.Diagnostics;
+    This file is part of the HandBrake source code.
+    Homepage: <http://handbrake.fr>.
+    It may be used under the terms of the GNU General Public License. */
 
 namespace Handbrake
 {
+    using System;
+    using System.Windows.Forms;
+
+    /// <summary>
+    /// The About Window
+    /// </summary>
     public partial class frmAbout : Form
     {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="frmAbout"/> class.
+        /// </summary>
         public frmAbout()
         {
             InitializeComponent();
-            Version.Text = Properties.Settings.Default.hb_version;
-            lbl_build.Text = Properties.Settings.Default.hb_build.ToString();
+
+            string nightly = Properties.Settings.Default.hb_version.Contains("svn") ? " (SVN / Nightly Build)" : string.Empty;
+            lbl_GUIBuild.Text = Properties.Settings.Default.hb_version + " (" + Properties.Settings.Default.hb_build + ") " + nightly;
         }
 
+        /// <summary>
+        /// Button - Close the window
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
         private void btn_close_Click(object sender, EventArgs e)
         {
             this.Close();
-        }
-
-        private void label_credits_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
-        {
-            Process.Start("http://handbrake.frtrac/wiki/x264Options");
         }
     }
 }

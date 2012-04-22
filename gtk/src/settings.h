@@ -34,22 +34,36 @@ enum
 	GHB_STATE_WORKDONE 	= 0x10,
 	GHB_STATE_PAUSED 	= 0x20,
 	GHB_STATE_MUXING 	= 0x40,
+	GHB_STATE_SEARCHING	= 0x80,
 };
+
+enum
+{
+	GHB_CANCEL_NONE,
+	GHB_CANCEL_ALL,
+	GHB_CANCEL_CURRENT,
+	GHB_CANCEL_FINISH
+};
+
+typedef struct preview_s preview_t;
 
 typedef struct
 {
 	gchar *current_dvd_device;
 	gboolean debug;
 	gboolean dont_clear_presets;
-	gboolean cancel_encode;
+	gboolean scale_busy;
+	gint cancel_encode;
 	GtkBuilder *builder;
 	GValue *settings;
 	GValue *queue;
 	GValue *current_job;
 	GIOChannel *activity_log;
 	GIOChannel *job_activity_log;
+	preview_t *preview;
 	gchar *appcast;
 	gint appcast_len;
+	GdkVisibilityState hb_visibility;
 } signal_user_data_t;
 
 enum
@@ -74,14 +88,16 @@ void ghb_settings_set_boolean(
 	GValue *settings, const gchar *key, gboolean bval);
 void ghb_settings_copy(
 	GValue *settings, const gchar *key, const GValue *value);
-GValue* ghb_settings_get_value(GValue *settings, const gchar *key);
-gboolean ghb_settings_get_boolean(GValue *settings, const gchar *key);
-gint64 ghb_settings_get_int64(GValue *settings, const gchar *key);
-gint ghb_settings_get_int(GValue *settings, const gchar *key);
-gdouble ghb_settings_get_double(GValue *settings, const gchar *key);
-gchar* ghb_settings_get_string(GValue *settings, const gchar *key);
-gint ghb_settings_combo_int(GValue *settings, const gchar *key);
-const gchar* ghb_settings_combo_option(GValue *settings, const gchar *key);
+GValue* ghb_settings_get_value(const GValue *settings, const gchar *key);
+gboolean ghb_settings_get_boolean(const GValue *settings, const gchar *key);
+gint64 ghb_settings_get_int64(const GValue *settings, const gchar *key);
+gint ghb_settings_get_int(const GValue *settings, const gchar *key);
+gdouble ghb_settings_get_double(const GValue *settings, const gchar *key);
+gchar* ghb_settings_get_string(const GValue *settings, const gchar *key);
+gint ghb_settings_combo_int(const GValue *settings, const gchar *key);
+gdouble ghb_settings_combo_double(const GValue *settings, const gchar *key);
+const gchar* ghb_settings_combo_option(const GValue *settings, const gchar *key);
+const gchar* ghb_settings_combo_string(const GValue *settings, const gchar *key);
 
 GValue* ghb_widget_value(GtkWidget *widget);
 gchar* ghb_widget_string(GtkWidget *widget);
@@ -93,5 +109,6 @@ gint ghb_widget_boolean(GtkWidget *widget);
 void ghb_widget_to_setting(GValue *settings, GtkWidget *widget);
 int ghb_ui_update(
 	signal_user_data_t *ud, const gchar *name, const GValue *value);
+const gchar* ghb_get_setting_key(GtkWidget *widget);
 
 #endif // _SETTINGS_H_

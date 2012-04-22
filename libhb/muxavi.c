@@ -5,7 +5,7 @@
    It may be used under the terms of the GNU General Public License. */
 
 #include "hb.h"
-#include "libavcodec/avcodec.h"
+#include "hbffmpeg.h"
 
 #define AVIF_HASINDEX  0x10
 #define AVIIF_KEYFRAME 0x10
@@ -332,6 +332,7 @@ static int AVIInit( hb_mux_object_t * m )
     hb_mux_data_t * mux_data;
 
     int audio_count = hb_list_count( title->list_audio );
+    int is_passthru = 0;
     int is_ac3      = 0;
     int hdrl_bytes;
     int i;
@@ -366,8 +367,6 @@ static int AVIInit( hb_mux_object_t * m )
 
     if( job->vcodec == HB_VCODEC_FFMPEG )
         h.Handler = FOURCC( "divx" );
-    else if( job->vcodec == HB_VCODEC_XVID )
-        h.Handler = FOURCC( "xvid" );
     else if( job->vcodec == HB_VCODEC_X264 )
         h.Handler = FOURCC( "h264" );
 
@@ -386,15 +385,13 @@ static int AVIInit( hb_mux_object_t * m )
     f.BitCount    = 24;
     if( job->vcodec == HB_VCODEC_FFMPEG )
         f.Compression = FOURCC( "DX50" );
-    else if( job->vcodec == HB_VCODEC_XVID )
-        f.Compression = FOURCC( "XVID" );
     else if( job->vcodec == HB_VCODEC_X264 )
         f.Compression = FOURCC( "H264" );
 #undef f
 
 #define g mux_data->vprp_header
     /* Vprp video stream header */	
-    AVRational sample_aspect_ratio = ( AVRational ){ job->pixel_aspect_width, job->pixel_aspect_height };
+    AVRational sample_aspect_ratio = ( AVRational ){ job->anamorphic.par_width, job->anamorphic.par_height };
     AVRational dar = av_mul_q( sample_aspect_ratio, ( AVRational ){ job->width, job->height } );
     int num, den;
     av_reduce(&num, &den, dar.num, dar.den, 0xFFFF);
@@ -427,6 +424,8 @@ static int AVIInit( hb_mux_object_t * m )
         audio = hb_list_item( title->list_audio, i );
 
         is_ac3 = (audio->config.out.codec == HB_ACODEC_AC3);
+        is_passthru = (audio->config.out.codec == HB_ACODEC_AC3) ||
+                      (audio->config.out.codec == HB_ACODEC_DCA);
 
         mux_data = calloc( sizeof( hb_mux_data_t ), 1 );
         audio->priv.mux_data = mux_data;
@@ -440,17 +439,17 @@ static int AVIInit( hb_mux_object_t * m )
         h.Type          = FOURCC( "auds" );
         h.InitialFrames = 1;
         h.Scale         = 1;
-        h.Rate          = is_ac3 ? ( audio->config.in.bitrate / 8 ) :
+        h.Rate          = is_passthru ? ( audio->config.in.bitrate / 8 ) :
                                    ( audio->config.out.bitrate * 1000 / 8 );
         h.Quality       = 0xFFFFFFFF;
         h.SampleSize    = 1;
 
         /* Audio stream format */
         f.FourCC         = FOURCC( "strf" );
-        if( is_ac3 )
+        if( is_passthru )
         {
             f.BytesCount     = sizeof( hb_wave_formatex_t ) - 8;
-            f.FormatTag      = 0x2000;
+            f.FormatTag      = is_ac3 ? 0x2000 : 0x2001;
             f.Channels       = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT(audio->config.in.channel_layout);
             f.SamplesPerSec  = audio->config.in.samplerate;
         }
@@ -464,7 +463,7 @@ static int AVIInit( hb_mux_object_t * m )
         }
         f.AvgBytesPerSec = h.Rate;
         f.BlockAlign     = 1;
-        if( is_ac3 )
+        if( is_passthru )
         {
             f.Size       = 0;
         }
@@ -490,10 +489,10 @@ static int AVIInit( hb_mux_object_t * m )
         /* video strf */
 		sizeof( hb_bitmap_info_t ) +
         /* video vprp */
-        ( job->pixel_ratio ? sizeof( hb_avi_vprp_info_t ) : 0 ) +
+        ( job->anamorphic.mode ? sizeof( hb_avi_vprp_info_t ) : 0 ) +
         /* audios strf */
         audio_count * ( sizeof( hb_wave_formatex_t ) +
-                        ( is_ac3 ? 0 : sizeof( hb_wave_mp3_t ) ) );
+                        ( is_passthru ? 0 : sizeof( hb_wave_mp3_t ) ) );
 
     /* Here we really start to write into the file */
 
@@ -513,11 +512,11 @@ static int AVIInit( hb_mux_object_t * m )
     WriteInt32( m->file, FOURCC( "LIST" ) );
     WriteInt32( m->file, 4 + sizeof( hb_avi_stream_header_t ) +
                 sizeof( hb_bitmap_info_t )  +
-                ( job->pixel_ratio ? sizeof( hb_avi_vprp_info_t ) : 0 ) );
+                ( job->anamorphic.mode ? sizeof( hb_avi_vprp_info_t ) : 0 ) );
     WriteInt32( m->file, FOURCC( "strl" ) );
     WriteStreamHeader( m->file, &mux_data->header );
     WriteBitmapInfo( m->file, &mux_data->format.v );
-    if( job->pixel_ratio )
+    if( job->anamorphic.mode )
     {
         WriteVprpInfo( m->file, &mux_data->vprp_header );
     }
@@ -537,11 +536,11 @@ static int AVIInit( hb_mux_object_t * m )
         WriteInt32( m->file, FOURCC( "LIST" ) );
         WriteInt32( m->file, 4 + sizeof( hb_avi_stream_header_t ) +
                              sizeof( hb_wave_formatex_t ) +
-                             ( is_ac3 ? 0 : sizeof( hb_wave_mp3_t ) ) );
+                             ( is_passthru ? 0 : sizeof( hb_wave_mp3_t ) ) );
         WriteInt32( m->file, FOURCC( "strl" ) );
         WriteStreamHeader( m->file, &mux_data->header );
         WriteWaveFormatEx( m->file, &mux_data->format.a.f );
-        if( !is_ac3 )
+        if( !is_passthru )
         {
             WriteWaveMp3( m->file, &mux_data->format.a.m );
         }
@@ -600,9 +599,12 @@ static int AVIMux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
     WriteInt32( m->file, job->mux_data->header.Length );
     for( i = 0; i < hb_list_count( title->list_audio ); i++ )
     {
+        int is_passthru;
         audio = hb_list_item( title->list_audio, i );
+        is_passthru = (audio->config.out.codec == HB_ACODEC_AC3) ||
+                      (audio->config.out.codec == HB_ACODEC_DCA);
         fseek( m->file, 264 + i *
-               ( 102 + ( ( audio->config.out.codec == HB_ACODEC_AC3 ) ? 0 :
+               ( 102 + ( is_passthru ? 0 :
                  sizeof( hb_wave_mp3_t ) ) ), SEEK_SET );
         WriteInt32( m->file, audio->priv.mux_data->header.Length );
     }

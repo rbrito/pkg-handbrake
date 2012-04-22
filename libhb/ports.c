@@ -4,31 +4,67 @@
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License. */
 
-#include <time.h>
-#include <sys/time.h>
-
-#if defined( SYS_BEOS )
-#include <OS.h>
-#include <signal.h>
-#elif defined( SYS_CYGWIN )
-#include <windows.h>
-#elif defined( SYS_SunOS )
-#include <sys/processor.h>
+#ifdef USE_PTHREAD
+#ifdef SYS_LINUX
+#define _GNU_SOURCE
+#include <sched.h>
 #endif
-
-#if USE_PTHREAD
 #include <pthread.h>
 #endif
 
-//#ifdef SYS_CYGWIN
-//#include <winsock2.h>
-//#include <ws2tcpip.h>
-//#else
+#ifdef SYS_BEOS
+#include <kernel/OS.h>
+#endif
+
+#if defined(SYS_DARWIN) || defined(SYS_FREEBSD)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#endif
+
+#ifdef SYS_OPENBSD
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <machine/cpu.h>
+#endif
+
+#ifdef SYS_MINGW
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <netinet/in.h>
-//#endif
+#endif
+
+#ifdef SYS_CYGWIN
+#include <windows.h>
+#endif
+
+#ifdef SYS_MINGW
+#include <pthread.h>
+#include <windows.h>
+#endif
+
+#ifdef SYS_SunOS
+#include <sys/processor.h>
+#endif
+
+#include <time.h>
+#include <sys/time.h>
+
+#if defined( SYS_LINUX )
+#include <linux/cdrom.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#elif defined( SYS_OPENBSD )
+#include <sys/dvdio.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#endif
+
+#include <stddef.h>
+#include <unistd.h>
 
 #include "hb.h"
 
@@ -56,6 +92,40 @@ int gettimeofday( struct timeval * tv, struct timezone * tz )
 #endif
 */
 
+int hb_dvd_region(char *device, int *region_mask)
+{
+#if defined( DVD_LU_SEND_RPC_STATE ) && defined( DVD_AUTH )
+    struct stat  st;
+    dvd_authinfo ai;
+    int          fd, ret;
+
+    fd = open( device, O_RDONLY );
+    if ( fd < 0 )
+        return -1;
+    if ( fstat( fd, &st ) < 0 )
+	{
+        close( fd );
+        return -1;
+	}
+    if ( !( S_ISBLK( st.st_mode ) || S_ISCHR( st.st_mode ) ) )
+	{
+        close( fd );
+        return -1;
+	}
+
+    ai.type = DVD_LU_SEND_RPC_STATE;
+    ret = ioctl(fd, DVD_AUTH, &ai);
+    close( fd );
+    if ( ret < 0 )
+        return ret;
+
+    *region_mask = ai.lrpcs.region_mask;
+    return 0;
+#else
+    return -1;
+#endif
+}
+
 uint64_t hb_get_date()
 {
     struct timeval tv;
@@ -78,7 +148,7 @@ void hb_snooze( int delay )
     snooze( 1000 * delay );
 #elif defined( SYS_DARWIN ) || defined( SYS_LINUX ) || defined( SYS_FREEBSD) || defined( SYS_SunOS )
     usleep( 1000 * delay );
-#elif defined( SYS_CYGWIN )
+#elif defined( SYS_CYGWIN ) || defined( SYS_MINGW )
     Sleep( delay );
 #endif
 }
@@ -100,54 +170,36 @@ int hb_get_cpu_count()
     }
     cpu_count = 1;
 
-#if defined( SYS_BEOS )
-    {
-        system_info info;
-        get_system_info( &info );
-        cpu_count = info.cpu_count;
-    }
-
-#elif defined( SYS_DARWIN ) || defined( SYS_FREEBSD )
-    FILE * info;
-    char   buffer[16];
-
-    if( ( info = popen( "/usr/sbin/sysctl hw.ncpu", "r" ) ) )
-    {
-        memset( buffer, 0, 16 );
-        if( fgets( buffer, 15, info ) )
-        {
-            if( sscanf( buffer, "hw.ncpu: %d", &cpu_count ) != 1 )
-            {
-                cpu_count = 1;
-            }
-        }
-        fclose( info );
-    }
-
-#elif defined( SYS_LINUX )
-    {
-        FILE * info;
-        char   buffer[8];
-
-        if( ( info = popen( "grep -c '^processor' /proc/cpuinfo",
-                            "r" ) ) )
-        {
-            memset( buffer, 0, 8 );
-            if( fgets( buffer, 7, info ) )
-            {
-                if( sscanf( buffer, "%d", &cpu_count ) != 1 )
-                {
-                    cpu_count = 1;
-                }
-            }
-            fclose( info );
-        }
-    }
-
-#elif defined( SYS_CYGWIN )
+#if defined(SYS_CYGWIN) || defined(SYS_MINGW)
     SYSTEM_INFO cpuinfo;
     GetSystemInfo( &cpuinfo );
     cpu_count = cpuinfo.dwNumberOfProcessors;
+
+#elif defined(SYS_LINUX)
+    unsigned int bit;
+    cpu_set_t p_aff;
+    memset( &p_aff, 0, sizeof(p_aff) );
+    sched_getaffinity( 0, sizeof(p_aff), &p_aff );
+    for( cpu_count = 0, bit = 0; bit < sizeof(p_aff); bit++ )
+         cpu_count += (((uint8_t *)&p_aff)[bit / 8] >> (bit % 8)) & 1;
+
+#elif defined(SYS_BEOS)
+    system_info info;
+    get_system_info( &info );
+    cpu_count = info.cpu_count;
+
+#elif defined(SYS_DARWIN) || defined(SYS_FREEBSD) || defined(SYS_OPENBSD)
+    size_t length = sizeof( cpu_count );
+#ifdef SYS_OPENBSD
+    int mib[2] = { CTL_HW, HW_NCPU };
+    if( sysctl(mib, 2, &cpu_count, &length, NULL, 0) )
+#else
+    if( sysctlbyname("hw.ncpu", &cpu_count, &length, NULL, 0) )
+#endif
+    {
+        cpu_count = 1;
+    }
+
 #elif defined( SYS_SunOS )
     {
         processorid_t cpumax;
@@ -167,20 +219,20 @@ int hb_get_cpu_count()
 #endif
 
     cpu_count = MAX( 1, cpu_count );
-    cpu_count = MIN( cpu_count, 8 );
+    cpu_count = MIN( cpu_count, 64 );
 
     return cpu_count;
 }
 
 /************************************************************************
- * Get a tempory directory for HB
+ * Get a temporary directory for HB
  ***********************************************************************/
-void hb_get_tempory_directory( hb_handle_t * h, char path[512] )
+void hb_get_temporary_directory( char path[512] )
 {
     char base[512];
 
     /* Create the base */
-#ifdef SYS_CYGWIN
+#if defined( SYS_CYGWIN ) || defined( SYS_MINGW )
     char *p;
     int i_size = GetTempPath( 512, base );
     if( i_size <= 0 || i_size >= 512 )
@@ -199,7 +251,7 @@ void hb_get_tempory_directory( hb_handle_t * h, char path[512] )
     if( base[strlen(base)-1] == '/' )
         base[strlen(base)-1] = '\0';
 
-    snprintf( path, 512, "%s/hb.%d", base, hb_get_pid( h ) );
+    snprintf( path, 512, "%s/hb.%d", base, getpid() );
 }
 
 /************************************************************************
@@ -210,7 +262,7 @@ void hb_get_tempory_filename( hb_handle_t * h, char name[1024],
 {
     va_list args;
 
-    hb_get_tempory_directory( h, name );
+    hb_get_temporary_directory( name );
     strcat( name, "/" );
 
     va_start( args, fmt );
@@ -226,11 +278,11 @@ void hb_get_tempory_filename( hb_handle_t * h, char name[1024],
  ***********************************************************************/
 void hb_mkdir( char * name )
 {
-//#ifdef SYS_CYGWIN
-//    mkdir( name );
-//#else
+#ifdef SYS_MINGW
+    mkdir( name );
+#else
     mkdir( name, 0755 );
-//#endif
+#endif
 }
 
 /************************************************************************
@@ -254,6 +306,27 @@ struct hb_thread_s
 //    HANDLE       thread;
 #endif
 };
+
+/* Get a unique identifier to thread and represent as 64-bit unsigned.
+ * If unsupported, the value 0 is be returned.
+ * Caller should use result only for display/log purposes.
+ */
+static uint64_t hb_thread_to_integer( const hb_thread_t* t )
+{
+#if defined( USE_PTHREAD )
+    #if defined( SYS_CYGWIN )
+        return (uint64_t)t->thread;
+    #elif defined( _WIN32 ) || defined( __MINGW32__ )
+        return (uint64_t)(ptrdiff_t)t->thread.p;
+    #elif defined( SYS_DARWIN )
+        return (unsigned long)t->thread;
+    #else
+        return (uint64_t)t->thread;
+    #endif
+#else
+    return 0;
+#endif
+}
 
 /************************************************************************
  * hb_thread_func()
@@ -285,7 +358,7 @@ static void hb_thread_func( void * _t )
     t->function( t->arg );
 
     /* Inform that the thread can be joined now */
-    hb_deep_log( 2, "thread %x exited (\"%s\")", t->thread, t->name );
+    hb_deep_log( 2, "thread %"PRIx64" exited (\"%s\")", hb_thread_to_integer( t ), t->name );
     hb_lock( t->lock );
     t->exited = 1;
     hb_unlock( t->lock );
@@ -330,7 +403,7 @@ hb_thread_t * hb_thread_init( char * name, void (* function)(void *),
 //        SetThreadPriority( GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL );
 #endif
 
-    hb_deep_log( 2, "thread %x started (\"%s\")", t->thread, t->name );
+    hb_deep_log( 2, "thread %"PRIx64" started (\"%s\")", hb_thread_to_integer( t ), t->name );
     return t;
 }
 
@@ -355,8 +428,7 @@ void hb_thread_close( hb_thread_t ** _t )
 //    WaitForSingleObject( t->thread, INFINITE );
 #endif
 
-    hb_deep_log( 2, "thread %x joined (\"%s\")",
-            t->thread, t->name );
+    hb_deep_log( 2, "thread %"PRIx64" joined (\"%s\")", hb_thread_to_integer( t ), t->name );
 
     hb_lock_close( &t->lock );
     free( t->name );
@@ -532,6 +604,35 @@ void hb_cond_wait( hb_cond_t * c, hb_lock_t * lock )
 #endif
 }
 
+void hb_clock_gettime( struct timespec *tp )
+{
+    struct timeval tv;
+    time_t sec;
+
+    sec = time( NULL );
+    gettimeofday( &tv, NULL );
+    tp->tv_sec = tv.tv_sec;
+    tp->tv_nsec = tv.tv_usec * 1000;
+}
+
+void hb_cond_timedwait( hb_cond_t * c, hb_lock_t * lock, int msec )
+{
+#if defined( SYS_BEOS )
+    c->thread = find_thread( NULL );
+    release_sem( lock->sem );
+    suspend_thread( c->thread );
+    acquire_sem( lock->sem );
+    c->thread = -1;
+#elif USE_PTHREAD
+    struct timespec ts;
+    hb_clock_gettime(&ts);
+    ts.tv_nsec += (msec % 1000) * 1000000;
+    ts.tv_sec += msec / 1000 + (ts.tv_nsec / 1000000000);
+    ts.tv_nsec %= 1000000000;
+    pthread_cond_timedwait( &c->cond, &lock->mutex, &ts );
+#endif
+}
+
 void hb_cond_signal( hb_cond_t * c )
 {
 #if defined( SYS_BEOS )
@@ -556,6 +657,13 @@ void hb_cond_signal( hb_cond_t * c )
 #endif
 }
 
+void hb_cond_broadcast( hb_cond_t * c )
+{
+#if USE_PTHREAD
+    pthread_cond_broadcast( &c->cond );
+#endif
+}
+
 /************************************************************************
  * Network
  ***********************************************************************/
@@ -571,6 +679,23 @@ hb_net_t * hb_net_open( char * address, int port )
 
     struct sockaddr_in   sock;
     struct hostent     * host;
+
+#ifdef SYS_MINGW
+    WSADATA wsaData;
+    int iResult, winsock_init = 0;
+
+    // Initialize Winsock
+    if (!winsock_init)
+    {
+        iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+        if (iResult != 0)
+        {
+            hb_log("WSAStartup failed: %d", iResult);
+            return NULL;
+        }
+        winsock_init = 1;
+    }
+#endif
 
     /* TODO: find out why this doesn't work on Win32 */
     if( !( host = gethostbyname( address ) ) )
@@ -621,3 +746,29 @@ void hb_net_close( hb_net_t ** _n )
     *_n = NULL;
 }
 
+#ifdef SYS_MINGW
+char *strtok_r(char *s, const char *delim, char **save_ptr) 
+{
+    char *token;
+
+    if (s == NULL) s = *save_ptr;
+
+    /* Scan leading delimiters.  */
+    s += strspn(s, delim);
+    if (*s == '\0') return NULL;
+
+    /* Find the end of the token.  */
+    token = s;
+    s = strpbrk(token, delim);
+    if (s == NULL)
+        /* This token finishes the string.  */
+        *save_ptr = strchr(token, '\0');
+    else {
+        /* Terminate the token and make *SAVE_PTR point past it.  */
+        *s = '\0';
+        *save_ptr = s + 1;
+    }
+
+    return token;
+}
+#endif

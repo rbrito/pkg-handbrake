@@ -1,317 +1,477 @@
 /*  frmActivityWindow.cs $
- 	
- 	   This file is part of the HandBrake source code.
- 	   Homepage: <http://handbrake.fr>.
- 	   It may be used under the terms of the GNU General Public License. */
-
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Text;
-using System.Windows.Forms;
-using System.IO;
-using System.Threading;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-
+    This file is part of the HandBrake source code.
+    Homepage: <http://handbrake.fr>.
+    It may be used under the terms of the GNU General Public License. */
 
 namespace Handbrake
 {
+    using System;
+    using System.ComponentModel;
+    using System.Diagnostics;
+    using System.IO;
+    using System.Text;
+    using System.Threading;
+    using System.Windows.Forms;
+
+    using HandBrake.Framework.Services;
+    using HandBrake.Framework.Services.Interfaces;
+    using HandBrake.ApplicationServices.Services.Interfaces;
+
+    using Model;
+    using Timer = System.Threading.Timer;
+
+    /// <summary>
+    /// The Activity Log Window
+    /// </summary>
     public partial class frmActivityWindow : Form
     {
-        delegate void SetTextCallback(string text);
-        String read_file;
-        Thread monitor;
-        frmMain mainWindow;
-        frmQueue queueWindow;
-        int position = 0;  // Position in the arraylist reached by the current log output in the rtf box.
+        /* Private Variables */
 
         /// <summary>
-        /// This window should be used to display the RAW output of the handbrake CLI which is produced during an encode.
+        /// The Encode Object
         /// </summary>
-        public frmActivityWindow(string file, frmMain fm, frmQueue fq)
+        private readonly IQueue encode;
+
+        /// <summary>
+        /// The Scan Object
+        /// </summary>
+        private readonly IScan scan;
+
+        /// <summary>
+        /// The Error service
+        /// </summary>
+        private readonly IErrorService errorService = new ErrorService();
+
+        /// <summary>
+        /// The current position in the log file
+        /// </summary>
+        private int position;
+
+        /// <summary>
+        /// A Timer for this window
+        /// </summary>
+        private Timer windowTimer;
+
+        /// <summary>
+        /// The Type of log that the window is currently dealing with
+        /// </summary>
+        private ActivityLogMode mode;
+
+        /* Constructor */
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="frmActivityWindow"/> class.
+        /// </summary>
+        /// <param name="encode">
+        /// The encode.
+        /// </param>
+        /// <param name="scan">
+        /// The scan.
+        /// </param>
+        public frmActivityWindow(IQueue encode, IScan scan)
         {
             InitializeComponent();
-            this.rtf_actLog.Text = string.Empty;
 
-            // When the window closes, we want to abort the monitor thread.
-            this.Disposed += new EventHandler(forceQuit);
+            this.encode = encode;
+            this.scan = scan;
+            this.position = 0;
 
-            mainWindow = fm;
-            queueWindow = fq;
-            read_file = file;
-            position = 0;
-
-            // Print the Log header in the Rich text box.
-            displayLogHeader();
-
-            if (file == "dvdinfo.dat")
-                txt_log.Text = "Scan Log";
-            else if (file == "hb_encode_log.dat")
-                txt_log.Text = "Encode Log";
-
-            // Start a new thread which will montior and keep the log window up to date if required/
-            startLogThread(read_file);            
+            // Listen for Scan and Encode Starting Events
+            scan.ScanStared += scan_ScanStared;
+            encode.EncodeStarted += encode_EncodeStarted;
         }
 
-        /// <summary>
-        /// Displays the Log header
-        /// </summary>
-        private void displayLogHeader()
-        {
-            // System Information
-            Functions.SystemInfo info = new Functions.SystemInfo();
-
-            // Add a header to the log file indicating that it's from the Windows GUI and display the windows version
-            rtf_actLog.AppendText(String.Format("### Windows GUI {1} {0} \n", Properties.Settings.Default.hb_build, Properties.Settings.Default.hb_version));
-            rtf_actLog.AppendText(String.Format("### Running: {0} \n###\n", Environment.OSVersion.ToString()));
-            rtf_actLog.AppendText(String.Format("### CPU: {0} \n", info.getCpuCount()));
-            rtf_actLog.AppendText(String.Format("### Ram: {0} MB \n", info.TotalPhysicalMemory()));
-            rtf_actLog.AppendText(String.Format("### Screen: {0}x{1} \n", info.screenBounds().Bounds.Width, info.screenBounds().Bounds.Height));
-            rtf_actLog.AppendText(String.Format("### Temp Dir: {0} \n", Path.GetTempPath()));
-            rtf_actLog.AppendText(String.Format("### Install Dir: {0} \n", Application.StartupPath));
-            rtf_actLog.AppendText(String.Format("### Data Dir: {0} \n", Application.UserAppDataPath));
-            rtf_actLog.AppendText("#########################################\n\n");
-        }
+        /* Delegates */
 
         /// <summary>
-        /// Starts a new thread which runs the autoUpdate function.
+        /// A callback function for updating the ui
         /// </summary>
-        /// <param name="file"> File which will be used to populate the Rich text box.</param>
-        private void startLogThread(string file)
+        /// <param name="text">
+        /// The text.
+        /// </param>
+        private delegate void SetTextCallback(StringBuilder text);
+
+        /// <summary>
+        /// Clear text callback
+        /// </summary>
+        private delegate void SetTextClearCallback();
+
+        /// <summary>
+        /// Set mode callback
+        /// </summary>
+        /// <param name="setMode">
+        /// The set mode.
+        /// </param>
+        private delegate void SetModeCallback(ActivityLogMode setMode);
+
+        /* Private Methods */
+
+        /// <summary>
+        /// Set the window to scan mode
+        /// </summary>
+        /// <param name="setMode">
+        /// The set Mode.
+        /// </param>
+        private void SetMode(ActivityLogMode setMode)
         {
-            try
+            if (IsHandleCreated)
             {
-                string logFile = Path.Combine(Path.GetTempPath(), file);
-                if (File.Exists(logFile))
+                if (rtf_actLog.InvokeRequired)
                 {
-                    // Start a new thread to run the autoUpdate process
-                    monitor = new Thread(autoUpdate);
-                    monitor.IsBackground = true;
-                    monitor.Start();
+                    IAsyncResult invoked = BeginInvoke(new SetModeCallback(SetMode), new object[] { setMode });
+                    EndInvoke(invoked);
                 }
                 else
-                    rtf_actLog.AppendText("\n\n\nERROR: The log file could not be found. \nMaybe you cleared your system's tempory folder or maybe you just havn't run an encode yet. \nTried to find the log file in: " + logFile);
-
-            }
-            catch (Exception exc)
-            {
-                MessageBox.Show("startLogThread(): Exception: \n" + exc);
-            }
-        }
-
-        /// <summary>
-        /// Change the log file to be displayed to hb_encode_log.dat
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void btn_scan_log_Click(object sender, EventArgs e)
-        {
-            if (monitor != null)
-                monitor.Abort();
-
-            rtf_actLog.Clear();
-            read_file = "dvdinfo.dat";
-            displayLogHeader();
-            startLogThread(read_file);
-            txt_log.Text = "Scan Log";
-        }
-
-        /// <summary>
-        /// Change the log file to be displayed to dvdinfo.dat
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void btn_encode_log_Click(object sender, EventArgs e)
-        {
-            if (monitor != null)
-                monitor.Abort();
-
-            rtf_actLog.Clear();
-            read_file = "hb_encode_log.dat";
-            position = 0;
-            displayLogHeader();
-            startLogThread(read_file);
-            txt_log.Text = "Encode Log";
-        }
-
-        /// <summary>
-        /// Copy to Clipboard
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void btn_copy_Click(object sender, EventArgs e)
-        {
-            if (rtf_actLog.SelectedText != "")
-                Clipboard.SetDataObject(rtf_actLog.SelectedText, true);
-            else
-                Clipboard.SetDataObject(rtf_actLog.Text, true);
-        }
-
-        /// <summary>
-        /// Updates the log window with any new data which is in the log file.
-        /// This is done every 5 seconds.
-        /// </summary>
-        /// <param name="state"></param>
-        private void autoUpdate(object state)
-        {
-            try
-            {
-                Boolean lastUpdate = false;
-                updateTextFromThread();
-                while (true)
                 {
-                    if ((mainWindow.isEncoding() == true) || (queueWindow.isEncoding() == true))
-                        updateTextFromThread();
+                    Reset();
+                    this.mode = setMode;
+
+                    Array values = Enum.GetValues(typeof(ActivityLogMode));
+                    Properties.Settings.Default.ActivityWindowLastMode = (int)values.GetValue(Convert.ToInt32(setMode));
+                    Properties.Settings.Default.Save();
+
+                    this.Text = mode == ActivityLogMode.Scan
+                                    ? "Activity Window (Scan Log)"
+                                    : "Activity Window (Encode Log)";
+
+                    if (mode == ActivityLogMode.Scan)
+                    {
+                        scan.ScanCompleted += stopWindowRefresh;
+                        encode.EncodeEnded -= stopWindowRefresh;
+                    }
                     else
                     {
-                        // The encode may just have stoped, so, refresh the log one more time before restarting it.
-                        if (lastUpdate == false)
-                            updateTextFromThread();
-
-                        lastUpdate = true; // Prevents the log window from being updated when there is no encode going.
-                        position = 0; // There is no encoding, so reset the log position counter to 0 so it can be reused
+                        scan.ScanCompleted -= stopWindowRefresh;
+                        encode.EncodeEnded += stopWindowRefresh;
                     }
-                    Thread.Sleep(5000);
+
+                    // Start a fresh window timer
+                    windowTimer = new Timer(new TimerCallback(LogMonitor), null, 1000, 1000);
                 }
-            }
-            catch (ThreadAbortException)
-            {
-                // Do Nothing. This is needed since we run thread.abort(). 
-                // Should probably find a better way of making this work at some point.
-            }
-            catch (Exception exc)
-            {
-                MessageBox.Show("autoUpdate(): Exception: \n" + exc);
             }
         }
 
         /// <summary>
-        /// Finds any new text in the log file and calls a funciton to display this new text.
+        /// On Window load, start a new timer
         /// </summary>
-        private void updateTextFromThread()
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The EventArgs.
+        /// </param>
+        private void ActivityWindowLoad(object sender, EventArgs e)
         {
             try
             {
-                string text = "";
-                List<string> data = readFile();
-                int count = data.Count;
-
-                while (position < count)
+                // Set the inital log file.
+                if (encode.IsEncoding)
                 {
-                    text = data[position].ToString();
-                    if (data[position].ToString().Contains("has exited"))
-                        text = "\n ############ End of Log ############## \n";
+                    this.logSelector.SelectedIndex = 1;
+                }
+                else if (scan.IsScanning)
+                {
+                    this.logSelector.SelectedIndex = 0;
+                }
+                else
+                {
+                    // Otherwise, use the last mode the window was in.
+                    ActivityLogMode activitLogMode = (ActivityLogMode)Enum.ToObject(typeof(ActivityLogMode), Properties.Settings.Default.ActivityWindowLastMode);
+                    this.logSelector.SelectedIndex = activitLogMode == ActivityLogMode.Scan ? 0 : 1;
+                }
+            }
+            catch (Exception exc)
+            {
+                errorService.ShowError("Error during load.", exc.ToString());
+            }
+        }
+
+        /// <summary>
+        /// Set the Log window to encode mode when an encode starts.
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void encode_EncodeStarted(object sender, EventArgs e)
+        {
+            SetMode(ActivityLogMode.Encode);
+        }
+
+        /// <summary>
+        /// Set the log widow to scan mode when a scan starts
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void scan_ScanStared(object sender, EventArgs e)
+        {
+            SetMode(ActivityLogMode.Scan);
+        }
+
+        /// <summary>
+        /// Stop refreshing the window when no scanning or encoding is happening.
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void stopWindowRefresh(object sender, EventArgs e)
+        {
+            windowTimer.Dispose();
+            Reset();
+            LogMonitor(null);
+        }
+
+        /// <summary>
+        /// Append new text to the window
+        /// </summary>
+        /// <param name="n">
+        /// The n.
+        /// </param>
+        private void LogMonitor(object n)
+        {
+            AppendWindowText(GetLog());
+        }
+
+        /// <summary>
+        /// New Code for getting the Activity log from the Services rather than reading a file.
+        /// </summary>
+        /// <returns>
+        /// The StringBuilder containing a log
+        /// </returns>
+        private StringBuilder GetLog()
+        {
+            StringBuilder appendText = new StringBuilder();
+
+            try
+            {
+                if (this.mode == ActivityLogMode.Scan)
+                {
+                    if (scan == null || scan.ActivityLog == string.Empty)
+                    {
+                        appendText.AppendFormat("Waiting for the log to be generated ...\n");
+                        position = 0;
+                        ClearWindowText();
+                        return appendText;
+                    }
+
+                    using (StringReader reader = new StringReader(scan.ActivityLog))
+                    {
+                        LogReader(reader, appendText);
+                    }
+                }
+                else
+                {
+                    if (encode == null || encode.ActivityLog == string.Empty)
+                    {
+                        appendText.AppendFormat("Waiting for the log to be generated ...\n");
+                        position = 0;
+                        ClearWindowText();
+                        return appendText;
+                    }
+
+                    using (StringReader reader = new StringReader(encode.ActivityLog))
+                    {
+                        LogReader(reader, appendText);
+                    }
+                }
+            }
+            catch (Exception exc)
+            {
+                windowTimer.Dispose();
+                errorService.ShowError("GetLog() Error", exc.ToString());
+            }
+
+            return appendText;
+        }
+
+        /// <summary>
+        /// Reads the log data from a Scan or Encode object
+        /// </summary>
+        /// <param name="reader">
+        /// The reader.
+        /// </param>
+        /// <param name="appendText">
+        /// The append text.
+        /// </param>
+        private void LogReader(StringReader reader, StringBuilder appendText)
+        {
+            string line;
+            int i = 1;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (i > position)
+                {
+                    appendText.AppendLine(line);
                     position++;
-
-                    SetText(text);
                 }
-            }
-            catch (Exception exc)
-            {
-                MessageBox.Show("updateTextFromThread(): Exception: \n" + exc);
+                i++;
             }
         }
 
         /// <summary>
-        /// Updates the rich text box with anything in the string text.
+        /// Append text to the RTF box
         /// </summary>
-        /// <param name="text"></param>
-        private void SetText(string text)
+        /// <param name="text">
+        /// The text.
+        /// </param>
+        private void AppendWindowText(StringBuilder text)
         {
             try
             {
-                // InvokeRequired required compares the thread ID of the
-                // calling thread to the thread ID of the creating thread.
-                // If these threads are different, it returns true.
-                if (this.IsHandleCreated) // Make sure the windows has a handle before doing anything
+                if (IsHandleCreated)
                 {
-                    if (this.rtf_actLog.InvokeRequired)
+                    if (rtf_actLog.InvokeRequired)
                     {
-                        SetTextCallback d = new SetTextCallback(SetText);
-                        this.Invoke(d, new object[] { text });
+                        IAsyncResult invoked = BeginInvoke(new SetTextCallback(AppendWindowText), new object[] { text });
+                        EndInvoke(invoked);
                     }
                     else
-                        this.rtf_actLog.AppendText(text);
+                        lock (rtf_actLog)
+                            rtf_actLog.AppendText(text.ToString());
+
+                    // Stop the refresh process if log has finished.
+                    if (text.ToString().Contains("HandBrake has Exited"))
+                    {
+                        windowTimer.Dispose();
+                    }
                 }
             }
-            catch (Exception exc)
+            catch (Exception)
             {
-                MessageBox.Show("SetText(): Exception: \n" + exc);
+                return;
             }
         }
 
         /// <summary>
-        /// Read the log file, and store the data in a List.
+        /// Clear the contents of the log window
         /// </summary>
-        /// <returns></returns>
-        private List<string> readFile()
+        private void ClearWindowText()
         {
-            // Ok, the task here is to, Get an arraylist of log data.
-            // And update some global varibles which are pointers to the last displayed log line.
-            List<string> logData = new List<string>();
-
             try
             {
-                // hb_encode_log.dat is the primary log file. Since .NET can't read this file whilst the CLI is outputing to it (Not even in read only mode),
-                // we'll need to make a copy of it.
-                string logFile = Path.Combine(Path.GetTempPath(), read_file);
-                string logFile2 = Path.Combine(Path.GetTempPath(), "hb_encode_log_AppReadable.dat");
-
-                // Make sure the application readable log file does not already exist. FileCopy fill fail if it does.
-                if (File.Exists(logFile2))
-                    File.Delete(logFile2);
-
-                // Copy the log file.
-                File.Copy(logFile, logFile2);
-
-                // Open the copied log file for reading
-                StreamReader sr = new StreamReader(logFile2);
-                string line = sr.ReadLine();
-                while (line != null)
+                if (IsHandleCreated)
                 {
-                    if (line.Trim() != "")
-                        logData.Add(line + System.Environment.NewLine);
-
-                    line = sr.ReadLine();
+                    if (rtf_actLog.InvokeRequired)
+                    {
+                        IAsyncResult invoked = BeginInvoke(new SetTextClearCallback(ClearWindowText));
+                        EndInvoke(invoked);
+                    }
+                    else
+                        lock (rtf_actLog)
+                            rtf_actLog.Clear();
                 }
-                sr.Close();
-                sr.Dispose();
-
-                return logData;
             }
-            catch (Exception exc)
+            catch (Exception)
             {
-                MessageBox.Show("Error in readFile() \n Unable to read the log file.\n You may have to restart HandBrake.\n  Error Information: \n\n" + exc.ToString(), "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
             }
-            return null;
         }
 
         /// <summary>
-        /// Kills the montior thead when the window is disposed of.
+        /// Reset Everything
         /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void forceQuit(object sender, EventArgs e)
+        private void Reset()
         {
-            if (monitor != null)
-            {
-                while (monitor.IsAlive)
-                    monitor.Abort();
-            }
-
-            this.Close();
+            if (windowTimer != null)
+                windowTimer.Dispose();
+            position = 0;
+            ClearWindowText();
+            windowTimer = new Timer(new TimerCallback(LogMonitor), null, 1000, 1000);
         }
 
-        private void copyToolStripMenuItem_Click(object sender, EventArgs e)
+        /* Menus and Buttons */
+
+        /// <summary>
+        /// Copy log to clipboard
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void MnuCopyLogClick(object sender, EventArgs e)
         {
-            if (rtf_actLog.SelectedText != "")
-                Clipboard.SetDataObject(rtf_actLog.SelectedText, true);
-            else
-                Clipboard.SetDataObject(rtf_actLog.Text, true);
+            Clipboard.SetDataObject(rtf_actLog.SelectedText != string.Empty ? rtf_actLog.SelectedText : rtf_actLog.Text, true);
+        }
+
+        /// <summary>
+        /// Open the log folder
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void MnuOpenLogFolderClick(object sender, EventArgs e)
+        {
+            string logDir = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\HandBrake\\logs";
+            string windir = Environment.GetEnvironmentVariable("WINDIR");
+            Process prc = new Process
+                              {
+                                  StartInfo =
+                                      {
+                                          FileName = windir + @"\explorer.exe",
+                                          Arguments = logDir
+                                      }
+                              };
+            prc.Start();
+        }
+
+        /// <summary>
+        /// Copy the log
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void BtnCopyClick(object sender, EventArgs e)
+        {
+            Clipboard.SetDataObject(rtf_actLog.SelectedText != string.Empty ? rtf_actLog.SelectedText : rtf_actLog.Text, true);
+        }
+
+        /// <summary>
+        /// Change the Log file in the viewer
+        /// </summary>
+        /// <param name="sender">The Sender </param>
+        /// <param name="e">The EventArgs</param>
+        private void LogSelectorClick(object sender, EventArgs e)
+        {
+            this.SetMode((string)this.logSelector.SelectedItem == "Scan Log" ? ActivityLogMode.Scan : ActivityLogMode.Encode);
+        }
+
+        /* Overrides */
+
+        /// <summary>
+        /// override onclosing
+        /// </summary>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            scan.ScanStared -= scan_ScanStared;
+            encode.EncodeStarted -= encode_EncodeStarted;
+
+            scan.ScanCompleted -= stopWindowRefresh;
+            encode.EncodeEnded -= stopWindowRefresh;
+
+            windowTimer.Dispose();
+            e.Cancel = true;
+            this.Dispose();
+            base.OnClosing(e);
         }
     }
 }
