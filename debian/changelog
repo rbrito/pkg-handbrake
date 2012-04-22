@@ -1,20 +1,24 @@
-handbrake (0.9.6-1~1.gbp6e95f7) UNRELEASED; urgency=low
+handbrake (0.9.6-1~2.gbpb8aa8c) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @6e95f75a81a1be4cb8bbad1320722d5f70710dcf **
+  ** SNAPSHOT build @b8aa8cd3dba141e72c7ee5798cf97b166f897fb9 **
 
-  * Run a first pass of `wrap-and-sort -s -a -v`.
-  * debian/control: Let the bug reporting to go Debian's BTS.
-  * debian/control: Allow compilation with Debian's libx264.
-  * debian/patches: Refresh them to be cleaner.
-  * debian/control: Loosen the build-dependency on libmp4v2.
-  * debian/rules: Don't allow building in parallel for the moment.
-  * debian/control: Add build-dependency on libdbus-glib-1-dev.
-  * debian/patches: Fix compilation with mp4v2 1.9.1.
   * Convert the package to format 3.0 (quilt).
-  * debian/patches: Fix initial compilation with dirty deb source dir.
+  * Fix generation of debian source package.
   * More fixes for initial compilation.
+  * Run a first pass of `wrap-and-sort -s -a -v`.
+  * debian/control: Add build-dependency on libdbus-glib-1-dev.
+  * debian/control: Allow compilation with Debian's libx264.
+  * debian/control: Let the bug reporting to go Debian's BTS.
+  * debian/control: Loosen the build-dependency on libmp4v2.
+  * debian/patches: Refresh them to be cleaner.
+  * debian/patches: Fix compilation with mp4v2 1.9.1.
+  * debian/rules: Don't allow building in parallel for the moment.
+  * debian/rules: Don't clean a file that's already in the right place.
+  * debian/rules: Remove commented out lines.
+  * debian/rules: cosmetics: Remove indication of makefile.
+  * debian/rules: cosmetics: Indentation.
 
- -- Rogério Brito <rbrito@ime.usp.br>  Sun, 22 Apr 2012 07:22:31 -0300
+ -- Rogério Brito <rbrito@ime.usp.br>  Sun, 22 Apr 2012 09:16:54 -0300
 
 handbrake (0.9.6-0.1) unstable; urgency=low
 
