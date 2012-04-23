@@ -1,6 +1,6 @@
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
-@@ -21,23 +21,11 @@
+@@ -21,23 +21,7 @@
  endif
  
  
@@ -10,10 +10,10 @@
 -MODULES += contrib/freetype
 -MODULES += contrib/lame
 -MODULES += contrib/libass
- MODULES += contrib/libdca
- MODULES += contrib/libdvdread
- MODULES += contrib/libdvdnav
- MODULES += contrib/libbluray
+-MODULES += contrib/libdca
+-MODULES += contrib/libdvdread
+-MODULES += contrib/libdvdnav
+-MODULES += contrib/libbluray
 -MODULES += contrib/libmkv
 -MODULES += contrib/libogg
 -MODULES += contrib/libsamplerate
@@ -24,7 +24,7 @@
  MODULES += contrib/mpeg2dec
  
  ifneq (,$(filter $(BUILD.system),mingw))
-@@ -46,8 +34,6 @@
+@@ -46,8 +30,6 @@
  endif
  endif
  
@@ -33,7 +33,7 @@
  ifneq (,$(filter $(BUILD.system),cygwin mingw))
  ifneq ($(HAS.iconv),1)
      MODULES += contrib/libiconv
-@@ -82,6 +68,11 @@
+@@ -82,6 +64,11 @@
      ## build gtk when gtk+linux
      MODULES += gtk
  endif
@@ -72,7 +72,7 @@
  TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
  
  ifeq (1,$(PTHREADW32.enabled))
-@@ -32,11 +33,11 @@
+@@ -32,11 +33,6 @@
  else
  	TEST.GCC.l += z
  endif
@@ -81,11 +81,6 @@
 -else
 -	TEST.GCC.l += fribidi
 -endif
-+#ifeq (1,$(FRIBIDI.enabled))
-+#    TEST.libs += $(CONTRIB.build/)lib/libfribidi.a
-+#else
-+#	TEST.GCC.l += fribidi
-+#endif
  
  ###############################################################################
  
