@@ -1,9 +1,19 @@
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
-@@ -21,23 +21,7 @@
+@@ -8,8 +8,6 @@
+ 
+ ###############################################################################
+ 
+-MODULES += contrib/a52dec
+-
+ ifneq (,$(filter $(BUILD.system),cygwin mingw))
+ ifneq ($(HAS.bz2),1)
+     MODULES += contrib/bzip2
+@@ -20,24 +18,9 @@
+     MODULES += contrib/fribidi
  endif
  
- 
+-
 -MODULES += contrib/faac
  MODULES += contrib/ffmpeg
 -MODULES += contrib/fontconfig
@@ -11,8 +21,8 @@
 -MODULES += contrib/lame
 -MODULES += contrib/libass
 -MODULES += contrib/libdca
--MODULES += contrib/libdvdread
--MODULES += contrib/libdvdnav
+ MODULES += contrib/libdvdread
+ MODULES += contrib/libdvdnav
 -MODULES += contrib/libbluray
 -MODULES += contrib/libmkv
 -MODULES += contrib/libogg
@@ -24,7 +34,7 @@
  MODULES += contrib/mpeg2dec
  
  ifneq (,$(filter $(BUILD.system),mingw))
-@@ -46,8 +30,6 @@
+@@ -46,8 +29,6 @@
  endif
  endif
  
@@ -33,7 +43,16 @@
  ifneq (,$(filter $(BUILD.system),cygwin mingw))
  ifneq ($(HAS.iconv),1)
      MODULES += contrib/libiconv
-@@ -82,6 +64,11 @@
+@@ -71,7 +52,7 @@
+     MODULES += macosx
+ else
+     ## default is to build CLI
+-    MODULES += test
++    ## MODULES += test
+ endif
+ 
+ ifeq (1-mingw,$(FEATURE.gtk.mingw)-$(BUILD.system))
+@@ -82,6 +63,11 @@
      ## build gtk when gtk+linux
      MODULES += gtk
  endif
