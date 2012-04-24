@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~2.gbpb8aa8c) UNRELEASED; urgency=low
+handbrake (0.9.6-1~3.gbp20933b) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @b8aa8cd3dba141e72c7ee5798cf97b166f897fb9 **
+  ** SNAPSHOT build @20933ba7e8656a6af4ec59208cb1fc7e9cf0a84d **
 
   * Convert the package to format 3.0 (quilt).
   * Fix generation of debian source package.
@@ -17,8 +17,14 @@ handbrake (0.9.6-1~2.gbpb8aa8c) UNRELEASED; urgency=low
   * debian/rules: Remove commented out lines.
   * debian/rules: cosmetics: Remove indication of makefile.
   * debian/rules: cosmetics: Indentation.
+  * 1st try at building with system libs.
+  * libhb: Dirty compilation fix for newer libbluray.
+  * Minor fix for compilation.
+  * Disable (temporarily) HandBrakeCLI.
+  * Revert "Disable (temporarily) HandBrakeCLI."
+  * debian/rules: Fix building package with CLI enabled.
 
- -- Rogério Brito <rbrito@ime.usp.br>  Sun, 22 Apr 2012 09:16:54 -0300
+ -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 01:43:31 -0300
 
 handbrake (0.9.6-0.1) unstable; urgency=low
 
