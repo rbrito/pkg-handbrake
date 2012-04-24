@@ -16,10 +16,6 @@ override_dh_auto_configure:
 override_dh_builddeb:
 	dh_builddeb -- -Zbzip2
 
-override_dh_install:
-	mv debian/handbrake-gtk debian/tmp
-	dh_install
-
 override_dh_clean:
 	dh_clean \
 		download/*tar* \
