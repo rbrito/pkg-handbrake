@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~3.gbp20933b) UNRELEASED; urgency=low
+handbrake (0.9.6-1~5.gbp7d32a1) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @20933ba7e8656a6af4ec59208cb1fc7e9cf0a84d **
+  ** SNAPSHOT build @7d32a13621ab488d35d5141d75d75f49d898ddea **
 
   * Convert the package to format 3.0 (quilt).
   * Fix generation of debian source package.
@@ -23,8 +23,10 @@ handbrake (0.9.6-1~3.gbp20933b) UNRELEASED; urgency=low
   * Disable (temporarily) HandBrakeCLI.
   * Revert "Disable (temporarily) HandBrakeCLI."
   * debian/rules: Fix building package with CLI enabled.
+  * debian/control: Add libdvdnav-dev as a build-dep.
+  * Fix compilation of the tests.
 
- -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 01:43:31 -0300
+ -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
 handbrake (0.9.6-0.1) unstable; urgency=low
 
