@@ -13,6 +13,12 @@ override_dh_auto_configure:
 		--gcc=/usr/lib/ccache/gcc \
 		CC="$(CC)" CXX="$(CXX)"
 
+override_dh_auto_install:
+	dh_auto_install --destdir=debian/tmp
+
+override_dh_install:
+	dh_install --list-missing
+
 override_dh_builddeb:
 	dh_builddeb -- -Zbzip2
 
