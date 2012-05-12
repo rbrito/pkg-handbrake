@@ -1,7 +1,9 @@
 Source: handbrake
 Section: graphics
 Priority: extra
-Maintainer: Christian Marillat <marillat@debian.org>
+Maintainer: Debian Multimedia Maintainers <pkg-multimedia-maintainers@lists.alioth.debian.org>
+Uploaders:
+ Rogério Brito <rbrito@ime.usp.br>
 Homepage: http://www.handbrake.fr/
 Standards-Version: 3.9.3
 Build-Depends:
