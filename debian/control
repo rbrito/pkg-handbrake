@@ -18,8 +18,6 @@ Build-Depends:
  libbz2-dev,
  libdbus-glib-1-dev,
  libdca-dev,
- libdvdnav-dev,
- libdvdread-dev,
  libfaac-dev,
  libgstreamer-plugins-base0.10-dev,
  libgstreamer0.10-dev,
