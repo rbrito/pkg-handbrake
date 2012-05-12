@@ -5,3 +5,4 @@
 03_kfreebsd.diff
 #04_format-security.diff
 0001-libhb-Fix-compilation-with-mp4v2-v1.9.1.patch
+0001-LinGUI-Allow-user-to-pass-libavcodec-settings-also-w.patch
