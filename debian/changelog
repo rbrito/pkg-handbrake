@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~6.gbp04a069) UNRELEASED; urgency=low
+handbrake (0.9.6-1~7.gbp8500dc) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @04a0696f79b9ad0ceb622d08518a71f48b811a54 **
+  ** SNAPSHOT build @8500dce1b63f3b53e539fbd7f26acef4fb8b984b **
 
   * Convert the package to format 3.0 (quilt).
   * Fix generation of debian source package.
@@ -33,6 +33,14 @@ handbrake (0.9.6-1~6.gbp04a069) UNRELEASED; urgency=low
   * Refresh debian/patches/01_build.diff
   * debian/control: Remove libdvd{read,nav}-dev from build deps for the moment.
   * debian/control: Change maintainer and add me as uploader.
+  * debian/patches: Remove encoding indication from desktop file.
+  * debian/rules: Install upstream's changelog.
+  * debian/control: Add Reinhard Tartler to Uploaders.
+  * debian/patches: Disable 04_format-security.diff from being applied.
+  * debian/patches: Remove part to set compiler for ffmpeg.
+  * debian/patches: Don't bother with PowerPC compilation of mpeg2dec.
+  * debian/patches: Remove patching of ffmpeg on kFreeBSD.
+  * Force handbrake to link against the system's libav.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
