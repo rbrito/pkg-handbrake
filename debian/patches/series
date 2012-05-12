@@ -1,7 +1,7 @@
 0001-Remove-encoding-indication-from-desktop-file.patch
 0001-Fix-include-with-the-system-s-libav.patch
 01_build.diff
-02_powerpc.diff
+#02_powerpc.diff
 03_kfreebsd.diff
 #04_format-security.diff
 0001-libhb-Fix-compilation-with-mp4v2-v1.9.1.patch
