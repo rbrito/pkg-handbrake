@@ -27,6 +27,7 @@ Build-Depends:
  libmkv-dev (>= 0.6.5.1),
  libmp3lame-dev,
  libmp4v2-dev,
+ libmpeg2-4-dev,
  libnotify-dev (>= 0.7.3),
  libsamplerate0-dev,
  libswscale-dev,
