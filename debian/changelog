@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~5.gbp7d32a1) UNRELEASED; urgency=low
+handbrake (0.9.6-1~6.gbp04a069) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @7d32a13621ab488d35d5141d75d75f49d898ddea **
+  ** SNAPSHOT build @04a0696f79b9ad0ceb622d08518a71f48b811a54 **
 
   * Convert the package to format 3.0 (quilt).
   * Fix generation of debian source package.
@@ -25,6 +25,14 @@ handbrake (0.9.6-1~5.gbp7d32a1) UNRELEASED; urgency=low
   * debian/rules: Fix building package with CLI enabled.
   * debian/control: Add libdvdnav-dev as a build-dep.
   * Fix compilation of the tests.
+  * gitignore: Add initial list of files to ignore.
+  * debian/control: Remove unused build-dep on xvidcore.
+  * debian/clean: Don't clean files that don't need cleaning.
+  * debian/control: Hooray! We can now compile with Debian's libav.
+  * debian/control: One fewer external library/package: mpeg2.
+  * Refresh debian/patches/01_build.diff
+  * debian/control: Remove libdvd{read,nav}-dev from build deps for the moment.
+  * debian/control: Change maintainer and add me as uploader.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
