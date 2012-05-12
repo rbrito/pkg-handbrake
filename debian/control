@@ -1,6 +1,6 @@
 Source: handbrake
 Section: graphics
-Priority: extra
+Priority: optional
 Maintainer: Debian Multimedia Maintainers <pkg-multimedia-maintainers@lists.alioth.debian.org>
 Uploaders:
  Rogério Brito <rbrito@ime.usp.br>,
