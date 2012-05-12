@@ -3,7 +3,8 @@ Section: graphics
 Priority: extra
 Maintainer: Debian Multimedia Maintainers <pkg-multimedia-maintainers@lists.alioth.debian.org>
 Uploaders:
- Rogério Brito <rbrito@ime.usp.br>
+ Rogério Brito <rbrito@ime.usp.br>,
+ Reinhard Tartler <siretart@gmail.com>
 Homepage: http://www.handbrake.fr/
 Standards-Version: 3.9.3
 Build-Depends:
