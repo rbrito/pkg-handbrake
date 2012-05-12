@@ -9,13 +9,13 @@
  ifneq (,$(filter $(BUILD.system),cygwin mingw))
  ifneq ($(HAS.bz2),1)
      MODULES += contrib/bzip2
-@@ -20,24 +18,9 @@
+@@ -20,25 +18,8 @@
      MODULES += contrib/fribidi
  endif
  
 -
 -MODULES += contrib/faac
- MODULES += contrib/ffmpeg
+-MODULES += contrib/ffmpeg
 -MODULES += contrib/fontconfig
 -MODULES += contrib/freetype
 -MODULES += contrib/lame
@@ -74,10 +74,10 @@
  TEST.libs = $(LIBHB.a) $(foreach n, \
 -        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
 -        ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
-+        avcodec avformat avutil dvdnav dvdread mpeg2 swscale, \
++        dvdnav dvdread mpeg2, \
          $(CONTRIB.build/)lib/lib$(n).a )
  
-+TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray
++TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale
 +
  TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
  
