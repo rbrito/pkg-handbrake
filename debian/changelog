@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~9.gbp16b2ed) UNRELEASED; urgency=low
+handbrake (0.9.6-1~10.gbp04ed26) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @16b2edd3f5b0b4bca30e9a1948903e541a89910a **
+  ** SNAPSHOT build @04ed26246c8c6cd19a4531f03d4b9daaa371a1d7 **
 
   [ Rogério Brito ]
   ** SNAPSHOT build @8500dce1b63f3b53e539fbd7f26acef4fb8b984b **
@@ -64,6 +64,8 @@ handbrake (0.9.6-1~9.gbp16b2ed) UNRELEASED; urgency=low
   * Cook up metadata for use with a patch-queue branch.
   * Regenerate patches cleanly from the 'patch-queue/master' branch.
   * contrib: Remove useless build scripts for 3rd-party programs.
+  * debian/patches/0002-Fix-include... Update with a cleaner solution.
+    Thanks to Fabian Greffrath for the cleaner solution.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
