@@ -1,5 +1,8 @@
-handbrake (0.9.6-1~7.gbp8500dc) UNRELEASED; urgency=low
+handbrake (0.9.6-1~8.gbp96c42c) UNRELEASED; urgency=low
 
+  ** SNAPSHOT build @96c42c346d715cf296675922522b10ac4194a230 **
+
+  [ Rogério Brito ]
   ** SNAPSHOT build @8500dce1b63f3b53e539fbd7f26acef4fb8b984b **
 
   * Convert the package to format 3.0 (quilt).
@@ -41,6 +44,25 @@ handbrake (0.9.6-1~7.gbp8500dc) UNRELEASED; urgency=low
   * debian/patches: Don't bother with PowerPC compilation of mpeg2dec.
   * debian/patches: Remove patching of ffmpeg on kFreeBSD.
   * Force handbrake to link against the system's libav.
+  * LinGUI: Allow user to pass libavcodec settings also with MPEG4 video.
+
+  [ Andres Mejia ]
+  * Change Priority to optional.
+
+  [ Reinhard Tartler ]
+  * fix my email address
+
+  [ Andres Mejia ]
+  * Add myself to Uploaders field.
+  * Add default gbp options to enable pristine-tar.
+
+  [ Rogério Brito ]
+  * debian/A01-gcc4.6.patch: Remove unused patch for mpeg2dec.
+  * Remove unused patches for third-party programs.
+  * debian/patches/01_build.diff: Add DEP-3 metadata to patch.
+  * patches/03_kfreebsd.diff: Add DEP-3 metadata to patch.
+  * Cook up metadata for use with a patch-queue branch.
+  * Regenerate patches cleanly from the 'patch-queue/master' branch.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
