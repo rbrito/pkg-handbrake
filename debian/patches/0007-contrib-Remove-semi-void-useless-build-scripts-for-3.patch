@@ -1,0 +1,302 @@
+From: =?UTF-8?q?Rog=C3=A9rio=20Brito?= <rbrito@ime.usp.br>
+Date: Tue, 15 May 2012 05:22:19 -0300
+Subject: contrib: Remove semi-void/useless build scripts for 3rd-party
+ programs.
+
+---
+ contrib/bzip2/module.defs          |   26 --------------------------
+ contrib/bzip2/module.rules         |    2 --
+ contrib/freetype/module.defs       |    5 -----
+ contrib/freetype/module.rules      |    2 --
+ contrib/libass/module.defs         |   16 ----------------
+ contrib/libass/module.rules        |    2 --
+ contrib/libbluray/module.defs      |   18 ------------------
+ contrib/libbluray/module.rules     |    2 --
+ contrib/libiconv/module.defs       |    4 ----
+ contrib/libiconv/module.rules      |    2 --
+ contrib/libsamplerate/module.defs  |    5 -----
+ contrib/libsamplerate/module.rules |    2 --
+ contrib/libtheora/module.defs      |   13 -------------
+ contrib/libtheora/module.rules     |    2 --
+ contrib/libxml2/module.defs        |   10 ----------
+ contrib/libxml2/module.rules       |    2 --
+ contrib/yasm/module.defs           |    5 -----
+ contrib/yasm/module.rules          |    2 --
+ contrib/zlib/module.defs           |   12 ------------
+ contrib/zlib/module.rules          |    2 --
+ 20 files changed, 134 deletions(-)
+ delete mode 100644 contrib/bzip2/module.defs
+ delete mode 100644 contrib/bzip2/module.rules
+ delete mode 100644 contrib/freetype/module.defs
+ delete mode 100644 contrib/freetype/module.rules
+ delete mode 100644 contrib/libass/module.defs
+ delete mode 100644 contrib/libass/module.rules
+ delete mode 100644 contrib/libbluray/module.defs
+ delete mode 100644 contrib/libbluray/module.rules
+ delete mode 100644 contrib/libiconv/module.defs
+ delete mode 100644 contrib/libiconv/module.rules
+ delete mode 100644 contrib/libsamplerate/module.defs
+ delete mode 100644 contrib/libsamplerate/module.rules
+ delete mode 100644 contrib/libtheora/module.defs
+ delete mode 100644 contrib/libtheora/module.rules
+ delete mode 100644 contrib/libxml2/module.defs
+ delete mode 100644 contrib/libxml2/module.rules
+ delete mode 100644 contrib/yasm/module.defs
+ delete mode 100644 contrib/yasm/module.rules
+ delete mode 100644 contrib/zlib/module.defs
+ delete mode 100644 contrib/zlib/module.rules
+
+diff --git a/contrib/bzip2/module.defs b/contrib/bzip2/module.defs
+deleted file mode 100644
+index 728e281..0000000
+--- a/contrib/bzip2/module.defs
++++ /dev/null
+@@ -1,26 +0,0 @@
+-$(eval $(call import.MODULE.defs,BZIP2,bzip2))
+-$(eval $(call import.CONTRIB.defs,BZIP2))
+-
+-BZIP2.FETCH.url = http://download.handbrake.fr/handbrake/contrib/bzip2-1.0.6.tar.gz
+-BZIP2.EXTRACT.tarbase = bzip2
+-BZIP2.CONFIGURE = $(TOUCH.exe) $@
+-
+-BZIP2.BUILD.extra = \
+-    CC=$(BZIP2.GCC.gcc) \
+-    CFLAGS="$(call fn.ARGS,BZIP2.GCC,*archs *sysroot *minver)" \
+-    RANLIB="$(RANLIB.exe)"
+-    PREFIX=$(call fn.ABSOLUTE,$(CONTRIB.build/))
+-
+-BZIP2.BUILD.ntargets = libbz2.a
+-
+-define BZIP2.INSTALL
+-    $(CP.exe) $(BZIP2.EXTRACT.dir/)libbz2.a $(CONTRIB.build/)lib/
+-    $(CP.exe) $(BZIP2.EXTRACT.dir/)bzlib.h $(CONTRIB.build/)include/
+-    $(TOUCH.exe) $@
+-endef
+-
+-define BZIP2.UNINSTALL
+-    $(RM.exe) -f $(CONTRIB.build/)lib/libbz2.a
+-    $(RM.exe) -f $(CONTRIB.build/)include/bzlib.h
+-    $(RM.exe) -f $(BZIP2.INSTALL.target)
+-endef
+diff --git a/contrib/bzip2/module.rules b/contrib/bzip2/module.rules
+deleted file mode 100644
+index 456bb12..0000000
+--- a/contrib/bzip2/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,BZIP2))
+-$(eval $(call import.CONTRIB.rules,BZIP2))
+diff --git a/contrib/freetype/module.defs b/contrib/freetype/module.defs
+deleted file mode 100644
+index 4f00d68..0000000
+--- a/contrib/freetype/module.defs
++++ /dev/null
+@@ -1,5 +0,0 @@
+-$(eval $(call import.MODULE.defs,FREETYPE,freetype))
+-$(eval $(call import.CONTRIB.defs,FREETYPE))
+-
+-FREETYPE.FETCH.url = http://download.handbrake.fr/handbrake/contrib/freetype-2.4.7.tar.bz2
+-
+diff --git a/contrib/freetype/module.rules b/contrib/freetype/module.rules
+deleted file mode 100644
+index d4ebbda..0000000
+--- a/contrib/freetype/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,FREETYPE))
+-$(eval $(call import.CONTRIB.rules,FREETYPE))
+diff --git a/contrib/libass/module.defs b/contrib/libass/module.defs
+deleted file mode 100644
+index 556d7cc..0000000
+--- a/contrib/libass/module.defs
++++ /dev/null
+@@ -1,16 +0,0 @@
+-__deps__ := FONTCONFIG FREETYPE FRIBIDI
+-$(eval $(call import.MODULE.defs,LIBASS,libass,$(__deps__)))
+-$(eval $(call import.CONTRIB.defs,LIBASS))
+-
+-LIBASS.FETCH.url = http://download.handbrake.fr/handbrake/contrib/libass-0.10.0-1.tar.gz
+-
+-# Disable as many external dependencies as I can get away with
+-# and tell configure where to find our version of freetype
+-LIBASS.CONFIGURE.extra = \
+-    --disable-png --disable-enca \
+-    FREETYPE_LIBS="-L$(call fn.ABSOLUTE,$(CONTRIB.build/))lib -lfreetype" \
+-    FREETYPE_CFLAGS="-I$(call fn.ABSOLUTE,$(CONTRIB.build/))include/freetype2" \
+-    FONTCONFIG_LIBS="-L$(call fn.ABSOLUTE,$(CONTRIB.build/))lib -lfontconfig" \
+-    FONTCONFIG_CFLAGS="-I$(call fn.ABSOLUTE,$(CONTRIB.build/))include" \
+-    FRIBIDI_LIBS="-L$(call fn.ABSOLUTE,$(CONTRIB.build/))lib -lfribidi" \
+-    FRIBIDI_CFLAGS="-I$(call fn.ABSOLUTE,$(CONTRIB.build/))include"
+diff --git a/contrib/libass/module.rules b/contrib/libass/module.rules
+deleted file mode 100644
+index 67a5ab6..0000000
+--- a/contrib/libass/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,LIBASS))
+-$(eval $(call import.CONTRIB.rules,LIBASS))
+diff --git a/contrib/libbluray/module.defs b/contrib/libbluray/module.defs
+deleted file mode 100644
+index d3371d0..0000000
+--- a/contrib/libbluray/module.defs
++++ /dev/null
+@@ -1,18 +0,0 @@
+-$(eval $(call import.MODULE.defs,LIBBLURAY,libbluray,LIBXML2))
+-$(eval $(call import.CONTRIB.defs,LIBBLURAY))
+-
+-LIBBLURAY.FETCH.url = http://download.handbrake.fr/handbrake/contrib/libbluray-0.0.1-pre-213-ga869da8.tar.gz
+-
+-LIBBLURAY.CONFIGURE.bootstrap = rm -fr aclocal.m4 autom4te.cache; ./bootstrap;
+-
+-ifneq (max,$(LIBBLURAY.GCC.g))
+-	LIBBLURAY.CONFIGURE.extra += --disable-debug
+-else
+-	LIBBLURAY.CONFIGURE.extra += --enable-debug
+-endif
+-
+-ifeq (none,$(LIBBLURAY.GCC.O))
+-	LIBBLURAY.CONFIGURE.extra += --disable-optimizations
+-endif
+-
+-LIBBLURAY.CONFIGURE.extra += --disable-examples
+diff --git a/contrib/libbluray/module.rules b/contrib/libbluray/module.rules
+deleted file mode 100644
+index ddea021..0000000
+--- a/contrib/libbluray/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,LIBBLURAY))
+-$(eval $(call import.CONTRIB.rules,LIBBLURAY))
+diff --git a/contrib/libiconv/module.defs b/contrib/libiconv/module.defs
+deleted file mode 100644
+index d1781cc..0000000
+--- a/contrib/libiconv/module.defs
++++ /dev/null
+@@ -1,4 +0,0 @@
+-$(eval $(call import.MODULE.defs,LIBICONV,libiconv))
+-$(eval $(call import.CONTRIB.defs,LIBICONV))
+-
+-LIBICONV.FETCH.url = http://download.handbrake.fr/handbrake/contrib/libiconv-1.13.tar.bz2
+diff --git a/contrib/libiconv/module.rules b/contrib/libiconv/module.rules
+deleted file mode 100644
+index 397d053..0000000
+--- a/contrib/libiconv/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,LIBICONV))
+-$(eval $(call import.CONTRIB.rules,LIBICONV))
+diff --git a/contrib/libsamplerate/module.defs b/contrib/libsamplerate/module.defs
+deleted file mode 100644
+index c99ae3a..0000000
+--- a/contrib/libsamplerate/module.defs
++++ /dev/null
+@@ -1,5 +0,0 @@
+-$(eval $(call import.MODULE.defs,LIBSAMPLERATE,libsamplerate))
+-$(eval $(call import.CONTRIB.defs,LIBSAMPLERATE))
+-
+-LIBSAMPLERATE.FETCH.url = http://download.handbrake.fr/handbrake/contrib/libsamplerate-0.1.4.tar.gz
+-LIBSAMPLERATE.EXTRACT.tarbase = libsamplerate
+diff --git a/contrib/libsamplerate/module.rules b/contrib/libsamplerate/module.rules
+deleted file mode 100644
+index ef63385..0000000
+--- a/contrib/libsamplerate/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,LIBSAMPLERATE))
+-$(eval $(call import.CONTRIB.rules,LIBSAMPLERATE))
+diff --git a/contrib/libtheora/module.defs b/contrib/libtheora/module.defs
+deleted file mode 100644
+index db29a89..0000000
+--- a/contrib/libtheora/module.defs
++++ /dev/null
+@@ -1,13 +0,0 @@
+-$(eval $(call import.MODULE.defs,LIBTHEORA,libtheora,LIBOGG LIBVORBIS))
+-$(eval $(call import.CONTRIB.defs,LIBTHEORA))
+-
+-LIBTHEORA.FETCH.url = http://download.handbrake.fr/handbrake/contrib/libtheora-1.1.0.tar.bz2
+-
+-LIBTHEORA.CONFIGURE.extra = \
+-    --disable-examples \
+-    --disable-oggtest \
+-    --disable-sdltest \
+-    --disable-vorbistest \
+-    --with-ogg=$(call fn.ABSOLUTE,$(CONTRIB.build/)) \
+-    --with-vorbis=$(call fn.ABSOLUTE,$(CONTRIB.build/)) \
+-    HAVE_PKG_CONFIG=no
+diff --git a/contrib/libtheora/module.rules b/contrib/libtheora/module.rules
+deleted file mode 100644
+index c30224b..0000000
+--- a/contrib/libtheora/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,LIBTHEORA))
+-$(eval $(call import.CONTRIB.rules,LIBTHEORA))
+diff --git a/contrib/libxml2/module.defs b/contrib/libxml2/module.defs
+deleted file mode 100644
+index 8d25756..0000000
+--- a/contrib/libxml2/module.defs
++++ /dev/null
+@@ -1,10 +0,0 @@
+-$(eval $(call import.MODULE.defs,LIBXML2,libxml2))
+-$(eval $(call import.CONTRIB.defs,LIBXML2))
+-
+-LIBXML2.FETCH.url = http://download.handbrake.fr/handbrake/contrib/libxml2-2.7.7.tar.gz
+-LIBXML2.EXTRACT.tarbase = libxml2-2.7.7
+-
+-# The Python components do not build on MinGW due to the lack of a select() call
+-# in the MinGW environment.
+-LIBXML2.CONFIGURE.extra = \
+-    --without-python --without-threads
+diff --git a/contrib/libxml2/module.rules b/contrib/libxml2/module.rules
+deleted file mode 100644
+index 0715628..0000000
+--- a/contrib/libxml2/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,LIBXML2))
+-$(eval $(call import.CONTRIB.rules,LIBXML2))
+diff --git a/contrib/yasm/module.defs b/contrib/yasm/module.defs
+deleted file mode 100644
+index 9021557..0000000
+--- a/contrib/yasm/module.defs
++++ /dev/null
+@@ -1,5 +0,0 @@
+-$(eval $(call import.MODULE.defs,YASM,yasm))
+-$(eval $(call import.CONTRIB.defs,YASM))
+-
+-YASM.FETCH.url = http://download.handbrake.fr/handbrake/contrib/yasm-1.1.0.tar.gz
+-
+diff --git a/contrib/yasm/module.rules b/contrib/yasm/module.rules
+deleted file mode 100644
+index ade13f9..0000000
+--- a/contrib/yasm/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,YASM))
+-$(eval $(call import.CONTRIB.rules,YASM))
+diff --git a/contrib/zlib/module.defs b/contrib/zlib/module.defs
+deleted file mode 100644
+index 9ddab57..0000000
+--- a/contrib/zlib/module.defs
++++ /dev/null
+@@ -1,12 +0,0 @@
+-$(eval $(call import.MODULE.defs,ZLIB,zlib))
+-$(eval $(call import.CONTRIB.defs,ZLIB))
+-
+-ZLIB.FETCH.url = http://download.handbrake.fr/handbrake/contrib/zlib-1.2.3.tar.gz
+-ZLIB.EXTRACT.tarbase = zlib
+-ZLIB.CONFIGURE.args = !sete @dir !env !exe @prefix !extra
+-
+-ifeq (1-mingw,$(BUILD.cross)-$(BUILD.system))
+-    ZLIB.CONFIGURE.env.AR     = AR="$(AR.exe) rc"
+-    ZLIB.CONFIGURE.env.RANLIB = RANLIB="$(RANLIB.exe)"
+-    ZLIB.CONFIGURE.env.args  += !AR !RANLIB
+-endif
+diff --git a/contrib/zlib/module.rules b/contrib/zlib/module.rules
+deleted file mode 100644
+index 5767ee6..0000000
+--- a/contrib/zlib/module.rules
++++ /dev/null
+@@ -1,2 +0,0 @@
+-$(eval $(call import.MODULE.rules,ZLIB))
+-$(eval $(call import.CONTRIB.rules,ZLIB))

@@ -4,3 +4,4 @@
 0004-Enable-compilation-on-kFreeBSD-arches.patch
 0005-libhb-Fix-compilation-with-mp4v2-v1.9.1.patch
 0006-LinGUI-Allow-user-to-pass-libavcodec-settings-also-w.patch
+0007-contrib-Remove-semi-void-useless-build-scripts-for-3.patch
