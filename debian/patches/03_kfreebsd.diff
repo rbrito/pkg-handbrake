@@ -1,9 +1,10 @@
-Description: Enable compilation on kFreeBSD arches.
-Forwarded: no
-Author: Christian Marillat <marillat@debian.org>
+Subject: Enable compilation on kFreeBSD arches.
+From: Christian Marillat <marillat@debian.org>
+Date: Tue, 15 May 2012 04:49:36 -0300
+
 Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 Last-Update: 2012-05-15
-
+Forwarded: no
 
 --- a/libhb/ports.h
 +++ b/libhb/ports.h

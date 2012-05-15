@@ -1,13 +1,15 @@
-Description: Remove embedded/downloaded copies of various libraries
- Once this is acceptable, this should be forwarded upstream so that the
- use of system libraries is an option, instead of downloading libraries
- and programs at build time.
-Forwarded: no
-Author: Christian Marillat <marillat@debian.org>
-Author: Rogério Theodoro de Brito <rbrito@ime.usp.br>
-Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
-Last-Update: 2012-05-15
+Subject: Remove embedded/downloaded copies of various libraries
+From: Christian Marillat <marillat@debian.org>
+Date: Tue, 15 May 2012 04:48:54 -0300
 
+Once this is acceptable, this should be forwarded upstream so that the
+use of system libraries is an option, instead of downloading libraries
+and programs at build time.
+
+Last-Update: 2012-05-15
+Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
+Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
+Forwarded: no
 
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
