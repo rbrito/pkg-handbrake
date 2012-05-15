@@ -1,22 +1,25 @@
-From 151a0b3ceccdb081e05f0a030071bafeb88ff962 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Rog=C3=A9rio=20Brito?= <rbrito@ime.usp.br>
 Date: Sat, 12 May 2012 01:53:49 -0300
-Subject: [PATCH] Fix include with the system's libav.
+Subject: Fix include with the system's libav.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
+Forwarded: no
+Last-Update: 2012-05-15
+Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
+Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
+---
+ libhb/audioconvert.h    |  119 +++++++++++++++++++++++++++++++++++++++++++++++
+ libhb/decavcodec.c      |    2 +-
+ libhb/encavcodecaudio.c |    2 +-
+ libhb/module.defs       |    2 +-
+ 4 files changed, 122 insertions(+), 3 deletions(-)
+ create mode 100644 libhb/audioconvert.h
 
-diff --git a/libhb/decavcodec.c b/libhb/decavcodec.c
-index fd58c5c..0cfe80d 100644
---- a/libhb/decavcodec.c
-+++ b/libhb/decavcodec.c
-@@ -38,7 +38,7 @@
- #include "hb.h"
- #include "hbffmpeg.h"
- #include "downmix.h"
--#include "libavcodec/audioconvert.h"
-+#include "audioconvert.h"
- 
- static void compute_frame_duration( hb_work_private_t *pv );
- static void flushDelayQueue( hb_work_private_t *pv );
+diff --git a/libhb/audioconvert.h b/libhb/audioconvert.h
+new file mode 100644
+index 0000000..f50eb3e
 --- /dev/null
 +++ b/libhb/audioconvert.h
 @@ -0,0 +1,119 @@
@@ -139,6 +142,21 @@ index fd58c5c..0cfe80d 100644
 +                     const void * const  in[6], const int  in_stride[6], int len);
 +
 +#endif /* AVCODEC_AUDIOCONVERT_H */
+diff --git a/libhb/decavcodec.c b/libhb/decavcodec.c
+index fd58c5c..5ada89a 100644
+--- a/libhb/decavcodec.c
++++ b/libhb/decavcodec.c
+@@ -38,7 +38,7 @@
+ #include "hb.h"
+ #include "hbffmpeg.h"
+ #include "downmix.h"
+-#include "libavcodec/audioconvert.h"
++#include "audioconvert.h"
+ 
+ static void compute_frame_duration( hb_work_private_t *pv );
+ static void flushDelayQueue( hb_work_private_t *pv );
+diff --git a/libhb/encavcodecaudio.c b/libhb/encavcodecaudio.c
+index 3a23256..0d97e8f 100644
 --- a/libhb/encavcodecaudio.c
 +++ b/libhb/encavcodecaudio.c
 @@ -7,7 +7,7 @@
@@ -150,9 +168,11 @@ index fd58c5c..0cfe80d 100644
  
  struct hb_work_private_s
  {
+diff --git a/libhb/module.defs b/libhb/module.defs
+index 3fefae8..3a5d10d 100644
 --- a/libhb/module.defs
 +++ b/libhb/module.defs
-@@ -38,7 +38,7 @@
+@@ -38,7 +38,7 @@ ifeq (1,$(FEATURE.ff.mpeg2))
  LIBHB.GCC.D += USE_FF_MPEG2
  endif
  LIBHB.GCC.D += __LIBHB__ USE_PTHREAD

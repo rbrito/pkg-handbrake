@@ -1,8 +1,7 @@
-From 78e03944f836db76bd61fb000595f5313634a8f7 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Rog=C3=A9rio=20Brito?= <rbrito@ime.usp.br>
 Date: Fri, 4 May 2012 13:21:56 -0300
-Subject: [PATCH] LinGUI: Allow user to pass libavcodec settings also with
- MPEG4 video.
+Subject: LinGUI: Allow user to pass libavcodec settings also with MPEG4
+ video.
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
@@ -13,7 +12,10 @@ if MPEG4 is selected.
 
 This patch fixes it.
 
-Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
+Applied-Upstream: https://github.com/HandBrake/HandBrake/commit/6bfa70d2543a5defd582236d7ecc2e38d2675bdf
+Forwarded: yes
+Last-Update: 2012-05-15
+Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 ---
  gtk/src/makedeps.py |    2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -31,6 +33,3 @@ index d7c2fa7..674c56d 100644
  	DepEntry("VideoEncoder", "Mp4iPodCompatible", "x264", False, False),
  	DepEntry("AudioTrackQualityEnable", "AudioTrackQuality", "FALSE", True, False),
  	DepEntry("AudioTrackQualityEnable", "AudioTrackQualityValue", "FALSE", True, False),
--- 
-1.7.10
-
