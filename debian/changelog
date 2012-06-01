@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~10.gbp04ed26) UNRELEASED; urgency=low
+handbrake (0.9.6-1~11.gbp308033) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @04ed26246c8c6cd19a4531f03d4b9daaa371a1d7 **
+  ** SNAPSHOT build @308033b3eeb2b8957bf07615cde916c0626d08b0 **
 
   [ Rogério Brito ]
   ** SNAPSHOT build @8500dce1b63f3b53e539fbd7f26acef4fb8b984b **
@@ -66,6 +66,11 @@ handbrake (0.9.6-1~10.gbp04ed26) UNRELEASED; urgency=low
   * contrib: Remove useless build scripts for 3rd-party programs.
   * debian/patches/0002-Fix-include... Update with a cleaner solution.
     Thanks to Fabian Greffrath for the cleaner solution.
+  * Avoid polluting debian/patches with no-op patches.
+  * debian/copyright: First approximation of a DEP-5-like format.
+  * debian/{control,patches}: Adapt kFreeBSD compilation patch to work with
+    the HURD. Thanks to Pino Toscano <pino@debian.org> for the review and
+    modifications.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
