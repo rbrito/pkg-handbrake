@@ -1,43 +1,60 @@
 From: Christian Marillat <marillat@debian.org>
 Date: Tue, 15 May 2012 04:49:36 -0300
-Subject: Enable compilation on kFreeBSD arches.
+Subject: Enable compilation on Debian arches other than Linux (kFreeBSD,
+ HURD).
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
+One of the main points here is that udev is present only on Linux (that is,
+it is the exception, not the norm). So, we check if LINUX is defined or not
+in the appropriate places, instead of listing every operating system that is
+not Windows or MacOS X.
+
 Forwarded: no
-Last-Update: 2012-05-15
+Last-Update: 2012-06-01
+
 Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
+Reviewed-by: Pino Toscano <pino@debian.org>
 Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 ---
- gtk/configure.ac    |    3 +++
- gtk/src/callbacks.c |   11 ++++++++---
- libhb/ports.h       |    2 +-
- 3 files changed, 12 insertions(+), 4 deletions(-)
+ gtk/configure.ac       |    9 +++++++--
+ gtk/src/callbacks.c    |   11 ++++++++---
+ libhb/ports.h          |    2 +-
+ make/include/main.defs |    5 +++++
+ 4 files changed, 21 insertions(+), 6 deletions(-)
 
 diff --git a/gtk/configure.ac b/gtk/configure.ac
-index d2db300..f16dc9d 100644
+index d2db300..60c5660 100644
 --- a/gtk/configure.ac
 +++ b/gtk/configure.ac
-@@ -93,6 +93,9 @@ case $host in
- 	fi
+@@ -94,10 +94,15 @@ case $host in
  	mingw_flag=yes
      ;;
-+    *kfreebsd*)
-+    	GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify dbus-glib-1 webkit-1.0"
-+    ;;
    *)
++    case "$host_os" in)
++	linux*)
++	  pkg_gudev="gudev-1.0"
++	  ;;
++    esac
      if test "x$gst_disable" = "xyes" ; then
- 	    GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gio-2.0 libnotify dbus-glib-1 gudev-1.0"
+-	    GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gio-2.0 libnotify dbus-glib-1 gudev-1.0"
++	    GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gio-2.0 libnotify dbus-glib-1 $pkg_gudev"
+     else
+-	    GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify dbus-glib-1 gudev-1.0"
++	    GHB_PACKAGES="gtk+-2.0 >= 2.10 gthread-2.0 gstreamer-0.10 gstreamer-interfaces-0.10 gstreamer-video-0.10 gstreamer-pbutils-0.10 gio-2.0 libnotify dbus-glib-1 $pkg_gudev"
+     fi
+ 	mingw_flag=no
+     ;;
 diff --git a/gtk/src/callbacks.c b/gtk/src/callbacks.c
-index 94a932d..eb67315 100644
+index 94a932d..866c6e9 100644
 --- a/gtk/src/callbacks.c
 +++ b/gtk/src/callbacks.c
 @@ -28,7 +28,9 @@
  #if !defined(_WIN32)
  #include <poll.h>
  #define G_UDEV_API_IS_SUBJECT_TO_CHANGE 1
-+#if !defined( __FreeBSD_kernel__ )
++#if defined(__linux__)
  #include <gudev/gudev.h>
 +#endif
  #include <dbus/dbus-glib.h>
@@ -58,7 +75,7 @@ index 94a932d..eb67315 100644
  }
  
 -#if !defined(_WIN32)
-+#if !defined(_WIN32) && !defined( __FreeBSD_kernel__ )
++#if defined(__linux__)
  static GUdevClient *udev_ctx = NULL;
  #endif
  
@@ -66,7 +83,7 @@ index 94a932d..eb67315 100644
  ghb_is_cd(GDrive *gd)
  {
 -#if !defined(_WIN32)
-+#if !defined(_WIN32) && !defined( __FreeBSD_kernel__ )
++#if defined(__linux__)
  	gchar *device;
  	GUdevDevice *udd;
  
@@ -75,7 +92,7 @@ index 94a932d..eb67315 100644
  ghb_udev_init()
  {
 -#if !defined(_WIN32)
-+#if !defined(_WIN32) && !defined( __FreeBSD_kernel__ )
++#if defined(__linux__)
  	udev_ctx = g_udev_client_new(NULL);
  #endif
  }
@@ -92,3 +109,19 @@ index 7b743c4..5e17799 100644
  #  define HB_LOW_PRIORITY    0
  #  define HB_NORMAL_PRIORITY 0
  #elif defined( SYS_CYGWIN )
+diff --git a/make/include/main.defs b/make/include/main.defs
+index 9770de1..c34c379 100644
+--- a/make/include/main.defs
++++ b/make/include/main.defs
+@@ -67,6 +67,11 @@ ifeq (1-kfreebsd,$(FEATURE.gtk)-$(BUILD.system))
+     MODULES += gtk
+ endif
+ 
++ifeq (1-gnu,$(FEATURE.gtk)-$(BUILD.system))
++    ## build gtk when gtk+gnu
++    MODULES += gtk
++endif
++
+ ifeq (1,$(FEATURE.local_yasm))
+     MODULES += contrib/yasm
+ endif
