@@ -43,7 +43,7 @@ Build-Depends:
  yasm
 
 Package: handbrake-cli
-Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
+Architecture: amd64 hurd-i386 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
 Depends:
  ${misc:Depends},
  ${shlibs:Depends}
@@ -55,7 +55,7 @@ Description: versatile DVD ripper and video transcoder (command line)
  variant, HandBrakeCLI
 
 Package: handbrake-gtk
-Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
+Architecture: amd64 hurd-i386 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
 Depends:
  ${misc:Depends},
  ${shlibs:Depends}

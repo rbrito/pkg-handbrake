@@ -8,6 +8,7 @@ CXX:=ccache $(CXX)
 
 override_dh_auto_configure:
 	cp make/variant/linux.defs make/variant/kfreebsd.defs
+	cp make/variant/linux.defs make/variant/gnu.defs
 
 	./configure --prefix=/usr --build build \
 		--gcc=/usr/lib/ccache/gcc \
@@ -25,7 +26,7 @@ override_dh_builddeb:
 override_dh_clean:
 	dh_clean \
 		download/*tar* \
-		make/variant/kfreebsd.defs
+		make/variant/kfreebsd.defs make/variant/gnu.defs
 
 override_dh_installchangelogs:
 	dh_installchangelogs NEWS
