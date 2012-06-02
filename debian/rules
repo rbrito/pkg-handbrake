@@ -21,7 +21,7 @@ override_dh_install:
 	dh_install --list-missing
 
 override_dh_builddeb:
-	dh_builddeb -- -Zbzip2
+	dh_builddeb -- -Zxz -z9 -Sextreme
 
 override_dh_clean:
 	dh_clean \
