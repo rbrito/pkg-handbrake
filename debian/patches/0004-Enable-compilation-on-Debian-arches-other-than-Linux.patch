@@ -32,7 +32,7 @@ index d2db300..60c5660 100644
  	mingw_flag=yes
      ;;
    *)
-+    case "$host_os" in)
++    case "$host_os" in
 +	linux*)
 +	  pkg_gudev="gudev-1.0"
 +	  ;;
