@@ -7,3 +7,4 @@
 #0007-Fix-for-compilation-with-Debian-s-libbluray.patch
 #0008-Fix-for-compilation-with-Debian-s-libdca.patch
 #0009-Remove-forcing-PGS-subtitles-to-be-included.patch
+0010-Remove-FAAC-dependency.patch

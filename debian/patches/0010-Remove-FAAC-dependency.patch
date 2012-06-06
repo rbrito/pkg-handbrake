@@ -1,0 +1,594 @@
+From: =?UTF-8?q?Rog=C3=A9rio=20Brito?= <rbrito@ime.usp.br>
+Date: Wed, 6 Jun 2012 06:10:20 -0300
+Subject: Remove FAAC dependency.
+
+We actually kill FAAC completely from here, while we should be ifdef'ing
+things (perhaps) and integrating that in upstream's configure system.
+
+With this, we depend on one fewer package of dubious license for handbrake
+to enter Debian.
+---
+ gtk/src/audiohandler.c |    5 +-
+ gtk/src/ghb.ui         |    8 --
+ gtk/src/hb-backend.c   |    6 +-
+ gtk/src/preset_xlat.c  |    2 +-
+ gtk/src/presets.c      |    6 +-
+ libhb/common.c         |   20 +--
+ libhb/common.h         |    1 -
+ libhb/encfaac.c        |  318 ------------------------------------------------
+ libhb/hb.c             |    2 -
+ libhb/internal.h       |    1 -
+ libhb/module.defs      |    4 +-
+ libhb/muxmkv.c         |    1 -
+ libhb/work.c           |    1 -
+ 13 files changed, 13 insertions(+), 362 deletions(-)
+ delete mode 100644 libhb/encfaac.c
+
+--- a/gtk/src/audiohandler.c
++++ b/gtk/src/audiohandler.c
+@@ -72,7 +72,7 @@
+ 			if ( mux == HB_MUX_MKV )
+ 				fallback = HB_ACODEC_LAME;
+ 			else
+-				fallback = HB_ACODEC_FAAC;
++				fallback = HB_ACODEC_FFAAC;
+ 			break;
+ 		}
+ 	}
+@@ -139,7 +139,7 @@
+ 			return HB_ACODEC_LAME;
+ 
+ 		case HB_ACODEC_AAC_PASS:
+-			return HB_ACODEC_FAAC;
++			return HB_ACODEC_FFAAC;
+ 
+ 		case HB_ACODEC_AC3_PASS:
+ 			return HB_ACODEC_AC3;
+@@ -155,7 +155,6 @@
+ 	{
+ 		mask = 	HB_ACODEC_LAME |
+ 				HB_ACODEC_FFAAC |
+-				HB_ACODEC_FAAC |
+ 				HB_ACODEC_AC3;
+ 	}
+ 	if ( mux == HB_MUX_MKV )
+--- a/gtk/src/ghb.ui
++++ b/gtk/src/ghb.ui
+@@ -7397,14 +7397,6 @@
+   Billy Biggs
+   Christian Wolff
+ 
+-libfaac authors:
+-  M. Bakker
+-  Tony Lenox
+-  RageOMatic
+-  thebard
+-  Ivan Dimkovic
+-  Krzysztof Nikiel
+-
+ libmp3lame authors:
+   Mike Cheng
+   Robert Hegemann
+--- a/gtk/src/hb-backend.c
++++ b/gtk/src/hb-backend.c
+@@ -3731,7 +3731,7 @@
+ gint
+ ghb_get_default_acodec()
+ {
+-	return HB_ACODEC_FAAC;
++	return HB_ACODEC_FFAAC;
+ }
+ 
+ static void
+@@ -4493,7 +4493,7 @@
+ 			}
+ 			else
+ 			{
+-				codec = HB_ACODEC_FAAC;
++				codec = HB_ACODEC_FFAAC;
+ 			}
+ 			value = ghb_lookup_acodec_value(codec);
+ 			ghb_settings_take_value(asettings, "AudioEncoder", value);
+@@ -4507,7 +4507,7 @@
+ 			if (codec == HB_ACODEC_VORBIS)
+ 			{
+ 				a_unsup = "Vorbis";
+-				codec = HB_ACODEC_FAAC;
++				codec = HB_ACODEC_FFAAC;
+ 			}
+ 		}
+ 		if (a_unsup)
+--- a/gtk/src/preset_xlat.c
++++ b/gtk/src/preset_xlat.c
+@@ -260,7 +260,7 @@
+ 
+ static value_map_t acodec_xlat[] =
+ {
+-	{"AAC (faac)", "faac"},
++	{"AAC (faac)", "ffaac"},
+ 	{"AC3 Passthru", "ac3"},
+ 	{"MP3 (lame)", "lame"},
+ 	{"Vorbis (vorbis)", "vorbis"},
+--- a/gtk/src/presets.c
++++ b/gtk/src/presets.c
+@@ -2000,9 +2000,9 @@
+ static value_map_t acodec_xlat[] =
+ {
+ 	{"AAC (ffmpeg)", "ffaac"},
+-	{"AAC (faac)", "faac"},
+-	{"AAC (CoreAudio)", "faac"},
+-	{"HE-AAC (CoreAudio)", "faac"},
++	{"AAC (faac)", "ffaac"},
++	{"AAC (CoreAudio)", "ffaac"},
++	{"HE-AAC (CoreAudio)", "ffaac"},
+ 	{"AC3 (ffmpeg)", "ffac3"},
+ 	{"AC3 (ffmpeg)", "ac3"},
+ 	{"AC3", "ac3"},			// Backwards compatibility with mac ui
+--- a/libhb/common.c
++++ b/libhb/common.c
+@@ -65,7 +65,7 @@
+   { "AAC (CoreAudio)",    "ca_aac",     HB_ACODEC_CA_AAC,       HB_MUX_MP4|HB_MUX_MKV },
+   { "HE-AAC (CoreAudio)", "ca_haac",    HB_ACODEC_CA_HAAC,      HB_MUX_MP4|HB_MUX_MKV },
+ #endif
+-  { "AAC (faac)",         "faac",       HB_ACODEC_FAAC,         HB_MUX_MP4|HB_MUX_MKV },
++  { "AAC (faac)",         "faac",       HB_ACODEC_FFAAC,        HB_MUX_MP4|HB_MUX_MKV },
+   { "AAC (ffmpeg)",       "ffaac",      HB_ACODEC_FFAAC,        HB_MUX_MP4|HB_MUX_MKV },
+   { "AAC Passthru",       "copy:aac",   HB_ACODEC_AAC_PASS,     HB_MUX_MP4|HB_MUX_MKV },
+   { "AC3 (ffmpeg)",       "ffac3",      HB_ACODEC_AC3,          HB_MUX_MP4|HB_MUX_MKV },
+@@ -414,22 +414,6 @@
+             }
+             break;
+ 
+-        case HB_ACODEC_FAAC:
+-            *low = 32 * channels;
+-            if (samplerate > 24000)
+-            {
+-                *high = 160 * channels;
+-                if (*high > 768)
+-                    *high = 768;
+-            }
+-            else
+-            {
+-                *high = 96 * channels;
+-                if (*high > 480)
+-                    *high = 480;
+-            }
+-            break;
+-
+         case HB_ACODEC_FFAAC:
+             *low = 32 * channels;
+             if (samplerate > 24000)
+@@ -1559,7 +1543,7 @@
+ 
+     /* Initalize some sensable defaults */
+     audiocfg->in.track = audiocfg->out.track = 0;
+-    audiocfg->out.codec = HB_ACODEC_FAAC;
++    audiocfg->out.codec = HB_ACODEC_FFAAC;
+     audiocfg->out.bitrate = -1;
+     audiocfg->out.quality = HB_INVALID_AUDIO_QUALITY;
+     audiocfg->out.compression_level = -1;
+--- a/libhb/common.h
++++ b/libhb/common.h
+@@ -857,7 +857,6 @@
+ extern hb_work_object_t hb_decavcodeca;
+ extern hb_work_object_t hb_decavcodecv;
+ extern hb_work_object_t hb_declpcm;
+-extern hb_work_object_t hb_encfaac;
+ extern hb_work_object_t hb_enclame;
+ extern hb_work_object_t hb_encvorbis;
+ extern hb_work_object_t hb_muxer;
+--- a/libhb/encfaac.c
++++ /dev/null
+@@ -1,318 +0,0 @@
+-/* $Id: encfaac.c,v 1.13 2005/03/03 17:21:57 titer Exp $
+-
+-   This file is part of the HandBrake source code.
+-   Homepage: <http://handbrake.fr/>.
+-   It may be used under the terms of the GNU General Public License. */
+-
+-#include "hb.h"
+-
+-#include "faac.h"
+-
+-struct hb_work_private_s
+-{
+-    hb_job_t   * job;
+-
+-    faacEncHandle * faac;
+-    unsigned long   input_samples;
+-    unsigned long   output_bytes;
+-    uint8_t       * buf;
+-    uint8_t       * obuf;
+-    hb_list_t     * list;
+-    double          pts;
+-    double          framedur;
+-	int             out_discrete_channels;
+-};
+-
+-int  encfaacInit( hb_work_object_t *, hb_job_t * );
+-int  encfaacWork( hb_work_object_t *, hb_buffer_t **, hb_buffer_t ** );
+-void encfaacClose( hb_work_object_t * );
+-
+-hb_work_object_t hb_encfaac =
+-{
+-    WORK_ENCFAAC,
+-    "AAC encoder (libfaac)",
+-    encfaacInit,
+-    encfaacWork,
+-    encfaacClose
+-};
+-
+-static const int valid_rates[] =
+-{
+-    22050, 24000, 32000, 44100, 48000, 0
+-};
+-
+-static int find_samplerate( int rate )
+-{
+-    int i;
+-
+-    for ( i = 0; valid_rates[i] && rate > valid_rates[i]; ++i )
+-    {
+-    }
+-    return i;
+-}
+-
+-/***********************************************************************
+- * hb_work_encfaac_init
+- ***********************************************************************
+- *
+- **********************************************************************/
+-int encfaacInit( hb_work_object_t * w, hb_job_t * job )
+-{
+-    hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
+-    hb_audio_t * audio = w->audio;
+-    faacEncConfigurationPtr cfg;
+-    uint8_t * bytes;
+-    unsigned long length;
+-
+-    w->private_data = pv;
+-
+-    pv->job   = job;
+-
+-	/* pass the number of channels used into the private work data */
+-    pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
+-
+-    /* if the sample rate is 'auto' and that has given us an invalid output */
+-    /* rate, map it to the next highest output rate or 48K if above the highest. */
+-    int rate_index = find_samplerate(audio->config.out.samplerate);
+-    if ( audio->config.out.samplerate != valid_rates[rate_index] )
+-    {
+-        int rate = valid_rates[valid_rates[rate_index]? rate_index : rate_index - 1];
+-        hb_log( "encfaac changing output samplerate from %d to %d",
+-                audio->config.out.samplerate, rate );
+-        audio->config.out.samplerate = rate;
+-
+-        /* if the new rate is over the max bandwidth per channel limit */
+-        /* lower the bandwidth. */
+-        double bw = audio->config.out.bitrate * 1000 / pv->out_discrete_channels;
+-        if ( bw > (double)rate * (6144./1024.) )
+-        {
+-            int newbr = (double)rate * (6.144/1024.) * pv->out_discrete_channels;
+-            hb_log( "encfaac changing output bitrate from %d to %d",
+-                    audio->config.out.bitrate, newbr );
+-            audio->config.out.bitrate = newbr;
+-        }
+-    }
+-
+-    pv->faac = faacEncOpen( audio->config.out.samplerate, pv->out_discrete_channels,
+-                            &pv->input_samples, &pv->output_bytes );
+-    pv->buf  = malloc( pv->input_samples * sizeof( float ) );
+-    pv->obuf = malloc( pv->output_bytes );
+-    pv->framedur = 90000.0 * pv->input_samples /
+-                   ( audio->config.out.samplerate * pv->out_discrete_channels );
+-    audio->config.out.samples_per_frame = pv->input_samples / pv->out_discrete_channels;
+-
+-    cfg                = faacEncGetCurrentConfiguration( pv->faac );
+-    cfg->mpegVersion   = MPEG4;
+-    cfg->aacObjectType = LOW;
+-    cfg->allowMidside  = 1;
+-
+-	if (pv->out_discrete_channels == 6) {
+-		/* we are preserving 5.1 audio into 6-channel AAC,
+-		so indicate that we have an lfe channel */
+-		cfg->useLfe    = 1;
+-	} else {
+-		cfg->useLfe    = 0;
+-	}
+-
+-    cfg->useTns        = 0;
+-    cfg->bitRate       = audio->config.out.bitrate * 1000 / pv->out_discrete_channels; /* Per channel */
+-    cfg->bandWidth     = 0;
+-    cfg->outputFormat  = 0;
+-    cfg->inputFormat   =  FAAC_INPUT_FLOAT;
+-
+-    if( ( audio->config.out.mixdown == HB_AMIXDOWN_6CH ) && ( audio->config.in.channel_map != &hb_qt_chan_map ) )
+-    {
+-        if( audio->config.in.channel_map == &hb_ac3_chan_map )
+-        {
+-            cfg->channel_map[0] = 2;
+-            cfg->channel_map[1] = 1;
+-            cfg->channel_map[2] = 3;
+-            cfg->channel_map[3] = 4;
+-            cfg->channel_map[4] = 5;
+-            cfg->channel_map[5] = 0;
+-        }
+-        else if( audio->config.in.channel_map == &hb_smpte_chan_map )
+-        {
+-            cfg->channel_map[0] = 2;
+-            cfg->channel_map[1] = 0;
+-            cfg->channel_map[2] = 1;
+-            cfg->channel_map[3] = 4;
+-            cfg->channel_map[4] = 5;
+-            cfg->channel_map[5] = 3;
+-        }
+-    }
+-
+-    if( !faacEncSetConfiguration( pv->faac, cfg ) )
+-    {
+-        hb_log( "faacEncSetConfiguration failed" );
+-        *job->die = 1;
+-        return 0;
+-    }
+-
+-    if( faacEncGetDecoderSpecificInfo( pv->faac, &bytes, &length ) < 0 )
+-    {
+-        hb_log( "faacEncGetDecoderSpecificInfo failed" );
+-        *job->die = 1;
+-        return 0;
+-    }
+-    memcpy( w->config->extradata.bytes, bytes, length );
+-    w->config->extradata.length = length;
+-    free( bytes );
+-
+-    pv->list = hb_list_init();
+-
+-    return 0;
+-}
+-
+-/***********************************************************************
+- * Close
+- ***********************************************************************
+- *
+- **********************************************************************/
+-void encfaacClose( hb_work_object_t * w )
+-{
+-    hb_work_private_t * pv = w->private_data;
+-    if ( pv )
+-    {
+-        if ( pv->faac )
+-        {
+-            faacEncClose( pv->faac );
+-            pv->faac = NULL;
+-        }
+-        if ( pv->buf )
+-        {
+-            free( pv->buf );
+-            pv->buf = NULL;
+-        }
+-        if ( pv->obuf )
+-        {
+-            free( pv->obuf );
+-            pv->obuf = NULL;
+-        }
+-        if ( pv->list )
+-            hb_list_empty( &pv->list );
+-
+-        free( pv );
+-        w->private_data = NULL;
+-    }
+-}
+-
+-/***********************************************************************
+- * Encode
+- ***********************************************************************
+- *
+- **********************************************************************/
+-static hb_buffer_t * Encode( hb_work_object_t * w )
+-{
+-    hb_work_private_t * pv = w->private_data;
+-
+-    if( hb_list_bytes( pv->list ) < pv->input_samples * sizeof( float ) )
+-    {
+-        /* Need more data */
+-        return NULL;
+-    }
+-
+-    uint64_t pts, pos;
+-    hb_list_getbytes( pv->list, pv->buf, pv->input_samples * sizeof( float ),
+-                      &pts, &pos );
+-
+-    int i;
+-    float *fltBuf = (float*)pv->buf;
+-    for ( i = 0; i < pv->input_samples; i++ )
+-        fltBuf[i] *= 32768.0;
+-        
+-    int size = faacEncEncode( pv->faac, (int32_t *)pv->buf, pv->input_samples,
+-                              pv->obuf, pv->output_bytes );
+-
+-    // AAC needs four frames before it can start encoding so we'll get nothing
+-    // on the first three calls to the encoder.
+-    if ( size > 0 )
+-    {
+-        hb_buffer_t * buf = hb_buffer_init( size );
+-        memcpy( buf->data, pv->obuf, size );
+-        buf->size = size;
+-        buf->start = pv->pts;
+-        pv->pts += pv->framedur;
+-        buf->stop = pv->pts;
+-        buf->frametype   = HB_FRAME_AUDIO;
+-        return buf;
+-    }
+-    return NULL;
+-}
+-
+-static hb_buffer_t *Flush( hb_work_object_t *w, hb_buffer_t *bufin )
+-{
+-    hb_work_private_t *pv = w->private_data;
+-
+-    // pad whatever data we have out to four input frames.
+-    int nbytes = hb_list_bytes( pv->list );
+-    int pad = pv->input_samples * sizeof(float) * 4 - nbytes;
+-    if ( pad > 0 )
+-    {
+-        hb_buffer_t *tmp = hb_buffer_init( pad );
+-        memset( tmp->data, 0, pad );
+-        hb_list_add( pv->list, tmp );
+-    }
+-
+-    // There are up to three frames buffered in the encoder plus one
+-    // in our list buffer so four calls to Encode should get them all.
+-    hb_buffer_t *bufout = NULL, *buf = NULL;
+-    while ( hb_list_bytes( pv->list ) >= pv->input_samples * sizeof(float) )
+-    {
+-        hb_buffer_t *b = Encode( w );
+-        if ( b )
+-        {
+-            if ( bufout == NULL )
+-            {
+-                bufout = b;
+-            }
+-            else
+-            {
+-                buf->next = b;
+-            }
+-            buf = b;
+-        }
+-    }
+-    // add the eof marker to the end of our buf chain
+-    if ( buf )
+-        buf->next = bufin;
+-    else
+-        bufout = bufin;
+-    return bufout;
+-}
+-
+-/***********************************************************************
+- * Work
+- ***********************************************************************
+- *
+- **********************************************************************/
+-int encfaacWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
+-                 hb_buffer_t ** buf_out )
+-{
+-    hb_work_private_t * pv = w->private_data;
+-    hb_buffer_t * buf;
+-
+-    if ( (*buf_in)->size <= 0 )
+-    {
+-        // EOF on input. Finish encoding what we have buffered then send
+-        // it & the eof downstream.
+-
+-        *buf_out = Flush( w, *buf_in );
+-        *buf_in = NULL;
+-        return HB_WORK_DONE;
+-    }
+-
+-    hb_list_add( pv->list, *buf_in );
+-    *buf_in = NULL;
+-
+-    *buf_out = buf = Encode( w );
+-
+-    while( buf )
+-    {
+-        buf->next = Encode( w );
+-        buf       = buf->next;
+-    }
+-
+-    return HB_WORK_OK;
+-}
+-
+--- a/libhb/hb.c
++++ b/libhb/hb.c
+@@ -455,7 +455,6 @@
+ 	hb_register( &hb_decavcodeca );
+ 	hb_register( &hb_decavcodecv );
+ 	hb_register( &hb_declpcm );
+-	hb_register( &hb_encfaac );
+ 	hb_register( &hb_enclame );
+ 	hb_register( &hb_encvorbis );
+ 	hb_register( &hb_muxer );
+@@ -555,7 +554,6 @@
+ 	hb_register( &hb_decavcodeca );
+ 	hb_register( &hb_decavcodecv );
+ 	hb_register( &hb_declpcm );
+-	hb_register( &hb_encfaac );
+ 	hb_register( &hb_enclame );
+ 	hb_register( &hb_encvorbis );
+ 	hb_register( &hb_muxer );
+--- a/libhb/internal.h
++++ b/libhb/internal.h
+@@ -355,7 +355,6 @@
+     WORK_DECAVCODEC,
+     WORK_DECAVCODECV,
+     WORK_DECLPCM,
+-    WORK_ENCFAAC,
+     WORK_ENCLAME,
+     WORK_ENCVORBIS,
+     WORK_ENC_CA_AAC,
+--- a/libhb/module.defs
++++ b/libhb/module.defs
+@@ -1,4 +1,4 @@
+-__deps__ := A52DEC BZIP2 FAAC FFMPEG FONTCONFIG FREETYPE LAME LIBASS LIBDCA \
++__deps__ := A52DEC BZIP2 FFMPEG FONTCONFIG FREETYPE LAME LIBASS LIBDCA \
+     LIBDVDREAD LIBDVDNAV LIBICONV LIBMKV LIBOGG LIBSAMPLERATE LIBTHEORA LIBVORBIS LIBXML2 \
+     MP4V2 MPEG2DEC PTHREADW32 X264 ZLIB LIBBLURAY
+ 
+@@ -92,7 +92,7 @@
+ LIBHB.lib = $(LIBHB.build/)hb.lib
+ 
+ LIBHB.dll.libs = $(foreach n, \
+-        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
++        a52 ass avcodec avformat avutil dca dvdnav dvdread fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
+         ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
+         $(CONTRIB.build/)lib/lib$(n).a )
+ 
+--- a/libhb/muxmkv.c
++++ b/libhb/muxmkv.c
+@@ -251,7 +251,6 @@
+                 }
+                 track->codecID = MK_ACODEC_FLAC;
+                 break;
+-            case HB_ACODEC_FAAC:
+             case HB_ACODEC_FFAAC:
+             case HB_ACODEC_CA_AAC:
+             case HB_ACODEC_CA_HAAC:
+--- a/libhb/work.c
++++ b/libhb/work.c
+@@ -128,7 +128,6 @@
+     hb_work_object_t * w;
+     switch( codec )
+     {
+-        case HB_ACODEC_FAAC:   return hb_get_work( WORK_ENCFAAC );
+         case HB_ACODEC_LAME:   return hb_get_work( WORK_ENCLAME );
+         case HB_ACODEC_VORBIS: return hb_get_work( WORK_ENCVORBIS );
+         case HB_ACODEC_CA_AAC: return hb_get_work( WORK_ENC_CA_AAC );
+--- a/gtk/src/Makefile.am
++++ b/gtk/src/Makefile.am
+@@ -3,13 +3,13 @@
+ if MINGW
+ HB_LIBS= \
+ 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
+-	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
++	-lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
+ 	-lx264 -lmp4v2 -lswscale -ltheora -lz \
+ 	-lbz2 -liberty -lpthreadGC2 -lbluray -lass -lfontconfig -lfreetype
+ else
+ HB_LIBS= \
+ 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
+-	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
++	-lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
+ 	-lx264 -lmp4v2 -lswscale -ltheoraenc -ltheoradec -lz -lxml2 \
+ 	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
+ endif
+--- a/test/module.defs
++++ b/test/module.defs
+@@ -13,7 +13,7 @@
+         dvdnav dvdread, \
+         $(CONTRIB.build/)lib/lib$(n).a )
+ 
+-TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2
++TEST.libs += -lass -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2
+ 
+ TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
+ 
