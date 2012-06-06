@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~11.gbp308033) UNRELEASED; urgency=low
+handbrake (0.9.6-1~12.gbpe980ef) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @308033b3eeb2b8957bf07615cde916c0626d08b0 **
+  ** SNAPSHOT build @e980ef460e007e1b9c0d1131f1c656c6bcae8ca3 **
 
   [ Rogério Brito ]
   ** SNAPSHOT build @8500dce1b63f3b53e539fbd7f26acef4fb8b984b **
@@ -71,6 +71,11 @@ handbrake (0.9.6-1~11.gbp308033) UNRELEASED; urgency=low
   * debian/{control,patches}: Adapt kFreeBSD compilation patch to work with
     the HURD. Thanks to Pino Toscano <pino@debian.org> for the review and
     modifications.
+  * debian/patches: Fix syntax error in portability patch for HURD/kFreeBSD.
+  * debian/patches: Add some patches for compilation of future versions of hb.
+  * debian/rules: Use max xz compression with 'extreme' strategy for binary pkgs.
+  * debian/patches: Add patch to remove FAAC dependency.
+  * d/control: Remove build-dep on faac.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
