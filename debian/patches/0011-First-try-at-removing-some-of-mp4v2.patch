@@ -1,0 +1,24 @@
+From: =?UTF-8?q?Rog=C3=A9rio=20Brito?= <rbrito@ime.usp.br>
+Date: Thu, 7 Jun 2012 07:09:37 -0300
+Subject: First try at removing some of mp4v2.
+
+Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
+---
+ libhb/stream.c |    1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/libhb/stream.c b/libhb/stream.c
+index 93167ba..362f862 100644
+--- a/libhb/stream.c
++++ b/libhb/stream.c
+@@ -12,7 +12,6 @@
+ #include "hbffmpeg.h"
+ #include "lang.h"
+ #include "a52dec/a52.h"
+-#include "mp4v2/mp4v2.h"
+ #include "libbluray/bluray.h"
+ 
+ #define min(a, b) a < b ? a : b
+-- 
+1.7.10
+
