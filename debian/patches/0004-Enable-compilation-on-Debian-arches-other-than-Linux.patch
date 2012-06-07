@@ -11,8 +11,8 @@ it is the exception, not the norm). So, we check if LINUX is defined or not
 in the appropriate places, instead of listing every operating system that is
 not Windows or MacOS X.
 
-Forwarded: no
-Last-Update: 2012-06-01
+Forwarded: yes
+Last-Update: 2012-06-07
 
 Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 Reviewed-by: Pino Toscano <pino@debian.org>
