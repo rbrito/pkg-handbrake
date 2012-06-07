@@ -24,6 +24,7 @@ Build-Depends:
  libdca-dev,
  libgstreamer-plugins-base0.10-dev,
  libgstreamer0.10-dev,
+ libgtk2.0-dev,
  libgudev-1.0-dev [linux-any],
  libmkv-dev (>= 0.6.5.1),
  libmp3lame-dev,
