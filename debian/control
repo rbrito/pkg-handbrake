@@ -35,7 +35,6 @@ Build-Depends:
  libtheora-dev,
  libtool,
  libvorbis-dev,
- libwebkit-dev,
  libx264-dev,
  python,
  wget,
