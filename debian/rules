@@ -10,7 +10,7 @@ override_dh_auto_configure:
 	cp make/variant/linux.defs make/variant/kfreebsd.defs
 	cp make/variant/linux.defs make/variant/gnu.defs
 
-	./configure --disable-gtk-update-checks --prefix=/usr --build build \
+	./configure --prefix=/usr --build build \
 		--gcc=/usr/lib/ccache/gcc \
 		CC="$(CC)" CXX="$(CXX)"
 
