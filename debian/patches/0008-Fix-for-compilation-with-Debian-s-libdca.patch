@@ -14,8 +14,6 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
  libhb/decdca.c |    7 ++++++-
  1 file changed, 6 insertions(+), 1 deletion(-)
 
-diff --git a/libhb/decdca.c b/libhb/decdca.c
-index a459dcd..ee21d31 100644
 --- a/libhb/decdca.c
 +++ b/libhb/decdca.c
 @@ -9,6 +9,11 @@
@@ -30,7 +28,7 @@ index a459dcd..ee21d31 100644
  struct hb_work_private_s
  {
      hb_job_t    * job;
-@@ -309,7 +314,7 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
+@@ -258,7 +263,7 @@ static hb_buffer_t * Decode( hb_work_obj
  
      for( i = 0; i < num_blocks; i++ )
      {
@@ -39,7 +37,3 @@ index a459dcd..ee21d31 100644
          float    * samples_out;
  
          dca_block( pv->state );
--- 
-1.7.10
-
-

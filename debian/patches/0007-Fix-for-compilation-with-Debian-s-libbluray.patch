@@ -21,8 +21,6 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
  libhb/bd.c |    4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)
 
-diff --git a/libhb/bd.c b/libhb/bd.c
-index 782e2d5..9e2e412 100644
 --- a/libhb/bd.c
 +++ b/libhb/bd.c
 @@ -51,7 +51,7 @@ hb_bd_t * hb_bd_init( char * path )
@@ -43,7 +41,3 @@ index 782e2d5..9e2e412 100644
      }
      qsort(d->title_info, d->title_count, sizeof( BLURAY_TITLE_INFO* ), title_info_compare_mpls );
      d->path = strdup( path );
--- 
-1.7.10
-
-

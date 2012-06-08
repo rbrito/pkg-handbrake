@@ -258,7 +258,7 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
 
     for( i = 0; i < num_blocks; i++ )
     {
-        sample_t * samples_in;
+        dca_sample_t * samples_in;
         float    * samples_out;
 
         dca_block( pv->state );
