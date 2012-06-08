@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~14.gbpafa1f1) UNRELEASED; urgency=low
+handbrake (0.9.6-1~15.gbp11281b) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @afa1f1ba1af4f69b7caeed9349082053d66a3ebe **
+  ** SNAPSHOT build @11281b62989b2f04d47226f5c62542feb4f7a534 **
 
   [ Rogério Brito ]
   * Convert the package to format 3.0 (quilt).
@@ -87,6 +87,8 @@ handbrake (0.9.6-1~14.gbpafa1f1) UNRELEASED; urgency=low
   * debian/clean: Update after Fabian's help.
   * debian/patches: Update to use Debian's libdvd{nav,read}.
     Thanks to Daniel Baumann for uploading new versions of these libraries.
+  * debian/control: re-add build-dependencies on libdvd{nav,read}-dev.
+  * Per Fabian's request, we reenable webkit support.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
