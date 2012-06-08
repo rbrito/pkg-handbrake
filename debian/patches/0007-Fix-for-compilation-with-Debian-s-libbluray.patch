@@ -23,7 +23,7 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
 
 --- a/libhb/bd.c
 +++ b/libhb/bd.c
-@@ -51,7 +51,7 @@ hb_bd_t * hb_bd_init( char * path )
+@@ -51,7 +51,7 @@
          goto fail;
      }
  
@@ -32,7 +32,7 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
      if ( d->title_count == 0 )
      {
          hb_log( "bd: not a bd - trying as a stream/file instead" );
-@@ -60,7 +60,7 @@ hb_bd_t * hb_bd_init( char * path )
+@@ -60,7 +60,7 @@
      d->title_info = calloc( sizeof( BLURAY_TITLE_INFO* ) , d->title_count );
      for ( ii = 0; ii < d->title_count; ii++ )
      {

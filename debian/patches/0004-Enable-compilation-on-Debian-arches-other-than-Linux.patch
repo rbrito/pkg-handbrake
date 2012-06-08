@@ -24,11 +24,9 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  make/include/main.defs |    5 +++++
  4 files changed, 21 insertions(+), 6 deletions(-)
 
-diff --git a/gtk/configure.ac b/gtk/configure.ac
-index d2db300..60c5660 100644
 --- a/gtk/configure.ac
 +++ b/gtk/configure.ac
-@@ -94,10 +94,15 @@ case $host in
+@@ -94,10 +94,15 @@
  	mingw_flag=yes
      ;;
    *)
@@ -46,8 +44,6 @@ index d2db300..60c5660 100644
      fi
  	mingw_flag=no
      ;;
-diff --git a/gtk/src/callbacks.c b/gtk/src/callbacks.c
-index 94a932d..866c6e9 100644
 --- a/gtk/src/callbacks.c
 +++ b/gtk/src/callbacks.c
 @@ -28,7 +28,9 @@
@@ -70,7 +66,7 @@ index 94a932d..866c6e9 100644
  #else
  #define WINVER 0x0500
  #include <winsock2.h>
-@@ -3943,14 +3948,14 @@ dvd_device_list()
+@@ -3943,14 +3948,14 @@
  	return dvd_devices;
  }
  
@@ -87,7 +83,7 @@ index 94a932d..866c6e9 100644
  	gchar *device;
  	GUdevDevice *udd;
  
-@@ -3984,7 +3989,7 @@ ghb_is_cd(GDrive *gd)
+@@ -3984,7 +3989,7 @@
  void
  ghb_udev_init()
  {
@@ -96,11 +92,9 @@ index 94a932d..866c6e9 100644
  	udev_ctx = g_udev_client_new(NULL);
  #endif
  }
-diff --git a/libhb/ports.h b/libhb/ports.h
-index 7b743c4..5e17799 100644
 --- a/libhb/ports.h
 +++ b/libhb/ports.h
-@@ -51,7 +51,7 @@ typedef struct hb_thread_s hb_thread_t;
+@@ -51,7 +51,7 @@
  #elif defined( SYS_DARWIN )
  #  define HB_LOW_PRIORITY    0
  #  define HB_NORMAL_PRIORITY 31
@@ -109,11 +103,9 @@ index 7b743c4..5e17799 100644
  #  define HB_LOW_PRIORITY    0
  #  define HB_NORMAL_PRIORITY 0
  #elif defined( SYS_CYGWIN )
-diff --git a/make/include/main.defs b/make/include/main.defs
-index 9770de1..c34c379 100644
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
-@@ -67,6 +67,11 @@ ifeq (1-kfreebsd,$(FEATURE.gtk)-$(BUILD.system))
+@@ -64,6 +64,11 @@
      MODULES += gtk
  endif
  

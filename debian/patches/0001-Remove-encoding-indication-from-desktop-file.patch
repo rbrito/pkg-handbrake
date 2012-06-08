@@ -13,11 +13,9 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  gtk/src/ghb.desktop |    1 -
  1 file changed, 1 deletion(-)
 
-diff --git a/gtk/src/ghb.desktop b/gtk/src/ghb.desktop
-index 1547d29..3583fdd 100644
 --- a/gtk/src/ghb.desktop
 +++ b/gtk/src/ghb.desktop
-@@ -5,7 +5,6 @@ Comment=Transcodes DVD, Bluray, and other media
+@@ -5,7 +5,6 @@
  Exec=ghb
  Icon=hb-icon
  Terminal=false

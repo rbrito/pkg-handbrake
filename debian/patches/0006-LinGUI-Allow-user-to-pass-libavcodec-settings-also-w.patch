@@ -20,11 +20,9 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  gtk/src/makedeps.py |    2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/gtk/src/makedeps.py b/gtk/src/makedeps.py
-index d7c2fa7..674c56d 100644
 --- a/gtk/src/makedeps.py
 +++ b/gtk/src/makedeps.py
-@@ -47,7 +47,7 @@ dep_map = (
+@@ -47,7 +47,7 @@
  	DepEntry("PictureAutoCrop", "PictureLeftCrop", "FALSE", False, False),
  	DepEntry("PictureAutoCrop", "PictureRightCrop", "FALSE", False, False),
  	DepEntry("VideoEncoder", "x264_tab", "x264", False, True),

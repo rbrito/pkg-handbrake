@@ -17,8 +17,6 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  libhb/encavcodecaudio.c |    4 +++-
  2 files changed, 6 insertions(+), 2 deletions(-)
 
-diff --git a/libhb/decavcodec.c b/libhb/decavcodec.c
-index fd58c5c..6192d1e 100644
 --- a/libhb/decavcodec.c
 +++ b/libhb/decavcodec.c
 @@ -38,7 +38,9 @@
@@ -32,8 +30,6 @@ index fd58c5c..6192d1e 100644
  
  static void compute_frame_duration( hb_work_private_t *pv );
  static void flushDelayQueue( hb_work_private_t *pv );
-diff --git a/libhb/encavcodecaudio.c b/libhb/encavcodecaudio.c
-index 3a23256..dad8fa1 100644
 --- a/libhb/encavcodecaudio.c
 +++ b/libhb/encavcodecaudio.c
 @@ -7,7 +7,9 @@

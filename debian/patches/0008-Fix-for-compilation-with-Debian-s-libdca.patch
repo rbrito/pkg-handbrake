@@ -28,7 +28,7 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
  struct hb_work_private_s
  {
      hb_job_t    * job;
-@@ -258,7 +263,7 @@ static hb_buffer_t * Decode( hb_work_obj
+@@ -258,7 +263,7 @@
  
      for( i = 0; i < num_blocks; i++ )
      {

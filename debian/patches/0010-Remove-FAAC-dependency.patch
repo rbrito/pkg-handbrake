@@ -583,12 +583,16 @@ to enter Debian.
  endif
 --- a/test/module.defs
 +++ b/test/module.defs
-@@ -13,7 +13,7 @@
-         dvdnav dvdread, \
-         $(CONTRIB.build/)lib/lib$(n).a )
+@@ -9,10 +9,9 @@
  
--TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2
-+TEST.libs += -lass -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2
+ TEST.exe = $(BUILD/)$(call TARGET.exe,$(HB.name)CLI)
+ 
+-TEST.libs = $(LIBHB.a) $(foreach n, \
+-        $(CONTRIB.build/)lib/lib$(n).a )
++TEST.libs = $(LIBHB.a)
+ 
+-TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2 -ldvdnav -ldvdread
++TEST.libs += -lass -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2 -ldvdnav -ldvdread
  
  TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
  

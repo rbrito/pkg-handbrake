@@ -7,8 +7,6 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
  libhb/stream.c |    1 -
  1 file changed, 1 deletion(-)
 
-diff --git a/libhb/stream.c b/libhb/stream.c
-index 93167ba..362f862 100644
 --- a/libhb/stream.c
 +++ b/libhb/stream.c
 @@ -12,7 +12,6 @@
@@ -19,6 +17,3 @@ index 93167ba..362f862 100644
  #include "libbluray/bluray.h"
  
  #define min(a, b) a < b ? a : b
--- 
-1.7.10
-
