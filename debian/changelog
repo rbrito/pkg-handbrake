@@ -1,10 +1,8 @@
-handbrake (0.9.6-1~13.gbp81707a) UNRELEASED; urgency=low
+handbrake (0.9.6-1~14.gbpafa1f1) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @81707a3048ea1f276e3b3b7f83fa44f8134116c3 **
+  ** SNAPSHOT build @afa1f1ba1af4f69b7caeed9349082053d66a3ebe **
 
   [ Rogério Brito ]
-  ** SNAPSHOT build @8500dce1b63f3b53e539fbd7f26acef4fb8b984b **
-
   * Convert the package to format 3.0 (quilt).
   * Fix generation of debian source package.
   * More fixes for initial compilation.
@@ -80,6 +78,15 @@ handbrake (0.9.6-1~13.gbp81707a) UNRELEASED; urgency=low
   * Mark patches that were forwarded upstream.
   * First try at removing webkit.
   * d/control: Add build-dep on libgtk2.0-dev.
+
+  [ Fabian Greffrath ]
+  * Bring master branch back to pristine upstream branch + patches in debian/patches/
+
+  [ Rogério Brito ]
+  * d/control: Add versioned pre-depends on dpkg for xz compression.
+  * debian/clean: Update after Fabian's help.
+  * debian/patches: Update to use Debian's libdvd{nav,read}.
+    Thanks to Daniel Baumann for uploading new versions of these libraries.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
