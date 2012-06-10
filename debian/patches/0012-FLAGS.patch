@@ -1,0 +1,26 @@
+Author: Fabian Greffrath <fabian+debian@greffrath.com>
+Subject: Consider CFLAGS, CPPFLAGS and LDFLAGS in libhb build.
+
+--- a/make/include/gcc.defs
++++ b/make/include/gcc.defs
+@@ -67,15 +67,15 @@ GCC.args.L         = -L$(1)
+ GCC.args.l         = -l$(1)
+ GCC.args.end       = -Wl,--end-group
+ 
+-GCC.args.extra         =
++GCC.args.extra         = $(CFLAGS) $(CPPFLAGS)
+ GCC.args.extra.h_o     =
+ GCC.args.extra.c_o     =
+-GCC.args.extra.dylib   =
+-GCC.args.extra.exe     =
++GCC.args.extra.dylib   = $(LDFLAGS) -Wl,-z,defs -Wl,--as-needed
++GCC.args.extra.exe     = $(LDFLAGS) -Wl,-z,defs -Wl,--as-needed
+ GCC.args.extra.hpp_o   =
+ GCC.args.extra.cpp_o   =
+-GCC.args.extra.dylib++ =
+-GCC.args.extra.exe++   =
++GCC.args.extra.dylib++ = $(LDFLAGS) -Wl,-z,defs -Wl,--as-needed
++GCC.args.extra.exe++   = $(LDFLAGS) -Wl,-z,defs -Wl,--as-needed
+ 
+ ###############################################################################
+ 
