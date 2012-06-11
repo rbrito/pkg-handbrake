@@ -24,6 +24,24 @@ to enter Debian.
  13 files changed, 13 insertions(+), 362 deletions(-)
  delete mode 100644 libhb/encfaac.c
 
+--- a/gtk/src/Makefile.am
++++ b/gtk/src/Makefile.am
+@@ -3,13 +3,13 @@
+ if MINGW
+ HB_LIBS= \
+ 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
+-	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
++	-lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
+ 	-lx264 -lmp4v2 -lswscale -ltheora -lz \
+ 	-lbz2 -liberty -lpthreadGC2 -lbluray -lass -lfontconfig -lfreetype
+ else
+ HB_LIBS= \
+ 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
+-	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
++	-lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
+ 	-lx264 -lmp4v2 -lswscale -ltheoraenc -ltheoradec -lz -lxml2 \
+ 	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
+ endif
 --- a/gtk/src/audiohandler.c
 +++ b/gtk/src/audiohandler.c
 @@ -72,7 +72,7 @@
@@ -563,34 +581,12 @@ to enter Debian.
          case HB_ACODEC_LAME:   return hb_get_work( WORK_ENCLAME );
          case HB_ACODEC_VORBIS: return hb_get_work( WORK_ENCVORBIS );
          case HB_ACODEC_CA_AAC: return hb_get_work( WORK_ENC_CA_AAC );
---- a/gtk/src/Makefile.am
-+++ b/gtk/src/Makefile.am
-@@ -3,13 +3,13 @@
- if MINGW
- HB_LIBS= \
- 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
--	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
-+	-lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
- 	-lx264 -lmp4v2 -lswscale -ltheora -lz \
- 	-lbz2 -liberty -lpthreadGC2 -lbluray -lass -lfontconfig -lfreetype
- else
- HB_LIBS= \
- 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
--	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
-+	-lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
- 	-lx264 -lmp4v2 -lswscale -ltheoraenc -ltheoradec -lz -lxml2 \
- 	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
- endif
 --- a/test/module.defs
 +++ b/test/module.defs
-@@ -9,10 +9,9 @@
- 
+@@ -10,7 +10,7 @@
  TEST.exe = $(BUILD/)$(call TARGET.exe,$(HB.name)CLI)
  
--TEST.libs = $(LIBHB.a) $(foreach n, \
--        $(CONTRIB.build/)lib/lib$(n).a )
-+TEST.libs = $(LIBHB.a)
- 
+ TEST.libs = $(LIBHB.a)
 -TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2 -ldvdnav -ldvdread
 +TEST.libs += -lass -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2 -ldvdnav -ldvdread
  

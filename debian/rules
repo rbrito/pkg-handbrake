@@ -5,6 +5,7 @@ CXX:=ccache $(CXX)
 
 CFLAGS   = $(shell dpkg-buildflags --get CFLAGS   2>/dev/null | sed -e 's/-g\|-O2//g')
 CXXFLAGS = $(shell dpkg-buildflags --get CXXFLAGS 2>/dev/null | sed -e 's/-g\|-O2//g')
+LDFLAGS += -Wl,-z,defs -Wl,--as-needed
 
 %:
 	dh $@ --builddirectory=build
@@ -16,7 +17,7 @@ override_dh_auto_configure:
 	./configure --prefix=/usr --build build \
 		--gcc=/usr/lib/ccache/gcc \
 		CC="$(CC)" CXX="$(CXX)" \
-		CFLAGS="$(CFLAGS)" CXXFLAGS="$(CXXFLAGS)"
+		CFLAGS="$(CFLAGS)" CXXFLAGS="$(CXXFLAGS)" LDFLAGS="$(LDFLAGS)"
 
 override_dh_auto_install:
 	dh_auto_install --destdir=debian/tmp

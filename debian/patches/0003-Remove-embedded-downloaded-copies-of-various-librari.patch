@@ -30,15 +30,6 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
  endif
  
-@@ -108,7 +108,7 @@
- 	-mwindows -Wl,--export-dynamic -Wl,--exclude-libs,ALL
- else
- ghb_LDFLAGS = \
--	-Wl,--export-dynamic -Wl,--exclude-libs,ALL
-+	-Wl,--export-dynamic -Wl,--exclude-libs,ALL -Wl,-z,defs -Wl,--as-needed
- endif
- 
- ghb_LDADD = $(HB_LIBS) $(GHB_LIBS)
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
 @@ -8,8 +8,6 @@
