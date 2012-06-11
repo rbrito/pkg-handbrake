@@ -7,6 +7,8 @@ Uploaders:
  Reinhard Tartler <siretart@tauware.de>,
  Andres Mejia <amejia@debian.org>
 Homepage: http://www.handbrake.fr/
+Vcs-Git: git://git.debian.org/git/pkg-multimedia/handbrake.git
+Vcs-Browser: http://git.debian.org/?p=pkg-multimedia/handbrake.git;a=summary
 Standards-Version: 3.9.3
 Build-Depends:
  automake,
@@ -22,8 +24,8 @@ Build-Depends:
  libbz2-dev,
  libdbus-glib-1-dev,
  libdca-dev,
- libdvdnav-dev (>= 4.2.0+20120524-1~),
- libdvdread-dev (>= 4.2.0+20120521-1~),
+ libdvdnav-dev (>= 4.2.0+20120524),
+ libdvdread-dev (>= 4.2.0+20120521),
  libgstreamer-plugins-base0.10-dev,
  libgstreamer0.10-dev,
  libgtk2.0-dev,
@@ -45,7 +47,7 @@ Build-Depends:
  yasm
 
 Package: handbrake-cli
-Architecture: amd64 hurd-i386 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
+Architecture: any-amd64 any-i386 powerpc
 Pre-Depends: dpkg (>= 1.15.6~)
 Depends:
  ${misc:Depends},
@@ -54,11 +56,12 @@ Description: versatile DVD ripper and video transcoder (command line)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media.  It's particularly useful
  for making videos that are compatible with portable video devices such as
- the Apple iPod/iPhone or Sony PSP.  This package contains the command-line
- variant, HandBrakeCLI
+ the Apple iPod/iPhone or Sony PSP.
+ .
+ This package contains the command-line variant, HandBrakeCLI.
 
 Package: handbrake-gtk
-Architecture: amd64 hurd-i386 i386 kfreebsd-amd64 kfreebsd-i386 powerpc
+Architecture: any-amd64 any-i386 powerpc
 Pre-Depends: dpkg (>= 1.15.6~)
 Depends:
  ${misc:Depends},
@@ -70,5 +73,6 @@ Description: versatile DVD ripper and video transcoder (GTK GUI)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media. It's particularly useful
  for making videos that are compatible with portable video devices such as
- the Apple iPod/iPhone or Sony PSP. This package contains the graphical
- variant, ghb.
+ the Apple iPod/iPhone or Sony PSP.
+ .
+ This package contains the graphical variant, ghb.
