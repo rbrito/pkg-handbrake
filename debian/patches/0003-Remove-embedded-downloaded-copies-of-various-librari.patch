@@ -99,20 +99,20 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
      MODULES += contrib/yasm
 --- a/test/module.defs
 +++ b/test/module.defs
-@@ -10,10 +10,10 @@
+@@ -9,10 +9,8 @@
+ 
  TEST.exe = $(BUILD/)$(call TARGET.exe,$(HB.name)CLI)
  
- TEST.libs = $(LIBHB.a) $(foreach n, \
+-TEST.libs = $(LIBHB.a) $(foreach n, \
 -        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
 -        ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
-         $(CONTRIB.build/)lib/lib$(n).a )
- 
+-        $(CONTRIB.build/)lib/lib$(n).a )
++TEST.libs = $(LIBHB.a)
 +TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2 -ldvdnav -ldvdread
-+
+ 
  TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
  
- ifeq (1,$(PTHREADW32.enabled))
-@@ -32,11 +32,6 @@
+@@ -32,11 +30,6 @@
  else
  	TEST.GCC.l += z
  endif
