@@ -71,7 +71,7 @@ handbrake (0.9.6-1~15.gbp11281b) UNRELEASED; urgency=low
     modifications.
   * debian/patches: Fix syntax error in portability patch for HURD/kFreeBSD.
   * debian/patches: Add some patches for compilation of future versions of hb.
-  * debian/rules: Use max xz compression with 'extreme' strategy for binary pkgs.
+  * debian/rules: Use max xz compression with 'extreme' strategy for debs.
   * debian/patches: Add patch to remove FAAC dependency.
   * d/control: Remove build-dep on faac.
   * debian/patches: First try at removing some of mp4v2.
@@ -80,7 +80,7 @@ handbrake (0.9.6-1~15.gbp11281b) UNRELEASED; urgency=low
   * d/control: Add build-dep on libgtk2.0-dev.
 
   [ Fabian Greffrath ]
-  * Bring master branch back to pristine upstream branch + patches in debian/patches/
+  * Bring master branch back to pristine upstream branch + patches
 
   [ Rogério Brito ]
   * d/control: Add versioned pre-depends on dpkg for xz compression.
@@ -88,7 +88,7 @@ handbrake (0.9.6-1~15.gbp11281b) UNRELEASED; urgency=low
   * debian/patches: Update to use Debian's libdvd{nav,read}.
     Thanks to Daniel Baumann for uploading new versions of these libraries.
   * debian/control: re-add build-dependencies on libdvd{nav,read}-dev.
-  * Per Fabian's request, we reenable webkit support.
+  * Per Fabian's request, we re-enable webkit support.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
