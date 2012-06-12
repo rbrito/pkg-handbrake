@@ -1,94 +1,78 @@
-handbrake (0.9.6-1~15.gbp11281b) UNRELEASED; urgency=low
+handbrake (0.9.6-1~16.gbp677374) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @11281b62989b2f04d47226f5c62542feb4f7a534 **
+  ** SNAPSHOT build @6773744ffcb4b65890bd2fb322cbcf96ea7abbbc **
+
+  * Team upload.
 
   [ Rogério Brito ]
-  * Convert the package to format 3.0 (quilt).
-  * Fix generation of debian source package.
-  * More fixes for initial compilation.
-  * Run a first pass of `wrap-and-sort -s -a -v`.
-  * debian/control: Add build-dependency on libdbus-glib-1-dev.
-  * debian/control: Allow compilation with Debian's libx264.
-  * debian/control: Let the bug reporting to go Debian's BTS.
-  * debian/control: Loosen the build-dependency on libmp4v2.
-  * debian/patches: Refresh them to be cleaner.
-  * debian/patches: Fix compilation with mp4v2 1.9.1.
-  * debian/rules: Don't allow building in parallel for the moment.
-  * debian/rules: Don't clean a file that's already in the right place.
-  * debian/rules: Remove commented out lines.
-  * debian/rules: cosmetics: Remove indication of makefile.
-  * debian/rules: cosmetics: Indentation.
-  * 1st try at building with system libs.
-  * libhb: Dirty compilation fix for newer libbluray.
-  * Minor fix for compilation.
-  * Disable (temporarily) HandBrakeCLI.
-  * Revert "Disable (temporarily) HandBrakeCLI."
-  * debian/rules: Fix building package with CLI enabled.
-  * debian/control: Add libdvdnav-dev as a build-dep.
-  * Fix compilation of the tests.
-  * gitignore: Add initial list of files to ignore.
-  * debian/control: Remove unused build-dep on xvidcore.
-  * debian/clean: Don't clean files that don't need cleaning.
-  * debian/control: Hooray! We can now compile with Debian's libav.
-  * debian/control: One fewer external library/package: mpeg2.
-  * Refresh debian/patches/01_build.diff
-  * debian/control: Remove libdvd{read,nav}-dev from build deps for the moment.
-  * debian/control: Change maintainer and add me as uploader.
-  * debian/patches: Remove encoding indication from desktop file.
-  * debian/rules: Install upstream's changelog.
-  * debian/control: Add Reinhard Tartler to Uploaders.
-  * debian/patches: Disable 04_format-security.diff from being applied.
-  * debian/patches: Remove part to set compiler for ffmpeg.
-  * debian/patches: Don't bother with PowerPC compilation of mpeg2dec.
-  * debian/patches: Remove patching of ffmpeg on kFreeBSD.
-  * Force handbrake to link against the system's libav.
-  * LinGUI: Allow user to pass libavcodec settings also with MPEG4 video.
+  * Note: This is an almost complete rework of the packaging included in
+    previous iterations of handbrake. This changelog reflects only a
+    fraction of the work that went into make it suitable for Debian and
+    involved the work of many people. For the complete list of changes,
+    we kindly refer you to the git repository for all the details.
+  * Many janitorial fixes to the packaging, including:
+    + Force bug reporting to go Debian's BTS.
+    + Convert the package to format 3.0 (quilt).
+    + Add me as Maintainer.
+    + Add Reinhard Tartler to Uploaders.
+    + Install upstream's changelog.
+    + Add DEP-3 metadata to patches.
+    + First approximation of a DEP-5-like format.
+    + Use max xz compression with 'extreme' strategy for debs.
+    + Add versioned pre-depends on dpkg for xz compression.
+  * Mark patches that were forwarded upstream.
+  * Fix build-dependencies/compilation fixes:
+    + Include libdbus-glib-1-dev, libgtk-2.0-dev.
+    + Remove unused libxvidcore-dev, libfaac-dev.
+    + Don't use external sources for libraries that we already have
+      in debian, by including (but not limited to):
+      libx264-dev, libbluray-dev, libdvdnav-dev, libdvdread-dev,
+      libmpeg2-4-dev, various components of libav.
+      Thanks to Daniel Baumann for uploading suitable, new versions
+      libdvd{nav,read} in time.
+  * debian/patches:
+    + 0001-Remove-encoding-...:
+      Remove encoding indication from desktop file, spotted by lintian.
+    + 0002-Fix-include-with-the-system-s-libav:
+      Use Debian's libav instead of ffmpeg 0.7 downloaded and patched
+      at build time. Thanks to Fabian Greffrath for the cleaner solution.
+    + 0003-Remove-embedded-...:
+    + 0004-Enable-compilation-on-Debian-arches...:
+      Adapt kFreeBSD compilation patch to work with the HURD. Thanks to
+      Pino Toscano for the review and modifications.
+    + 0005-libhb-Fix-compilation-with-mp4v2-v1.9.1-...:
+    + 0006-LinGUI-Allow-user-to-pass-libavcodec-settings-...:
+    + 0007-Fix-for-compilation-with-Debian-s-libbluray:
+    + 0008-Fix-for-compilation-with-Debian-s-libdca:
+    + 0010-Remove-FAAC-dependency:
+      Patch to remove use of FAAC---it is non-free and there are good
+      enough solutions for use as substitutes.
+    + 0011-First-try-at-removing-some-of-mp4v2:
+      First try at removing some of mp4v2---linking mp4v2 against
+      handbrake results in undistributable binaries, which poses a problem
+      for Debian.
 
   [ Andres Mejia ]
   * Change Priority to optional.
+  * Add myself to Uploaders field.
+  * Add default gbp options to enable pristine-tar.
 
   [ Reinhard Tartler ]
   * fix my email address
 
-  [ Andres Mejia ]
-  * Add myself to Uploaders field.
-  * Add default gbp options to enable pristine-tar.
-
-  [ Rogério Brito ]
-  * debian/A01-gcc4.6.patch: Remove unused patch for mpeg2dec.
-  * Remove unused patches for third-party programs.
-  * debian/patches/01_build.diff: Add DEP-3 metadata to patch.
-  * patches/03_kfreebsd.diff: Add DEP-3 metadata to patch.
-  * Cook up metadata for use with a patch-queue branch.
-  * Regenerate patches cleanly from the 'patch-queue/master' branch.
-  * contrib: Remove useless build scripts for 3rd-party programs.
-  * debian/patches/0002-Fix-include... Update with a cleaner solution.
-    Thanks to Fabian Greffrath for the cleaner solution.
-  * Avoid polluting debian/patches with no-op patches.
-  * debian/copyright: First approximation of a DEP-5-like format.
-  * debian/{control,patches}: Adapt kFreeBSD compilation patch to work with
-    the HURD. Thanks to Pino Toscano <pino@debian.org> for the review and
-    modifications.
-  * debian/patches: Fix syntax error in portability patch for HURD/kFreeBSD.
-  * debian/patches: Add some patches for compilation of future versions of hb.
-  * debian/rules: Use max xz compression with 'extreme' strategy for debs.
-  * debian/patches: Add patch to remove FAAC dependency.
-  * d/control: Remove build-dep on faac.
-  * debian/patches: First try at removing some of mp4v2.
-  * Mark patches that were forwarded upstream.
-  * First try at removing webkit.
-  * d/control: Add build-dep on libgtk2.0-dev.
-
   [ Fabian Greffrath ]
   * Bring master branch back to pristine upstream branch + patches
-
-  [ Rogério Brito ]
-  * d/control: Add versioned pre-depends on dpkg for xz compression.
-  * debian/clean: Update after Fabian's help.
-  * debian/patches: Update to use Debian's libdvd{nav,read}.
-    Thanks to Daniel Baumann for uploading new versions of these libraries.
-  * debian/control: re-add build-dependencies on libdvd{nav,read}-dev.
-  * Per Fabian's request, we re-enable webkit support.
+  * Add versions to build-dependencies on libdvdnav-dev and libdvdread-dev.
+  * Consider CFLAGS, CPPFLAGS and LDFLAGS in libhb build and fix format string security errors.
+  * Filter optimization and debug flags out of dpkg-buildflags.
+  * Fix lintian warnings WRT debian/changelog.
+  * Some cosmetic changes to debian/control.
+  * Simplify debian/patches/0003-Remove-embedded-downloaded-copies-of-various-librari.patch
+  * Set LDFLAGS in debian/rules instead of hard-coding them.
+  * Simplify debian/handbrake-gtk.install.
+  * Improvements to 0010-Remove-FAAC-dependency.patch:
+  * Get rid of libmp4v2 and thus MP4 muxing and fall back to MKV instead.
+  * Mention in the package description that we have ripped out libfaac and libmp4v2.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
