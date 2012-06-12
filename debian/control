@@ -57,6 +57,10 @@ Description: versatile DVD ripper and video transcoder (command line)
  for making videos that are compatible with portable video devices such as
  the Apple iPod/iPhone or Sony PSP.
  .
+ This version of handbrake has been modified for inclusion in Debian.
+ It does neither support audio encoding to AAC via faac nor MP4 format
+ muxing via libmp4v2, it falls back to the MKV format instead.
+ .
  This package contains the command-line variant, HandBrakeCLI.
 
 Package: handbrake-gtk
@@ -73,5 +77,9 @@ Description: versatile DVD ripper and video transcoder (GTK GUI)
  videos into H.264, XViD, or OGG formatted media. It's particularly useful
  for making videos that are compatible with portable video devices such as
  the Apple iPod/iPhone or Sony PSP.
+ .
+ This version of handbrake has been modified for inclusion in Debian.
+ It does neither support audio encoding to AAC via faac nor MP4 format
+ muxing via libmp4v2, it falls back to the MKV format instead.
  .
  This package contains the graphical variant, ghb.
