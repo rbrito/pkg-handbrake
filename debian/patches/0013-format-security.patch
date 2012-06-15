@@ -1,6 +1,7 @@
 Author: Fabian Greffrath <fabian+debian@greffrath.com>
 Subject: Fix format string security errors.
 
+Forwarded: no
 --- a/libhb/deccc608sub.c
 +++ b/libhb/deccc608sub.c
 @@ -1607,7 +1607,7 @@ int write_cc_buffer_as_srt (struct eia60

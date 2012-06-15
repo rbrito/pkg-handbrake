@@ -2,6 +2,7 @@ From: =?UTF-8?q?Rog=C3=A9rio=20Brito?= <rbrito@ime.usp.br>
 Date: Thu, 7 Jun 2012 07:09:37 -0300
 Subject: First try at removing some of mp4v2.
 
+Forwarded: partially (only first hunk)
 Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
 ---
  libhb/stream.c |    1 -

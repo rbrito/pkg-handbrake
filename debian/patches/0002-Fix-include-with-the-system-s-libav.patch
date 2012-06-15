@@ -8,7 +8,7 @@ Content-Transfer-Encoding: 8bit
 Thanks to Fabian Greffrath for the more elegant solution than the "brute
 force" that I employed earlier.
 
-Forwarded: no
+Forwarded: yes
 Last-Update: 2012-05-15
 Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
