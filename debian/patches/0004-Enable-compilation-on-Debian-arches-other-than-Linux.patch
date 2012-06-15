@@ -11,6 +11,7 @@ it is the exception, not the norm). So, we check if LINUX is defined or not
 in the appropriate places, instead of listing every operating system that is
 not Windows or MacOS X.
 
+Applied-Upstream: https://github.com/HandBrake/HandBrake/commit/cd368d7e
 Forwarded: yes
 Last-Update: 2012-06-07
 

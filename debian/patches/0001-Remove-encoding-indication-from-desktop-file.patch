@@ -5,6 +5,7 @@ MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
+Applied-Upstream: https://github.com/HandBrake/HandBrake/commit/826dad9e
 Forwarded: yes
 Last-Update: 2012-06-07
 Reviewed-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
