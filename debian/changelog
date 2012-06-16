@@ -1,6 +1,6 @@
-handbrake (0.9.6-1~16.gbp677374) UNRELEASED; urgency=low
+handbrake (0.9.6-1~17.gbp3e1bde) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @6773744ffcb4b65890bd2fb322cbcf96ea7abbbc **
+  ** SNAPSHOT build @3e1bde73579abdc9d8a2aaac6efd22995850186e **
 
   * Team upload.
 
@@ -63,16 +63,19 @@ handbrake (0.9.6-1~16.gbp677374) UNRELEASED; urgency=low
   [ Fabian Greffrath ]
   * Bring master branch back to pristine upstream branch + patches
   * Add versions to build-dependencies on libdvdnav-dev and libdvdread-dev.
-  * Consider CFLAGS, CPPFLAGS and LDFLAGS in libhb build and fix format string security errors.
+  * Consider CFLAGS, CPPFLAGS and LDFLAGS in libhb build and fix format
+    string security errors.
   * Filter optimization and debug flags out of dpkg-buildflags.
   * Fix lintian warnings WRT debian/changelog.
   * Some cosmetic changes to debian/control.
-  * Simplify debian/patches/0003-Remove-embedded-downloaded-copies-of-various-librari.patch
+  * Simplify debian/patches/0003-Remove-embedded-downloaded-....patch
   * Set LDFLAGS in debian/rules instead of hard-coding them.
   * Simplify debian/handbrake-gtk.install.
   * Improvements to 0010-Remove-FAAC-dependency.patch:
   * Get rid of libmp4v2 and thus MP4 muxing and fall back to MKV instead.
-  * Mention in the package description that we have ripped out libfaac and libmp4v2.
+  * Mention in the package description that we have ripped out libfaac and
+    libmp4v2.
+
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
