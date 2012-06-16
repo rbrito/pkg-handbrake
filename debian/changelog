@@ -76,6 +76,12 @@ handbrake (0.9.6-1~17.gbp3e1bde) UNRELEASED; urgency=low
   * Mention in the package description that we have ripped out libfaac and
     libmp4v2.
 
+  [ Rogério Brito ]
+  * debian/patches:
+    + Add 0014-Use-unpatched-a52.patch for use with future releases.
+  * debian/patches:
+    + Add 0015-use-metadata-reading-from-libav.patch to avoid using mp4v2
+      and, therefore, a license problem with linking MPL1.1 code.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
