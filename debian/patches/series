@@ -1,3 +1,4 @@
+0001-libhb-Fix-erroneous-memcpy-used-with-overlapping-mem.patch
 0001-Remove-encoding-indication-from-desktop-file.patch
 0002-Fix-include-with-the-system-s-libav.patch
 0003-Remove-embedded-downloaded-copies-of-various-librari.patch
