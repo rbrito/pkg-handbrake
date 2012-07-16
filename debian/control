@@ -5,7 +5,8 @@ Maintainer: Debian Multimedia Maintainers <pkg-multimedia-maintainers@lists.alio
 Uploaders:
  Rogério Brito <rbrito@ime.usp.br>,
  Reinhard Tartler <siretart@tauware.de>,
- Andres Mejia <amejia@debian.org>
+ Andres Mejia <amejia@debian.org>,
+ Fabian Greffrath <fabian+debian@greffrath.com>
 Homepage: http://www.handbrake.fr/
 Vcs-Git: git://git.debian.org/git/pkg-multimedia/handbrake.git
 Vcs-Browser: http://git.debian.org/?p=pkg-multimedia/handbrake.git;a=summary
