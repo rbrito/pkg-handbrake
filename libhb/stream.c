@@ -12,7 +12,6 @@
 #include "hbffmpeg.h"
 #include "lang.h"
 #include "a52dec/a52.h"
-#include "mp4v2/mp4v2.h"
 #include "libbluray/bluray.h"
 
 #define min(a, b) a < b ? a : b
@@ -250,10 +249,10 @@ static void hb_stream_duration(hb_stream_t *stream, hb_title_t *inTitle);
 static off_t align_to_next_packet(hb_stream_t *stream);
 static int64_t pes_timestamp( const uint8_t *pes );
 
-static void hb_ts_stream_init(hb_stream_t *stream);
+static int hb_ts_stream_init(hb_stream_t *stream);
 static hb_buffer_t * hb_ts_stream_decode(hb_stream_t *stream);
 static void hb_init_audio_list(hb_stream_t *stream, hb_title_t *title);
-static void hb_ts_stream_find_pids(hb_stream_t *stream);
+static int hb_ts_stream_find_pids(hb_stream_t *stream);
 
 static void hb_ps_stream_init(hb_stream_t *stream);
 static hb_buffer_t * hb_ps_stream_decode(hb_stream_t *stream);
@@ -614,10 +613,10 @@ static int hb_stream_get_type(hb_stream_t *stream)
                    " offset %d bytes", psize, offset);
             stream->packetsize = psize;
             stream->hb_stream_type = transport;
-            hb_ts_stream_init(stream);
-            return 1;
+            if (hb_ts_stream_init(stream) == 0)
+                return 1;
         }
-        if ( hb_stream_check_for_ps(stream) != 0 )
+        else if ( hb_stream_check_for_ps(stream) != 0 )
         {
             hb_log("file is MPEG Program Stream");
             stream->hb_stream_type = program;
@@ -2133,7 +2132,7 @@ static void hb_init_audio_list(hb_stream_t *stream, hb_title_t *title)
  *
  **********************************************************************/
 
-static void hb_ts_stream_init(hb_stream_t *stream)
+static int hb_ts_stream_init(hb_stream_t *stream)
 {
     int i;
 
@@ -2161,7 +2160,10 @@ static void hb_ts_stream_init(hb_stream_t *stream)
     stream->ts.packet = malloc( stream->packetsize );
 
     // Find the audio and video pids in the stream
-    hb_ts_stream_find_pids(stream);
+    if (hb_ts_stream_find_pids(stream) < 0)
+    {
+        return -1;
+    }
 
     // hb_ts_resolve_pid_types reads some data, so the TS buffers
     // are needed here.
@@ -2229,6 +2231,7 @@ static void hb_ts_stream_init(hb_stream_t *stream)
                 hb_stream_delete_ts_entry(stream, i);
         }
     }
+    return 0;
 }
 
 static void hb_ps_stream_init(hb_stream_t *stream)
@@ -2919,6 +2922,13 @@ static int parse_pes_header(
                 pes_info->dts = pes_info->pts;
             }
         }
+        // A user encountered a stream that has garbage DTS timestamps. 
+        // DTS should never be > PTS.  Such broken timestamps leads to 
+        // HandBrake computing negative buffer start times. 
+        if (pes_info->dts > pes_info->pts) 
+        { 
+            pes_info->dts = pes_info->pts; 
+        } 
 
         if ( has_escr )
             bits_skip(&bb_hdr, 8 * 6);
@@ -3694,7 +3704,10 @@ static void hb_ps_stream_find_streams(hb_stream_t *stream)
                 if ( decode_ps_map( stream, buf->data, buf->size ) )
                 {
                     hb_log("Found program stream map");
-                    goto done;
+                    // Normally, we could quit here since the program
+                    // stream map *should* map all streams. But once
+                    // again Tivo breaks things by not always creating
+                    // complete maps.  So continue processing...
                 }
                 else
                 {
@@ -3828,7 +3841,6 @@ static void hb_ps_stream_find_streams(hb_stream_t *stream)
         }
         hb_stream_seek( stream, 0.2 );
     }
-done:
     hb_buffer_close( &buf );
 }
 
@@ -4257,7 +4269,7 @@ static void hb_ps_resolve_stream_types(hb_stream_t *stream)
 }
 
 
-static void hb_ts_stream_find_pids(hb_stream_t *stream)
+static int hb_ts_stream_find_pids(hb_stream_t *stream)
 {
     // To be different from every other broadcaster in the world, New Zealand TV
     // changes PMTs (and thus video & audio PIDs) when 'programs' change. Since
@@ -4286,8 +4298,8 @@ static void hb_ts_stream_find_pids(hb_stream_t *stream)
 
         if ((pid == 0x0000) && (stream->ts_number_pat_entries == 0))
         {
-          decode_PAT(buf, stream);
-          continue;
+            decode_PAT(buf, stream);
+            continue;
         }
 
         int pat_index = 0;
@@ -4312,16 +4324,21 @@ static void hb_ts_stream_find_pids(hb_stream_t *stream)
             if (stream->pat_info[pat_index].program_number != 0 &&
                 pid == stream->pat_info[pat_index].program_map_PID)
             {
-              if (build_program_map(buf, stream) > 0)
-                break;
+                if (build_program_map(buf, stream) > 0)
+                {
+                    break;
+                }
             }
         }
         // Keep going  until we have a complete set of PIDs
         if ( ts_index_of_video( stream ) >= 0 )
           break;
     }
+    if ( ts_index_of_video( stream ) < 0 )
+        return -1;
     update_ts_streams( stream, stream->pmt_info.PCR_PID, 0, -1, P, NULL );
- }
+    return 0;
+}
 
 
 // convert a PES PTS or DTS to an int64

@@ -166,8 +166,6 @@ hb_work_object_t * hb_sync_init( hb_job_t * job )
                 chapter   = hb_list_item( title->list_chapter, i - 1 );
                 duration += chapter->duration;
             }
-            duration += 90000;
-            /* 1 second safety so we're sure we won't miss anything */
         }
         sync->count_frames_max = duration * title->rate / title->rate_base / 90000;
     }
@@ -1238,7 +1236,15 @@ static hb_buffer_t * OutputAudioFrame( hb_audio_t *audio, hb_buffer_t *buf,
                                        hb_sync_audio_t *sync )
 {
     int64_t start = (int64_t)sync->next_start;
-    double duration = buf->stop - buf->start;
+
+    // Can't count of buf->s.stop - buf->s.start for accurate duration
+    // due to integer rounding, so use buf->s.duration when it is set
+    // (which should be always if I didn't miss anything)
+    double duration;
+    if ( buf->duration > 0 )
+        duration = buf->duration;
+    else
+        duration = buf->stop - buf->start;
 
     if ( !( audio->config.out.codec & HB_ACODEC_PASS_FLAG ) )
     {

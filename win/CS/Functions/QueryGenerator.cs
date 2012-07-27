@@ -238,7 +238,6 @@ namespace Handbrake.Functions
                     query += string.Format(" --start-at frame:{0} --stop-at frame:{1}", mainWindow.drop_chapterStart.Text, calculatedDuration);
                     break;
                 case 3: // Preview
-                    query += " --previews " + UserSettingService.GetUserSetting<int>(ASUserSettingConstants.PreviewScanCount) + " ";
                     query += " --start-at-preview " + preview;
                     query += " --stop-at duration:" + duration + " ";
                     break;
@@ -493,7 +492,7 @@ namespace Handbrake.Functions
                               : string.Format(",{0}", Converters.GetCliMixDown(audioTrack.MixDown));
 
                 // Audio Samplerates (-R)
-                string rate = audioTrack.SampleRate == 0 ? "Auto" : audioTrack.SampleRate.ToString(); // Default to "Auto"
+                string rate = audioTrack.SampleRate == 0 ? "Auto" : audioTrack.SampleRate.ToString(Culture); // Default to "Auto"
                 samplerates += string.IsNullOrEmpty(samplerates) ? rate : string.Format(",{0}", rate);
 
                 // Audio Bitrates (-B)
@@ -637,6 +636,12 @@ namespace Handbrake.Functions
             // LibDVDNav
             if (UserSettingService.GetUserSetting<bool>(ASUserSettingConstants.DisableLibDvdNav))
                 query += " --no-dvdnav";
+
+            if (UserSettingService.GetUserSetting<int>(ASUserSettingConstants.PreviewScanCount) != 10)
+            {
+                query += string.Format(
+                    " --previews {0} ", UserSettingService.GetUserSetting<int>(ASUserSettingConstants.PreviewScanCount));
+            }
 
             return query;
         }

@@ -98,7 +98,7 @@ namespace Handbrake
 
                 if (selectedTitle != null && !string.IsNullOrEmpty(selectedTitle.SourceName))
                 {
-                    return Path.GetFileName(selectedTitle.SourceName);
+                    return Path.GetFileNameWithoutExtension(selectedTitle.SourceName);
                 }
 
                 // We have a drive, selected as a folder.
@@ -223,7 +223,7 @@ namespace Handbrake
                 if (info.NewVersionAvailable)
                 {
                     UpdateInfo updateWindow = new UpdateInfo(info, userSettingService.GetUserSetting<string>(ASUserSettingConstants.HandBrakeVersion),
-                        userSettingService.GetUserSetting<string>(ASUserSettingConstants.HandBrakeBuild));
+                        userSettingService.GetUserSetting<int>(ASUserSettingConstants.HandBrakeBuild));
                     updateWindow.ShowDialog();
                 }
             }
@@ -622,7 +622,7 @@ namespace Handbrake
             Form preset = new frmAddPreset(this, presetHandler);
             if (preset.ShowDialog() == DialogResult.OK)
             {
-                TreeNode presetTreeview = new TreeNode(presetHandler.LastPresetAdded.Name) { ForeColor = Color.Black };
+                TreeNode presetTreeview = new TreeNode(presetHandler.LastPresetAdded.Name) { ForeColor = Color.Black, Tag = presetHandler.LastPresetAdded };
                 treeView_presets.Nodes.Add(presetTreeview);
                 presetHandler.LastPresetAdded = null;
             }
@@ -826,10 +826,19 @@ namespace Handbrake
         {
             foreach (TreeNode treenode in treeView_presets.Nodes)
             {
+                if (treenode.Tag != null && ((Preset)treenode.Tag).Name == presetName)
+                {
+                    treeView_presets.SelectedNode = treenode;
+                    return;
+                }
+
                 foreach (TreeNode node in treenode.Nodes)
                 {
                     if (node.Text.Equals(presetName))
+                    {
                         treeView_presets.SelectedNode = node;
+                        return;
+                    }
                 }
             }
         }
@@ -2584,7 +2593,7 @@ namespace Handbrake
 
                 if (info.NewVersionAvailable)
                 {
-                    UpdateInfo updateWindow = new UpdateInfo(info, userSettingService.GetUserSetting<string>(ASUserSettingConstants.HandBrakeVersion), userSettingService.GetUserSetting<string>(ASUserSettingConstants.HandBrakeBuild));
+                    UpdateInfo updateWindow = new UpdateInfo(info, userSettingService.GetUserSetting<string>(ASUserSettingConstants.HandBrakeVersion), userSettingService.GetUserSetting<int>(ASUserSettingConstants.HandBrakeBuild));
                     updateWindow.ShowDialog();
                 }
                 else
@@ -2675,6 +2684,7 @@ namespace Handbrake
         }
 
         #endregion
+
 
         // This is the END of the road ****************************************
     }
