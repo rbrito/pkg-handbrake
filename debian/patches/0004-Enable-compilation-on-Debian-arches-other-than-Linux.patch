@@ -27,7 +27,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
-@@ -64,6 +64,11 @@
+@@ -69,6 +69,11 @@
      MODULES += gtk
  endif
  

@@ -55,7 +55,7 @@ to enter Debian.
  			break;
  		}
  	}
-@@ -139,7 +136,7 @@
+@@ -130,7 +127,7 @@
  			return HB_ACODEC_LAME;
  
  		case HB_ACODEC_AAC_PASS:
@@ -64,7 +64,7 @@ to enter Debian.
  
  		case HB_ACODEC_AC3_PASS:
  			return HB_ACODEC_AC3;
-@@ -155,7 +152,6 @@
+@@ -144,7 +141,6 @@
  	{
  		mask = 	HB_ACODEC_LAME |
  				HB_ACODEC_FFAAC |
@@ -74,7 +74,7 @@ to enter Debian.
  	if ( mux == HB_MUX_MKV )
 --- a/gtk/src/hb-backend.c
 +++ b/gtk/src/hb-backend.c
-@@ -3731,7 +3731,7 @@
+@@ -3729,7 +3729,7 @@
  gint
  ghb_get_default_acodec()
  {
@@ -83,7 +83,7 @@ to enter Debian.
  }
  
  static void
-@@ -4487,13 +4487,9 @@
+@@ -4485,13 +4485,9 @@
  			{
  				codec = HB_ACODEC_AC3;
  			}
@@ -98,7 +98,7 @@ to enter Debian.
  			}
  			value = ghb_lookup_acodec_value(codec);
  			ghb_settings_take_value(asettings, "AudioEncoder", value);
-@@ -4507,7 +4503,7 @@
+@@ -4505,7 +4501,7 @@
  			if (codec == HB_ACODEC_VORBIS)
  			{
  				a_unsup = "Vorbis";
@@ -119,7 +119,7 @@ to enter Debian.
  	{"Vorbis (vorbis)", "vorbis"},
 --- a/gtk/src/presets.c
 +++ b/gtk/src/presets.c
-@@ -2000,9 +2000,6 @@
+@@ -2004,9 +2004,6 @@
  static value_map_t acodec_xlat[] =
  {
  	{"AAC (ffmpeg)", "ffaac"},
@@ -131,7 +131,7 @@ to enter Debian.
  	{"AC3", "ac3"},			// Backwards compatibility with mac ui
 --- a/libhb/common.c
 +++ b/libhb/common.c
-@@ -65,7 +65,7 @@
+@@ -66,7 +66,7 @@
    { "AAC (CoreAudio)",    "ca_aac",     HB_ACODEC_CA_AAC,       HB_MUX_MP4|HB_MUX_MKV },
    { "HE-AAC (CoreAudio)", "ca_haac",    HB_ACODEC_CA_HAAC,      HB_MUX_MP4|HB_MUX_MKV },
  #endif
@@ -140,7 +140,7 @@ to enter Debian.
    { "AAC (ffmpeg)",       "ffaac",      HB_ACODEC_FFAAC,        HB_MUX_MP4|HB_MUX_MKV },
    { "AAC Passthru",       "copy:aac",   HB_ACODEC_AAC_PASS,     HB_MUX_MP4|HB_MUX_MKV },
    { "AC3 (ffmpeg)",       "ffac3",      HB_ACODEC_AC3,          HB_MUX_MP4|HB_MUX_MKV },
-@@ -414,22 +414,6 @@
+@@ -415,22 +415,6 @@
              }
              break;
  
@@ -163,7 +163,7 @@ to enter Debian.
          case HB_ACODEC_FFAAC:
              *low = 32 * channels;
              if (samplerate > 24000)
-@@ -1559,7 +1543,7 @@
+@@ -1560,7 +1544,7 @@
  
      /* Initalize some sensable defaults */
      audiocfg->in.track = audiocfg->out.track = 0;
@@ -214,7 +214,7 @@ to enter Debian.
  	hb_register( &hb_muxer );
 --- a/libhb/internal.h
 +++ b/libhb/internal.h
-@@ -355,7 +355,6 @@
+@@ -360,7 +360,6 @@
      WORK_DECAVCODEC,
      WORK_DECAVCODECV,
      WORK_DECLPCM,
@@ -241,7 +241,7 @@ to enter Debian.
  
 --- a/libhb/muxmkv.c
 +++ b/libhb/muxmkv.c
-@@ -251,7 +251,6 @@
+@@ -255,7 +255,6 @@
                  }
                  track->codecID = MK_ACODEC_FLAC;
                  break;

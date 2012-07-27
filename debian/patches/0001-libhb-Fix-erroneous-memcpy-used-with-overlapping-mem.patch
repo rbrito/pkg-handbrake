@@ -14,11 +14,9 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
  libhb/deca52.c |    2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/libhb/deca52.c b/libhb/deca52.c
-index a8d537d..d137a96 100644
 --- a/libhb/deca52.c
 +++ b/libhb/deca52.c
-@@ -374,7 +374,7 @@ static int deca52BSInfo( hb_work_object_t *w, const hb_buffer_t *b,
+@@ -376,7 +376,7 @@
              // discard enough bytes from the front of the buffer to make
              // room for the new stuff
              int newlen = sizeof(w->audio->priv.config.a52.buf) - blen;
@@ -27,6 +25,3 @@ index a8d537d..d137a96 100644
              len = newlen;
          }
      }
--- 
-1.7.10
-
