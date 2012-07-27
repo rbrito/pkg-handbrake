@@ -712,29 +712,26 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
     hb_job_t           * job = title->job;
     char                 filename[1024];
     FILE               * file;
-    uint8_t            * buf1, * buf2, * buf3, * buf4, * pen;
+    uint8_t            * buf1, * buf2, * buf3, * pen;
     uint32_t             swsflags;
-    AVPicture            pic_in, pic_preview, pic_deint, pic_crop, pic_scale;
+    AVPicture            pic_in, pic_preview, pic_deint, pic_crop;
     struct SwsContext  * context;
-    int                  i;
-    int                  deint_width = ((title->width + 7) >> 3) << 3;
-    int                  rgb_width = ((job->width + 7) >> 3) << 3;
+    int                  i, p;
+    int                  aligned_width = ((title->width + 7) & ~7);
+    int                  aligned_height = ((title->height + 7) & ~7);
     int                  preview_size;
 
     swsflags = SWS_LANCZOS | SWS_ACCURATE_RND;
 
-    buf1 = av_malloc( avpicture_get_size( PIX_FMT_YUV420P, title->width, title->height ) );
-    buf2 = av_malloc( avpicture_get_size( PIX_FMT_YUV420P, deint_width, title->height ) );
-    buf3 = av_malloc( avpicture_get_size( PIX_FMT_YUV420P, rgb_width, job->height ) );
-    buf4 = av_malloc( avpicture_get_size( PIX_FMT_RGB32, rgb_width, job->height ) );
+    buf1 = av_malloc( avpicture_get_size( PIX_FMT_YUV420P, aligned_width, aligned_height ) );
+    buf2 = av_malloc( avpicture_get_size( PIX_FMT_YUV420P, aligned_width, aligned_height ) );
+    buf3 = av_malloc( avpicture_get_size( PIX_FMT_RGB32, job->width, job->height ) );
     avpicture_fill( &pic_in, buf1, PIX_FMT_YUV420P,
-                    title->width, title->height );
+                    aligned_width, aligned_height );
     avpicture_fill( &pic_deint, buf2, PIX_FMT_YUV420P,
-                    deint_width, title->height );
-    avpicture_fill( &pic_scale, buf3, PIX_FMT_YUV420P,
-                    rgb_width, job->height );
-    avpicture_fill( &pic_preview, buf4, PIX_FMT_RGB32,
-                    rgb_width, job->height );
+                    aligned_width, aligned_height );
+    avpicture_fill( &pic_preview, buf3, PIX_FMT_RGB32,
+                    job->width, job->height );
 
     // Allocate the AVPicture frames and fill in
 
@@ -750,13 +747,23 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
         return;
     }
 
-    fread( buf1, avpicture_get_size( PIX_FMT_YUV420P, title->width, title->height), 1, file );
+    for (p = 0; p < 3; p++)
+    {
+        int w = !p ? title->width : title->width >> 1;
+        int h = !p ? title->height : title->height >> 1;
+        pen = pic_in.data[p];
+        for (i = 0; i < h; i++)
+        {
+            fread( pen, w, 1, file );
+            pen += pic_in.linesize[p];
+        }
+    }
     fclose( file );
 
     if( job->deinterlace )
     {
         // Deinterlace and crop
-        avpicture_deinterlace( &pic_deint, &pic_in, PIX_FMT_YUV420P, title->width, title->height );
+        avpicture_deinterlace( &pic_deint, &pic_in, PIX_FMT_YUV420P, aligned_width, aligned_height );
         av_picture_crop( &pic_crop, &pic_deint, PIX_FMT_YUV420P, job->crop[0], job->crop[2] );
     }
     else
@@ -769,27 +776,13 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
     context = hb_sws_get_context(title->width  - (job->crop[2] + job->crop[3]),
                              title->height - (job->crop[0] + job->crop[1]),
                              PIX_FMT_YUV420P,
-                             job->width, job->height, PIX_FMT_YUV420P,
+                             job->width, job->height, PIX_FMT_RGB32,
                              swsflags);
 
     // Scale
     sws_scale(context,
               (const uint8_t* const *)pic_crop.data, pic_crop.linesize,
               0, title->height - (job->crop[0] + job->crop[1]),
-              pic_scale.data, pic_scale.linesize);
-
-    // Free context
-    sws_freeContext( context );
-
-    // Get preview context
-    context = hb_sws_get_context(rgb_width, job->height, PIX_FMT_YUV420P,
-                              rgb_width, job->height, PIX_FMT_RGB32,
-                              swsflags);
-
-    // Create preview
-    sws_scale(context,
-              (const uint8_t* const *)pic_scale.data, pic_scale.linesize,
-              0, job->height,
               pic_preview.data, pic_preview.linesize);
 
     // Free context
@@ -799,13 +792,12 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
     pen = buffer;
     for( i = 0; i < job->height; i++ )
     {
-        memcpy( pen, buf4 + preview_size * i, 4 * job->width );
+        memcpy( pen, buf3 + preview_size * i, 4 * job->width );
         pen += 4 * job->width;
     }
 
     // Clean up
     avpicture_free( &pic_preview );
-    avpicture_free( &pic_scale );
     avpicture_free( &pic_deint );
     avpicture_free( &pic_in );
 }
@@ -827,8 +819,10 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
  * @param prog_diff   Sensitivity for detecting different colors on progressive frames
  * @param prog_threshold Sensitivity for flagging progressive frames as combed
  */
-int hb_detect_comb( hb_buffer_t * buf, int width, int height, int color_equal, int color_diff, int threshold, int prog_equal, int prog_diff, int prog_threshold )
+int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int threshold, int prog_equal, int prog_diff, int prog_threshold )
 {
+    int width = buf->width;
+    int height = buf->height;
     int j, k, n, off, cc_1, cc_2, cc[3];
 	// int flag[3] ; // debugging flag
     uint16_t s1, s2, s3, s4;
@@ -962,8 +956,8 @@ void hb_set_anamorphic_size( hb_job_t * job,
     int mod = job->modulus ? job->modulus : 16;
     double aspect = title->aspect;
     
-    int pixel_aspect_width  = job->anamorphic.par_width;
-    int pixel_aspect_height = job->anamorphic.par_height;
+    int64_t pixel_aspect_width  = job->anamorphic.par_width;
+    int64_t pixel_aspect_height = job->anamorphic.par_height;
 
     /* If a source was really NTSC or PAL and the user specified ITU PAR
        values, replace the standard PAR values with the ITU broadcast ones. */
@@ -1033,8 +1027,8 @@ void hb_set_anamorphic_size( hb_job_t * job,
             *output_height = MULTIPLE_MOD( cropped_height, 2 );
             // adjust the source PAR for new width/height
             // new PAR = source PAR * ( old width / new_width ) * ( new_height / old_height )
-            pixel_aspect_width = title->pixel_aspect_width * cropped_width * (*output_height);            
-            pixel_aspect_height = title->pixel_aspect_height * (*output_width) * cropped_height;
+            pixel_aspect_width = (int64_t)title->pixel_aspect_width * cropped_width * (*output_height);            
+            pixel_aspect_height = (int64_t)title->pixel_aspect_height * (*output_width) * cropped_height;
         break;
 
         case 2:
@@ -1075,12 +1069,8 @@ void hb_set_anamorphic_size( hb_job_t * job,
             /* The film AR is the source's display width / cropped source height.
                The output display width is the output height * film AR.
                The output PAR is the output display width / output storage width. */
-            int64_t par_w, par_h;
-            par_w = (int64_t)height * cropped_width * pixel_aspect_width;
-            par_h = (int64_t)width * cropped_height * pixel_aspect_height;
-            hb_limit_rational64( &par_w, &par_h, par_w, par_h, 65535);
-            pixel_aspect_width = par_w;
-            pixel_aspect_height = par_h;
+            pixel_aspect_width = (int64_t)height * cropped_width * pixel_aspect_width;
+            pixel_aspect_height = (int64_t)width * cropped_height * pixel_aspect_height;
 
             /* Pass the results back to the caller */
             *output_width = width;
@@ -1133,7 +1123,7 @@ void hb_set_anamorphic_size( hb_job_t * job,
             if( job->anamorphic.dar_width && job->anamorphic.dar_height )
             {
                 /* We need to adjust the PAR to produce this aspect. */
-                pixel_aspect_width = height * job->anamorphic.dar_width / job->anamorphic.dar_height;
+                pixel_aspect_width = (int64_t)height * job->anamorphic.dar_width / job->anamorphic.dar_height;
                 pixel_aspect_height = width;
             }
             else
@@ -1146,7 +1136,7 @@ void hb_set_anamorphic_size( hb_job_t * job,
                 if( job->anamorphic.keep_display_aspect )
                 {
                     /* We can ignore the possibility of a PAR change */
-                    pixel_aspect_width = height * ( (double)source_display_width / (double)cropped_height );
+                    pixel_aspect_width = (int64_t)height * ( (double)source_display_width / (double)cropped_height );
                     pixel_aspect_height = width;
                 }
                 else
@@ -1165,7 +1155,9 @@ void hb_set_anamorphic_size( hb_job_t * job,
     }
     
     /* While x264 is smart enough to reduce fractions on its own, libavcodec
-       needs some help with the math, so lose superfluous factors.            */
+     * needs some help with the math, so lose superfluous factors. */
+    hb_limit_rational64( &pixel_aspect_width, &pixel_aspect_height,
+                        pixel_aspect_width, pixel_aspect_height, 65535 );
     hb_reduce( output_par_width, output_par_height,
                pixel_aspect_width, pixel_aspect_height );
 }
@@ -1343,7 +1335,7 @@ void hb_add( hb_handle_t * h, hb_job_t * job )
     hb_title_t    * title,    * title_copy;
     hb_chapter_t  * chapter,  * chapter_copy;
     hb_audio_t    * audio;
-    hb_subtitle_t * subtitle, * subtitle_copy;
+    hb_subtitle_t * subtitle;
     hb_attachment_t * attachment;
     int             i;
     char            audio_lang[4];
@@ -1429,61 +1421,48 @@ void hb_add( hb_handle_t * h, hb_job_t * job )
      */
     memset( audio_lang, 0, sizeof( audio_lang ) );
 
-    if ( job->indepth_scan ) {
+    if( job->indepth_scan )
+    {
 
-        /*
-         * Find the first audio language that is being encoded
-         */
-        for( i = 0; i < hb_list_count(job->list_audio); i++ )
+        /* Find the first audio language that is being encoded, then add all the
+         * matching subtitles for that language. */
+        for( i = 0; i < hb_list_count( job->list_audio ); i++ )
         {
             if( ( audio = hb_list_item( job->list_audio, i ) ) )
             {
-                strncpy(audio_lang, audio->config.lang.iso639_2, sizeof(audio_lang));
+                strncpy( audio_lang, audio->config.lang.iso639_2, sizeof( audio_lang ) );
                 break;
             }
         }
-    }
-
-    /*
-     * If doing a subtitle scan then add all the matching subtitles for this
-     * language.
-     */
-    if ( job->indepth_scan )
-    {
-        for( i=0; i < hb_list_count( title->list_subtitle ); i++ )
+        for( i = 0; i < hb_list_count( title->list_subtitle ); i++ )
         {
             subtitle = hb_list_item( title->list_subtitle, i );
             if( strcmp( subtitle->iso639_2, audio_lang ) == 0 &&
                 subtitle->source == VOBSUB )
             {
-                /*
-                 * Matched subtitle language with audio language, so
+                /* Matched subtitle language with audio language, so
                  * add this to our list to scan.
                  *
                  * We will update the subtitle list on the second pass
-                 * later after the first pass has completed.
-                 */
-                subtitle_copy = malloc( sizeof( hb_subtitle_t ) );
-                memcpy( subtitle_copy, subtitle, sizeof( hb_subtitle_t ) );
-                hb_list_add( title_copy->list_subtitle, subtitle_copy );
+                 * later after the first pass has completed. */
+                hb_list_add( title_copy->list_subtitle, hb_subtitle_copy( subtitle ) );
             }
         }
-    } else {
+    }
+    else
+    {
         /*
          * Not doing a subtitle scan in this pass, but maybe we are in the
          * first pass?
          */
         if( job->pass != 1 )
         {
-            /*
-             * Copy all of them from the input job, to the title_copy/job_copy.
-             */
-            for(  i = 0; i < hb_list_count(job->list_subtitle); i++ ) {
+            /* Copy all subtitles from the input job to title_copy/job_copy. */
+            for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
+            {
                 if( ( subtitle = hb_list_item( job->list_subtitle, i ) ) )
                 {
-                    subtitle_copy = malloc( sizeof( hb_subtitle_t ) );
-                    memcpy( subtitle_copy, subtitle, sizeof( hb_subtitle_t ) );
-                    hb_list_add( title_copy->list_subtitle, subtitle_copy );
+                    hb_list_add( title_copy->list_subtitle, hb_subtitle_copy( subtitle ) );
                 }
             }
         }

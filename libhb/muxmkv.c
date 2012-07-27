@@ -77,6 +77,7 @@ static int MKVInit( hb_mux_object_t * m )
         hb_error( "Could not create output file, Disk Full?" );
         job->mux_data = NULL;
         *job->die = 1;
+        free(track);
         return 0;
     }
 
@@ -94,8 +95,10 @@ static int MKVInit( hb_mux_object_t * m )
             /* Taken from x264 muxers.c */
             avcC_len = 5 + 1 + 2 + job->config.h264.sps_length + 1 + 2 + job->config.h264.pps_length;
             avcC = malloc(avcC_len);
-            if (avcC == NULL)
+            if (avcC == NULL) {
+                free(track);
                 return -1;
+            }
 
             avcC[0] = 1;
             avcC[1] = job->config.h264.sps[1];      /* AVCProfileIndication */
@@ -158,6 +161,7 @@ static int MKVInit( hb_mux_object_t * m )
         default:
             *job->die = 1;
             hb_error("muxmkv: Unknown video codec: %x", job->vcodec);
+            free(track);
             return 0;
     }
 
@@ -279,7 +283,20 @@ static int MKVInit( hb_mux_object_t * m )
         // MKV lang codes should be ISO-639-2/B
         lang =  lang_for_code2( audio->config.lang.iso639_2 );
         track->language = lang->iso639_2b ? lang->iso639_2b : lang->iso639_2;
-        track->extra.audio.samplingFreq = (float)audio->config.out.samplerate;
+        // sample rate
+        if ((audio->config.out.codec == HB_ACODEC_CA_HAAC) ||
+            (audio->config.out.codec == HB_ACODEC_AAC_PASS &&
+             audio->config.in.samples_per_frame > 1024))
+        {
+            // For HE-AAC, write outputSamplingFreq too
+            // samplingFreq is half of outputSamplingFreq
+            track->extra.audio.outputSamplingFreq = (float)audio->config.out.samplerate;
+            track->extra.audio.samplingFreq = track->extra.audio.outputSamplingFreq / 2.;
+        }
+        else
+        {
+            track->extra.audio.samplingFreq = (float)audio->config.out.samplerate;
+        }
         if (audio->config.out.codec & HB_ACODEC_PASS_FLAG)
         {
             track->extra.audio.channels = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT(audio->config.in.channel_layout);

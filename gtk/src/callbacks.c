@@ -28,7 +28,9 @@
 #if !defined(_WIN32)
 #include <poll.h>
 #define G_UDEV_API_IS_SUBJECT_TO_CHANGE 1
+#if defined(__linux__)
 #include <gudev/gudev.h>
+#endif
 #include <dbus/dbus-glib.h>
 #include <dbus/dbus-glib-lowlevel.h>
 
@@ -49,6 +51,9 @@
 #endif
 
 #include <gdk/gdkx.h>
+#ifndef NOTIFY_CHECK_VERSION
+#define NOTIFY_CHECK_VERSION(x,y,z) 0
+#endif
 #else
 #define WINVER 0x0500
 #include <winsock2.h>
@@ -904,14 +909,8 @@ gboolean
 ghb_idle_scan(signal_user_data_t *ud)
 {
 	gchar *path;
-	gint preview_count;
-
-	show_scan_progress(ud);
 	path = ghb_settings_get_string( ud->settings, "scan_source");
-	prune_logs(ud);
-
-	preview_count = ghb_settings_get_int(ud->settings, "preview_count");
-	start_scan(ud, path, 0, preview_count);
+	ghb_do_scan(ud, path, 0, TRUE);
 	g_free(path);
 	return FALSE;
 }
@@ -2847,19 +2846,22 @@ ghb_backend_events(signal_user_data_t *ud)
 		status_str = searching_status_string(ud, &status.queue);
 		label = GTK_LABEL(GHB_WIDGET(ud->builder, "queue_status"));
 		gtk_label_set_text (label, status_str);
+		if (ghb_settings_get_boolean(ud->settings, "show_status"))
+		{
 #if !GTK_CHECK_VERSION(2, 16, 0)
-		GtkStatusIcon *si;
+			GtkStatusIcon *si;
 
-		si = GTK_STATUS_ICON(GHB_OBJECT(ud->builder, "hb_status"));
-		gtk_status_icon_set_tooltip(si, status_str);
+			si = GTK_STATUS_ICON(GHB_OBJECT(ud->builder, "hb_status"));
+			gtk_status_icon_set_tooltip(si, status_str);
 #endif
 #if defined(_USE_APP_IND)
-		char * ai_status_str= g_strdup_printf(
-			"%.2f%%",
-			100.0 * status.queue.progress);
-		app_indicator_set_label( ud->ai, ai_status_str, "99.99%");
-		g_free(ai_status_str);
+			char * ai_status_str= g_strdup_printf(
+				"%.2f%%",
+				100.0 * status.queue.progress);
+			app_indicator_set_label( ud->ai, ai_status_str, "99.99%");
+			g_free(ai_status_str);
 #endif
+		}
 		gtk_label_set_text (work_status, status_str);
 		gtk_progress_bar_set_fraction (progress, status.queue.progress);
 		g_free(status_str);
@@ -2892,20 +2894,23 @@ ghb_backend_events(signal_user_data_t *ud)
 		status_str = working_status_string(ud, &status.queue);
 		label = GTK_LABEL(GHB_WIDGET(ud->builder, "queue_status"));
 		gtk_label_set_text (label, status_str);
+		if (ghb_settings_get_boolean(ud->settings, "show_status"))
+		{
 #if defined(_USE_APP_IND)
-		char * ai_status_str= g_strdup_printf(
-			"%.2f%%",
-			100.0 * status.queue.progress);
-		app_indicator_set_label( ud->ai, ai_status_str, "99.99%");
-		g_free(ai_status_str);
+			char * ai_status_str= g_strdup_printf(
+				"%.2f%%",
+				100.0 * status.queue.progress);
+			app_indicator_set_label( ud->ai, ai_status_str, "99.99%");
+			g_free(ai_status_str);
 #else
 #if !GTK_CHECK_VERSION(2, 16, 0)
-		GtkStatusIcon *si;
+			GtkStatusIcon *si;
 
-		si = GTK_STATUS_ICON(GHB_OBJECT(ud->builder, "hb_status"));
-		gtk_status_icon_set_tooltip(si, status_str);
+			si = GTK_STATUS_ICON(GHB_OBJECT(ud->builder, "hb_status"));
+			gtk_status_icon_set_tooltip(si, status_str);
 #endif
 #endif
+		}
 		gtk_label_set_text (work_status, status_str);
 		gtk_progress_bar_set_fraction (progress, status.queue.progress);
 		g_free(status_str);
@@ -3943,14 +3948,14 @@ dvd_device_list()
 	return dvd_devices;
 }
 
-#if !defined(_WIN32)
+#if defined(__linux__)
 static GUdevClient *udev_ctx = NULL;
 #endif
 
 gboolean
 ghb_is_cd(GDrive *gd)
 {
-#if !defined(_WIN32)
+#if defined(__linux__)
 	gchar *device;
 	GUdevDevice *udd;
 
@@ -3984,7 +3989,7 @@ ghb_is_cd(GDrive *gd)
 void
 ghb_udev_init()
 {
-#if !defined(_WIN32)
+#if defined(__linux__)
 	udev_ctx = g_udev_client_new(NULL);
 #endif
 }
@@ -4965,15 +4970,17 @@ ghb_check_update(signal_user_data_t *ud)
 	if (host == NULL || appcast == NULL)
 		return NULL;
 
-	query = g_strdup_printf( "GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n",
+	query = g_strdup_printf("GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n",
 							appcast, host);
 
 	ioc = ghb_net_open(ud, host, 80);
 	if (ioc == NULL)
-		return NULL;
+		goto free_resources;
 
 	g_io_channel_write_chars(ioc, query, strlen(query), &len, &gerror);
 	g_io_channel_flush(ioc, &gerror);
+
+free_resources:
 	g_free(query);
 	g_free(host);
 	g_free(appcast);

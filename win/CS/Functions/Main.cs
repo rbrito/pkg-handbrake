@@ -179,7 +179,6 @@ namespace Handbrake.Functions
             {
                 // Get the Source Name and remove any invalid characters
                 string sourceName = Path.GetInvalidFileNameChars().Aggregate(mainWindow.SourceName, (current, character) => current.Replace(character.ToString(), string.Empty));
-                sourceName = Path.GetFileNameWithoutExtension(sourceName);
 
                 // Remove Underscores
                 if (UserSettingService.GetUserSetting<bool>(UserSettingConstants.AutoNameRemoveUnderscore))
@@ -372,7 +371,7 @@ namespace Handbrake.Functions
             }
             catch (Exception e)
             {
-                UserSettingService.SetUserSetting(ASUserSettingConstants.HandBrakeBuild, string.Empty);
+                UserSettingService.SetUserSetting(ASUserSettingConstants.HandBrakeBuild, 0);
                 UserSettingService.SetUserSetting(ASUserSettingConstants.HandBrakePlatform, string.Empty);
                 UserSettingService.SetUserSetting(ASUserSettingConstants.HandBrakeVersion, string.Empty);
                 UserSettingService.SetUserSetting(ASUserSettingConstants.HandBrakeExeHash, string.Empty);

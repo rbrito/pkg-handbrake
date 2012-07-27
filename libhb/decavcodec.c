@@ -1409,7 +1409,9 @@ static void decodeAudio( hb_audio_t * audio, hb_work_private_t *pv, uint8_t *dat
     int pos = 0;
     int loop_limit = 256;
 
-    if ( pts != -1 )
+    // If we are givn a pts, use it.
+    // But don't loose partial ticks.
+    if ( pts != -1 && (int64_t)pv->pts_next != pts )
         pv->pts_next = pts;
     while ( pos < size )
     {
@@ -1447,7 +1449,8 @@ static void decodeAudio( hb_audio_t * audio, hb_work_private_t *pv, uint8_t *dat
         {
             int isamp = av_get_bytes_per_sample( context->sample_fmt );
             nsamples = out_size / isamp;
-            double pts_next = pv->pts_next + nsamples * pv->duration;
+            double duration = nsamples * pv->duration;
+            double pts_next = pv->pts_next + duration;
 
             // DTS-HD can be passed through to mkv
             if( audio->config.out.codec & HB_ACODEC_PASS_FLAG )
@@ -1460,6 +1463,7 @@ static void decodeAudio( hb_audio_t * audio, hb_work_private_t *pv, uint8_t *dat
                 buf = hb_buffer_init( avp.size );
                 memcpy( buf->data, avp.data, avp.size );
                 buf->start = pv->pts_next;
+                buf->duration = duration;
                 buf->stop  = pts_next;
                 hb_list_add( pv->list, buf );
                 pv->pts_next = pts_next;
@@ -1500,6 +1504,7 @@ static void decodeAudio( hb_audio_t * audio, hb_work_private_t *pv, uint8_t *dat
             hb_buffer_t * buf;
             buf = downmixAudio( audio, pv, buffer, context->channels, nsamples );
             buf->start = pv->pts_next;
+            buf->duration = duration;
             buf->stop = pts_next;
             hb_list_add( pv->list, buf );
 
