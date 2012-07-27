@@ -51,6 +51,24 @@ handbrake (0.9.8-1~18.gbpe6c151) UNRELEASED; urgency=low
       First try at removing some of mp4v2---linking mp4v2 against
       handbrake results in undistributable binaries, which poses a problem
       for Debian.
+  * debian/patches:
+    + Add 0014-Use-unpatched-a52.patch for use with future releases.
+  * debian/patches:
+    + Add 0015-use-metadata-reading-from-libav.patch to avoid using mp4v2
+      and, therefore, a license problem with linking MPL1.1 code.
+  * Wrap long lines in the changelog.
+  * debian/patches: Add patch to fix memcpy with overlapping memory regions.
+  * Imported Upstream version 0.9.8
+  * debian/patches:
+    + 0001-Remove-encoding-...: remove, applied upstream.
+    + 0004-Enable-compilation-on-Debian-arches...: partially applied
+      upstream, adjust.
+    + 0006-LinGUI-Allow-user-to-pass-libavcodec-settings-...: remove,
+      applied upstream.
+    + 0011-First-try-at-removing-some-of-mp4v2: partially applied
+      upstream, adjust.
+    + 0012-FLAGS.patch: remove, applied upstream.
+    + Refresh remaining patches.
 
   [ Andres Mejia ]
   * Change Priority to optional.
@@ -75,29 +93,10 @@ handbrake (0.9.8-1~18.gbpe6c151) UNRELEASED; urgency=low
   * Get rid of libmp4v2 and thus MP4 muxing and fall back to MKV instead.
   * Mention in the package description that we have ripped out libfaac and
     libmp4v2.
-
-  [ Rogério Brito ]
-  * debian/patches:
-    + Add 0014-Use-unpatched-a52.patch for use with future releases.
-  * debian/patches:
-    + Add 0015-use-metadata-reading-from-libav.patch to avoid using mp4v2
-      and, therefore, a license problem with linking MPL1.1 code.
-  * Wrap long lines in the changelog.
-
-  [ Fabian Greffrath ]
   * Add some copyright holders and LGPL-licensed files to debian/copyright.
-  * Add debian/README.source with instructions and reasons to repackage the source tarball when handbrake gets eventually uploaded to Debian.
-
-  [ Rogério Brito ]
-  * debian/patches: Add patch to fix memcpy with overlapping memory regions.
-
-  [ Fabian Greffrath ]
+  * Add debian/README.source with instructions and reasons to repackage
+    the source tarball when handbrake gets eventually uploaded to Debian.
   * Add myself to Uploaders.
-
-  [ Rogério Brito ]
-  * Imported Upstream version 0.9.8
-  * debian/patches: Remove patches applied upstream.
-  * debian/patches: Refresh remaining patches.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
 
