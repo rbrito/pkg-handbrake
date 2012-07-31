@@ -11,9 +11,6 @@ LDFLAGS += -Wl,-z,defs -Wl,--as-needed
 	dh $@ --builddirectory=build
 
 override_dh_auto_configure:
-	cp make/variant/linux.defs make/variant/kfreebsd.defs
-	cp make/variant/linux.defs make/variant/gnu.defs
-
 	./configure --prefix=/usr --build build \
 		--gcc=/usr/lib/ccache/gcc \
 		CC="$(CC)" CXX="$(CXX)" \
@@ -27,11 +24,6 @@ override_dh_install:
 
 override_dh_builddeb:
 	dh_builddeb -- -Zxz -z9 -Sextreme
-
-override_dh_clean:
-	dh_clean \
-		download/*tar* \
-		make/variant/kfreebsd.defs make/variant/gnu.defs
 
 override_dh_installchangelogs:
 	dh_installchangelogs NEWS
