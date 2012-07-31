@@ -1,6 +1,6 @@
-handbrake (0.9.8-1~18.gbpe6c151) UNRELEASED; urgency=low
+handbrake (0.9.8-1~19.gbpc8b9ba) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @e6c15161cb966bad1868974d678f82545e8ca11d **
+  ** SNAPSHOT build @c8b9ba73d1dc4f5fc3b5999e927a567c2f7d3565 **
 
   * Team upload.
 
@@ -69,6 +69,8 @@ handbrake (0.9.8-1~18.gbpe6c151) UNRELEASED; urgency=low
       upstream, adjust.
     + 0012-FLAGS.patch: remove, applied upstream.
     + Refresh remaining patches.
+    + 0016-...: Use unpatched libmkv for the moment.
+  * debian/rules: Simplify, after changes accepted upstream.
 
   [ Andres Mejia ]
   * Change Priority to optional.
