@@ -23,10 +23,10 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 +++ b/gtk/src/Makefile.am
 @@ -10,7 +10,7 @@
  HB_LIBS= \
- 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
- 	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
--	-lx264 -lmp4v2 -lswscale -ltheora -lz \
-+	-lx264 -lmp4v2 -lswscale -ltheoraenc -ltheoradec -lz -lxml2 \
+ 	-lhb -la52 -lmkv -lavresample -lavformat -lavcodec -lavutil \
+ 	-ldvdnav -ldvdread -lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc \
+-	-logg -lsamplerate -lx264 -lmp4v2 -lswscale -ltheora -lz \
++	-logg -lsamplerate -lx264 -lmp4v2 -lswscale -ltheoraenc -ltheoradec -lz \
  	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
  endif
  
@@ -41,7 +41,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  ifneq (,$(filter $(BUILD.system),cygwin mingw))
  ifneq ($(HAS.bz2),1)
      MODULES += contrib/bzip2
-@@ -20,34 +18,12 @@
+@@ -20,33 +18,12 @@
      MODULES += contrib/fribidi
  endif
  
@@ -52,7 +52,6 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 -MODULES += contrib/freetype
 -MODULES += contrib/lame
 -MODULES += contrib/libass
--MODULES += contrib/libdca
 -MODULES += contrib/libdvdread
 -MODULES += contrib/libdvdnav
 -MODULES += contrib/libbluray
@@ -76,7 +75,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  ifneq (,$(filter $(BUILD.system),cygwin mingw))
  ifneq ($(HAS.iconv),1)
      MODULES += contrib/libiconv
-@@ -88,6 +64,11 @@
+@@ -87,6 +64,11 @@
      MODULES += gtk
  endif
  
@@ -95,11 +94,11 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  TEST.exe = $(BUILD/)$(call TARGET.exe,$(HB.name)CLI)
  
 -TEST.libs = $(LIBHB.a) $(foreach n, \
--        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
+-        a52 ass avcodec avformat avutil avresample dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
 -        ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
 -        $(CONTRIB.build/)lib/lib$(n).a )
 +TEST.libs = $(LIBHB.a)
-+TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2 -ldvdnav -ldvdread
++TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lavresample -lmpeg2 -ldvdnav -ldvdread
  
  TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
  

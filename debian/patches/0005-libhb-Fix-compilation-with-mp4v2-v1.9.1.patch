@@ -16,7 +16,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 
 --- a/libhb/decmetadata.c
 +++ b/libhb/decmetadata.c
-@@ -13,7 +13,7 @@
+@@ -16,7 +16,7 @@
      MP4FileHandle input_file;
      hb_deep_log( 2, "Got an MP4 input, read the metadata");
  
@@ -25,7 +25,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  
      if( input_file != MP4_INVALID_FILE_HANDLE )
      { 
-@@ -92,7 +92,7 @@
+@@ -107,7 +107,7 @@
              }
          }
  
@@ -36,7 +36,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  
 --- a/libhb/muxmp4.c
 +++ b/libhb/muxmp4.c
-@@ -93,13 +93,13 @@
+@@ -96,13 +96,13 @@
      if (job->largeFileSize)
      /* Use 64-bit MP4 file */
      {
@@ -52,7 +52,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
      }
  
      if (m->file == MP4_INVALID_FILE_HANDLE)
-@@ -1331,14 +1331,14 @@
+@@ -1336,14 +1336,14 @@
          MP4TagsFree( tags );
      }
  

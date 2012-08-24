@@ -1,6 +1,6 @@
 --- a/libhb/muxmkv.c
 +++ b/libhb/muxmkv.c
-@@ -289,8 +289,7 @@
+@@ -292,8 +292,7 @@
          {
              // For HE-AAC, write outputSamplingFreq too
              // samplingFreq is half of outputSamplingFreq
