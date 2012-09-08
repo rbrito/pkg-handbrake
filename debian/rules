@@ -1,8 +1,5 @@
 #!/usr/bin/make -f
 
-CC:=ccache $(CC)
-CXX:=ccache $(CXX)
-
 CFLAGS   = $(shell dpkg-buildflags --get CFLAGS   2>/dev/null | sed -e 's/-g\|-O2//g')
 CXXFLAGS = $(shell dpkg-buildflags --get CXXFLAGS 2>/dev/null | sed -e 's/-g\|-O2//g')
 LDFLAGS += -Wl,-z,defs -Wl,--as-needed
@@ -12,7 +9,6 @@ LDFLAGS += -Wl,-z,defs -Wl,--as-needed
 
 override_dh_auto_configure:
 	./configure --prefix=/usr --build build \
-		--gcc=/usr/lib/ccache/gcc \
 		CC="$(CC)" CXX="$(CXX)" \
 		CFLAGS="$(CFLAGS)" CXXFLAGS="$(CXXFLAGS)" LDFLAGS="$(LDFLAGS)"
 
