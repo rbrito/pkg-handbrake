@@ -1,6 +1,4 @@
-handbrake (0.9.8-1~19.gbpc8b9ba) UNRELEASED; urgency=low
-
-  ** SNAPSHOT build @c8b9ba73d1dc4f5fc3b5999e927a567c2f7d3565 **
+handbrake (0.9.8-1~19.gbpc8b9ba) experimental; urgency=low
 
   * Team upload.
 
@@ -79,6 +77,8 @@ handbrake (0.9.8-1~19.gbpc8b9ba) UNRELEASED; urgency=low
 
   [ Reinhard Tartler ]
   * fix my email address
+  * Upload to experimental
+  * Remove ccache diversion
 
   [ Fabian Greffrath ]
   * Bring master branch back to pristine upstream branch + patches
@@ -100,7 +100,7 @@ handbrake (0.9.8-1~19.gbpc8b9ba) UNRELEASED; urgency=low
     the source tarball when handbrake gets eventually uploaded to Debian.
   * Add myself to Uploaders.
 
- -- Rogério Brito <rbrito@ime.usp.br>  Tue, 24 Apr 2012 02:31:41 -0300
+ -- Reinhard Tartler <siretart@tauware.de>  Sat, 08 Sep 2012 14:34:33 +0200
 
 handbrake (0.9.6-0.1) unstable; urgency=low
 
