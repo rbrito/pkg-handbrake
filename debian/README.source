@@ -1,5 +1,7 @@
-TODO: Before handbrake gets eventually uploaded to Debian,the source tarball
-should get repackaged with the following directories removed:
+Because of licensing and copyright concerns, the following
+subdirectories and the containing files have been removed from the
+upstream tarball. They need to get pruned on each new upstream release
+and are not necessary for compilation or operation under Linux.
 
  contrib/
  download/
@@ -7,37 +9,4 @@ should get repackaged with the following directories removed:
  macosx/
  win/
 
-While the former three are simply obsolete and contain stuff that is useless
-for the Debian package, the latter two contain binary files and sources under
-spurious licenses:
-
-$ find handbrake/ -name '*.dll'
-handbrake/win/CS/libraries/caliburn/Castle.Core.dll
-handbrake/win/CS/libraries/caliburn/Caliburn.Micro.dll
-handbrake/win/CS/libraries/caliburn/System.Windows.Interactivity.dll
-handbrake/win/CS/libraries/caliburn/Castle.Windsor.dll
-handbrake/win/CS/libraries/ProgressBar/Windows7ProgressBar.dll
-handbrake/win/CS/libraries/Growl.CoreLibrary.dll
-handbrake/win/CS/libraries/Growl.Connector.dll
-handbrake/win/CS/libraries/EagleBoost.Wpf.Presentation.dll
-handbrake/win/CS/libraries/OokiiDialogs/Ookii.Dialogs.Wpf.dll
-handbrake/win/CS/libraries/OokiiDialogs/Ookii.Dialogs.dll
-handbrake/win/CS/libraries/SplitButton/SplitButton.dll
-handbrake/win/CS/libraries/Microsoft.WindowsAPICodePack.Shell.dll
-handbrake/win/CS/libraries/Microsoft.WindowsAPICodePack.dll
-handbrake/win/CS/HandBrake.Interop/HandBrakeInterop/libgcc_s_sjlj-1.dll
-
-$ grep -ir "all rights reserved" handbrake/
-handbrake/macosx/Sparkle.framework/Versions/A/Headers/SUAppcast.h://  Copyright 2006 Andy Matuschak. All rights reserved.
-handbrake/macosx/Sparkle.framework/Versions/A/Headers/SUVersionComparisonProtocol copy.h://  Copyright 2007 Andy Matuschak. All rights reserved.
-handbrake/macosx/Sparkle.framework/Versions/A/Headers/SUAppcastItem.h://  Copyright 2006 Andy Matuschak. All rights reserved.
-handbrake/macosx/Sparkle.framework/Versions/A/Headers/SUUpdater.h://  Copyright 2006 Andy Matuschak. All rights reserved.
-handbrake/macosx/Sparkle.framework/Versions/A/Headers/Sparkle.h://  Copyright 2006 Andy Matuschak. All rights reserved.
-handbrake/macosx/Sparkle.framework/Versions/A/Headers/SUVersionComparisonProtocol.h://  Copyright 2007 Andy Matuschak. All rights reserved.
-handbrake/macosx/Info.plist.m4:All rights reserved.</string>
-handbrake/macosx/Growl.framework/Versions/A/Headers/GrowlApplicationBridge.h://  Copyright 2004-2006 The Growl Project. All rights reserved.
-handbrake/win/CS/libraries/Growl license.txt:All rights reserved
-Binary file handbrake/win/CS/libraries/caliburn/System.Windows.Interactivity.dll matches
-handbrake/win/CS/libraries/ProgressBar/License.txt:All rights reserved.
-handbrake/win/CS/libraries/OokiiDialogs/license.txt:All rights reserved.
-handbrake/win/CS/libraries/SplitButton/License.txt:All rights reserved.
+ -- Reinhard Tartler <siretart@tauware.de>, Sun, 30 Sep 2012 18:18:33 +0200
