@@ -1,4 +1,4 @@
-handbrake (0.9.8-1~19.gbpc8b9ba) experimental; urgency=low
+handbrake (0.9.8+dfsg1-1~19.gbpc8b9ba) experimental; urgency=low
 
   * Team upload.
 
@@ -79,6 +79,12 @@ handbrake (0.9.8-1~19.gbpc8b9ba) experimental; urgency=low
   * fix my email address
   * Upload to experimental
   * Remove ccache diversion
+  * Prune the following subdirectories from the upstream tarball:
+     - contrib/
+     - download/
+     - pkg/
+     - macosx/
+     - win/
 
   [ Fabian Greffrath ]
   * Bring master branch back to pristine upstream branch + patches
@@ -99,8 +105,8 @@ handbrake (0.9.8-1~19.gbpc8b9ba) experimental; urgency=low
   * Add debian/README.source with instructions and reasons to repackage
     the source tarball when handbrake gets eventually uploaded to Debian.
   * Add myself to Uploaders.
-
- -- Reinhard Tartler <siretart@tauware.de>  Sat, 08 Sep 2012 14:34:33 +0200
+  
+ -- Reinhard Tartler <siretart@tauware.de>  Sun, 30 Sep 2012 18:19:41 +0200
 
 handbrake (0.9.6-0.1) unstable; urgency=low
 
