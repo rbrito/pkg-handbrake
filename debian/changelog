@@ -82,7 +82,6 @@ handbrake (0.9.8+dfsg1-1~19.gbpc8b9ba) experimental; urgency=low
   * Prune the following subdirectories from the upstream tarball:
      - contrib/
      - download/
-     - pkg/
      - macosx/
      - win/
 
