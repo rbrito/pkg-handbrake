@@ -84,3 +84,22 @@ Description: versatile DVD ripper and video transcoder (GTK GUI)
  muxing via libmp4v2, it falls back to the MKV format instead.
  .
  This package contains the graphical variant, ghb.
+
+Package: handbrake-dbg
+Section: debug
+Priority: extra
+Architecture: any
+Depends: ${misc:Depends},
+         handbrake-cli (= ${binary:Version}),
+         handbrake-gtk (= ${binary:Version})
+Description: handbrake -- debugging symbols
+ HandBrake is a versatile, easy-to-use tool for converting DVDs and other
+ videos into H.264, XViD, or OGG formatted media.  It's particularly useful
+ for making videos that are compatible with portable video devices such as
+ the Apple iPod/iPhone or Sony PSP.
+ .
+ This version of handbrake has been modified for inclusion in Debian.
+ It does neither support audio encoding to AAC via faac nor MP4 format
+ muxing via libmp4v2, it falls back to the MKV format instead.
+ .
+ This package provides debugging symbols
