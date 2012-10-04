@@ -13,7 +13,6 @@ Vcs-Browser: http://git.debian.org/?p=pkg-multimedia/handbrake.git;a=summary
 Standards-Version: 3.9.3
 Build-Depends:
  automake,
- ccache,
  debhelper (>= 9),
  intltool,
  liba52-0.7.4-dev,
