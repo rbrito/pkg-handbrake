@@ -72,7 +72,9 @@ Depends:
  ${shlibs:Depends}
 Recommends:
  gstreamer0.10-ffmpeg,
- gstreamer0.10-x
+ gstreamer0.10-x,
+# handbrake segfaults with libdvdread4_4.2.0+20120521-2, see #688574
+ libdvdread4 (>= 4.2.0+20120521-3)
 Description: versatile DVD ripper and video transcoder (GTK GUI)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media. It's particularly useful
