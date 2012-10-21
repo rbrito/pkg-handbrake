@@ -1,3 +1,23 @@
+handbrake (0.9.8+dfsg1-2) experimental; urgency=low
+
+  [ Dmitry Smirnov ]
+  * adding handbrake-dbg package
+  * adding man pages
+  * libdvdread4 (>= 4.2.0+20120521-3) to Recommends:
+  * removing ccache (obsolete) from Build-depends
+
+  [ Fabian Greffrath ]
+  * Versioned recommends are moot, use versioned Breaks instead.
+
+  [ Reinhard Tartler ]
+  * Fix version numbering.
+    The git snapshot id really needs to be part of the
+    upstream version. I'm leaving that out for now to avoid having to
+    reroll a new tarball, we'll handle it properly on the next
+    upstream version.
+
+ -- Reinhard Tartler <siretart@tauware.de>  Sun, 21 Oct 2012 18:28:51 +0200
+
 handbrake (0.9.8+dfsg1-1~19.gbpc8b9ba) experimental; urgency=low
 
   * Team upload.
