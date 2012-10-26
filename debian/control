@@ -51,7 +51,8 @@ Build-Depends:
 
 Package: handbrake-cli
 Architecture: any-amd64 any-i386 powerpc
-Pre-Depends: dpkg (>= 1.15.6~)
+Pre-Depends:
+ dpkg (>= 1.15.6~)
 Depends:
  ${misc:Depends},
  ${shlibs:Depends}
@@ -72,7 +73,8 @@ Description: versatile DVD ripper and video transcoder (command line)
 
 Package: handbrake-gtk
 Architecture: any-amd64 any-i386 powerpc
-Pre-Depends: dpkg (>= 1.15.6~)
+Pre-Depends:
+ dpkg (>= 1.15.6~)
 Depends:
  ${misc:Depends},
  ${shlibs:Depends}
@@ -98,9 +100,10 @@ Package: handbrake-dbg
 Section: debug
 Priority: extra
 Architecture: any
-Depends: ${misc:Depends},
-         handbrake-cli (= ${binary:Version}),
-         handbrake-gtk (= ${binary:Version})
+Depends:
+ handbrake-cli (= ${binary:Version}),
+ handbrake-gtk (= ${binary:Version}),
+ ${misc:Depends}
 Description: handbrake -- debugging symbols
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
  videos into H.264, XViD, or OGG formatted media.  It's particularly useful
