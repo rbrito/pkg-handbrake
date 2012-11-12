@@ -27,7 +27,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
-@@ -69,6 +69,11 @@
+@@ -69,6 +69,11 @@ ifeq (1-kfreebsd,$(FEATURE.gtk)-$(BUILD.
      MODULES += gtk
  endif
  
@@ -39,3 +39,25 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  ifeq (1,$(FEATURE.local_yasm))
      MODULES += contrib/yasm
  endif
+--- a/libhb/module.defs
++++ b/libhb/module.defs
+@@ -52,6 +52,8 @@ else ifeq ($(BUILD.system),mingw)
+ 	LIBHB.GCC.args.extra.dylib++ += -Wl,--enable-auto-import -static
+ else ifeq ($(BUILD.system),solaris)
+     LIBHB.GCC.D += SYS_SunOS _LARGEFILE_SOURCE _FILE_OFFSET_BITS=64
++else ifeq ($(BUILD.system),gnu)
++    LIBHB.GCC.D += SYS_HURD _LARGEFILE_SOURCE _FILE_OFFSET_BITS=64
+ else
+     LIBHB.platform.D = SYS_UNKNOWN
+ endif
+--- a/libhb/ports.h
++++ b/libhb/ports.h
+@@ -51,7 +51,7 @@ typedef struct hb_thread_s hb_thread_t;
+ #elif defined( SYS_DARWIN )
+ #  define HB_LOW_PRIORITY    0
+ #  define HB_NORMAL_PRIORITY 31
+-#elif defined( SYS_LINUX ) || defined( SYS_FREEBSD ) || defined ( SYS_SunOS ) || defined ( __FreeBSD_kernel__ )
++#elif defined( SYS_LINUX ) || defined( SYS_FREEBSD ) || defined ( SYS_SunOS ) || defined ( SYS_HURD ) || defined ( __FreeBSD_kernel__ )
+ #  define HB_LOW_PRIORITY    0
+ #  define HB_NORMAL_PRIORITY 0
+ #elif defined( SYS_CYGWIN )
