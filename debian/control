@@ -49,29 +49,7 @@ Build-Depends:
  wget,
  yasm
 
-Package: handbrake-cli
-Architecture: any-amd64 any-i386 powerpc
-Pre-Depends:
- dpkg (>= 1.15.6~)
-Depends:
- ${misc:Depends},
- ${shlibs:Depends}
-Breaks:
-# handbrake segfaults with libdvdread4_4.2.0+20120521-2, see #688574
- libdvdread4 (<< 4.2.0+20120521-3)
-Description: versatile DVD ripper and video transcoder (command line)
- HandBrake is a versatile, easy-to-use tool for converting DVDs and other
- videos into H.264, XViD, or OGG formatted media.  It's particularly useful
- for making videos that are compatible with portable video devices such as
- the Apple iPod/iPhone or Sony PSP.
- .
- This version of handbrake has been modified for inclusion in Debian.
- It does neither support audio encoding to AAC via faac nor MP4 format
- muxing via libmp4v2, it falls back to the MKV format instead.
- .
- This package contains the command-line variant, HandBrakeCLI.
-
-Package: handbrake-gtk
+Package: handbrake
 Architecture: any-amd64 any-i386 powerpc
 Pre-Depends:
  dpkg (>= 1.15.6~)
@@ -81,8 +59,11 @@ Depends:
 Recommends:
  gstreamer0.10-ffmpeg,
  gstreamer0.10-x
+Conflicts:
+ handbrake-gtk
+Replaces:
+ handbrake-gtk
 Breaks:
-# handbrake segfaults with libdvdread4_4.2.0+20120521-2, see #688574
  libdvdread4 (<< 4.2.0+20120521-3)
 Description: versatile DVD ripper and video transcoder (GTK GUI)
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
@@ -96,13 +77,34 @@ Description: versatile DVD ripper and video transcoder (GTK GUI)
  .
  This package contains the graphical variant, ghb.
 
+Package: handbrake-cli
+Architecture: any-amd64 any-i386 powerpc
+Pre-Depends:
+ dpkg (>= 1.15.6~)
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends}
+Breaks:
+ libdvdread4 (<< 4.2.0+20120521-3)
+Description: versatile DVD ripper and video transcoder (command line)
+ HandBrake is a versatile, easy-to-use tool for converting DVDs and other
+ videos into H.264, XViD, or OGG formatted media.  It's particularly useful
+ for making videos that are compatible with portable video devices such as
+ the Apple iPod/iPhone or Sony PSP.
+ .
+ This version of handbrake has been modified for inclusion in Debian.
+ It does neither support audio encoding to AAC via faac nor MP4 format
+ muxing via libmp4v2, it falls back to the MKV format instead.
+ .
+ This package contains the command-line variant, HandBrakeCLI.
+
 Package: handbrake-dbg
 Section: debug
 Priority: extra
 Architecture: any
 Depends:
+ handbrake (= ${binary:Version}),
  handbrake-cli (= ${binary:Version}),
- handbrake-gtk (= ${binary:Version}),
  ${misc:Depends}
 Description: handbrake -- debugging symbols
  HandBrake is a versatile, easy-to-use tool for converting DVDs and other
