@@ -22,36 +22,36 @@
 
 enum
 {
-	GHB_ERROR_NONE,
-	GHB_ERROR_CANCELED,
-	GHB_ERROR_FAIL,
+    GHB_ERROR_NONE,
+    GHB_ERROR_CANCELED,
+    GHB_ERROR_FAIL,
 };
 
 typedef struct
 {
-	gint state;
+    gint state;
 
-	// SCANNING
-	gint title_count;
-	gint title_cur;
+    // SCANNING
+    gint title_count;
+    gint title_cur;
 
-	// WORKING
-	gint unique_id;
-	gint job_cur;
-	gint job_count;
-	gdouble progress;
-	gdouble rate_cur;
-	gdouble rate_avg;
-	gint hours;
-	gint minutes;
-	gint seconds;
-	gint error;
+    // WORKING
+    gint unique_id;
+    gint job_cur;
+    gint job_count;
+    gdouble progress;
+    gdouble rate_cur;
+    gdouble rate_avg;
+    gint hours;
+    gint minutes;
+    gint seconds;
+    gint error;
 } ghb_instance_status_t;
 
 typedef struct
 {
-	ghb_instance_status_t scan;
-	ghb_instance_status_t queue;
+    ghb_instance_status_t scan;
+    ghb_instance_status_t queue;
 } ghb_status_t;
 
 #define GHB_PIC_KEEP_WIDTH          0x01
@@ -62,42 +62,19 @@ typedef struct
 #define GHB_PIC_KEEP_PAR            0x20
 #define GHB_PIC_USE_MAX             0x40
 
-typedef struct
-{
-	gchar *path;
-	gchar *name;
-	gint index;
-	gint type;
-	char *video_codec_name;
-	gint width;
-	gint height;
-	gint crop[4];
-	gint num_chapters;
-	gint rate;
-	gint rate_base;
-	gint interlaced;
-	gint aspect_n;
-	gint aspect_d;
-	gint hours;
-	gint minutes;
-	gint seconds;
-	gint64 duration;
-	gint angle_count;
-} ghb_title_info_t;
-
 #define GHB_AUDIO_SAMPLERATE 1
 #define GHB_AUDIO_BITRATE 2
 #define GHB_FRAMERATE 3
 
 const gchar* ghb_version(void);
 void ghb_vquality_range(
-	signal_user_data_t *ud, 
-	gdouble *min, 
-	gdouble *max,
-	gdouble *step,
-	gdouble *page,
-	gint *digits,
-	gboolean *inverted);
+    signal_user_data_t *ud, 
+    gdouble *min, 
+    gdouble *max,
+    gdouble *step,
+    gdouble *page,
+    gint *digits,
+    gboolean *inverted);
 //const gchar* ghb_get_rate_string(gint rate, gint type);
 void ghb_combo_init(signal_user_data_t *ud);
 void ghb_backend_init(gint debug);
@@ -123,7 +100,7 @@ void ghb_track_status(void);
 void ghb_backend_scan(const gchar *path, gint titleindex, gint preview_count, guint64 min_duration);
 void ghb_backend_scan_stop();
 void ghb_backend_queue_scan(const gchar *path, gint titleindex);
-gboolean ghb_get_title_info(ghb_title_info_t *tinfo, gint titleindex);
+hb_title_t* ghb_get_title_info(gint titleindex);
 void ghb_par_init(signal_user_data_t *ud);
 void ghb_set_scale(signal_user_data_t *ud, gint mode);
 void ghb_set_scale_settings(GValue *settings, gint mode);
@@ -137,34 +114,33 @@ gboolean ghb_audio_can_passthru(gint acodec);
 gint ghb_get_default_acodec(void);
 hb_audio_config_t* ghb_get_scan_audio_info(gint titleindex, gint audioindex);
 void ghb_set_bitrate_opts(
-	GtkBuilder *builder, gint first_rate, gint last_rate, gint extra_rate);
+    GtkBuilder *builder, gint first_rate, gint last_rate, gint extra_rate);
 void ghb_grey_combo_options(signal_user_data_t *ud);
 void ghb_update_ui_combo_box(
-	signal_user_data_t *ud, const gchar *name, gint user_data, gboolean all);
-gchar* ghb_get_source_audio_lang(gint titleindex, gint track);
+    signal_user_data_t *ud, const gchar *name, gint user_data, gboolean all);
+const gchar* ghb_get_source_audio_lang(gint titleindex, gint track);
 gint ghb_find_audio_track(
-	gint titleindex, const gchar *lang, gint acodec, 
-	gint fallback_acodec, GHashTable *track_indices);
+    gint titleindex, const gchar *lang, gint acodec, 
+    gint fallback_acodec, GHashTable *track_indices);
 const gchar* ghb_audio_track_description(gint track, int titleindex);
 void ghb_add_all_subtitles(signal_user_data_t *ud, gint titleindex);
 gint ghb_find_pref_subtitle_track(const gchar *lang);
 gint ghb_find_subtitle_track(
-	gint titleindex, const gchar *lang, gboolean burn, 
-	gboolean force, gint source, GHashTable *track_indices);
+    gint titleindex, const gchar *lang, gboolean burn, 
+    gboolean force, gint source, GHashTable *track_indices);
 gint ghb_pick_subtitle_track(signal_user_data_t *ud);
 gint ghb_find_cc_track(gint titleindex);
 gint ghb_longest_title(void);
 gchar* ghb_build_advanced_opts_string(GValue *settings);
 GdkPixbuf* ghb_get_preview_image(
-	gint titleindex, gint index, signal_user_data_t *ud,
-	gint *width, gint *height);
+    gint titleindex, gint index, signal_user_data_t *ud,
+    gint *width, gint *height);
 gchar* ghb_dvd_volname(const gchar *device);
 gint ghb_get_title_number(gint titleindex);
 int ghb_get_title_count();
 gint ghb_subtitle_track_source(GValue *settings, gint track);
 const char* ghb_subtitle_track_source_name(GValue *settings, gint track);
-const char* ghb_subtitle_source_name(gint source);
-gchar* ghb_subtitle_track_lang(GValue *settings, gint track);
+const gchar* ghb_subtitle_track_lang(GValue *settings, gint track);
 
 gboolean ghb_validate_vquality(GValue *settings);
 gboolean ghb_validate_audio(GValue *settings);

@@ -1,13 +1,15 @@
-/* $Id: scan.c,v 1.52 2005/11/25 15:05:25 titer Exp $
+/* scan.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
 #include "hbffmpeg.h"
 #include "a52dec/a52.h"
-#include "dca.h"
 
 typedef struct
 {
@@ -16,7 +18,7 @@ typedef struct
 
     char         * path;
     int            title_index;
-    hb_list_t    * list_title;
+    hb_title_set_t * title_set;
 
     hb_bd_t      * bd;
     hb_dvd_t     * dvd;
@@ -49,7 +51,7 @@ static const char *aspect_to_string( double aspect )
 
 hb_thread_t * hb_scan_init( hb_handle_t * handle, volatile int * die,
                             const char * path, int title_index, 
-                            hb_list_t * list_title, int preview_count, 
+                            hb_title_set_t * title_set, int preview_count, 
                             int store_previews, uint64_t min_duration )
 {
     hb_scan_t * data = calloc( sizeof( hb_scan_t ), 1 );
@@ -58,7 +60,7 @@ hb_thread_t * hb_scan_init( hb_handle_t * handle, volatile int * die,
     data->die          = die;
     data->path         = strdup( path );
     data->title_index  = title_index;
-    data->list_title   = list_title;
+    data->title_set    = title_set;
     
     data->preview_count  = preview_count;
     data->store_previews = store_previews;
@@ -86,7 +88,8 @@ static void ScanFunc( void * _data )
         if( data->title_index )
         {
             /* Scan this title only */
-            hb_list_add( data->list_title, hb_bd_title_scan( data->bd,
+            hb_list_add( data->title_set->list_title,
+                         hb_bd_title_scan( data->bd,
                          data->title_index, 0 ) );
         }
         else
@@ -94,10 +97,12 @@ static void ScanFunc( void * _data )
             /* Scan all titles */
             for( i = 0; i < hb_bd_title_count( data->bd ); i++ )
             {
-                hb_list_add( data->list_title, hb_bd_title_scan( data->bd, 
+                hb_list_add( data->title_set->list_title,
+                             hb_bd_title_scan( data->bd, 
                              i + 1, data->min_title_duration ) );
             }
-            feature = hb_bd_main_feature( data->bd, data->list_title );
+            feature = hb_bd_main_feature( data->bd,
+                                          data->title_set->list_title );
         }
     }
     else if( ( data->dvd = hb_dvd_init( data->path ) ) )
@@ -107,7 +112,8 @@ static void ScanFunc( void * _data )
         if( data->title_index )
         {
             /* Scan this title only */
-            hb_list_add( data->list_title, hb_dvd_title_scan( data->dvd,
+            hb_list_add( data->title_set->list_title,
+                         hb_dvd_title_scan( data->dvd,
                             data->title_index, 0 ) );
         }
         else
@@ -115,10 +121,12 @@ static void ScanFunc( void * _data )
             /* Scan all titles */
             for( i = 0; i < hb_dvd_title_count( data->dvd ); i++ )
             {
-                hb_list_add( data->list_title, hb_dvd_title_scan( data->dvd, 
+                hb_list_add( data->title_set->list_title,
+                             hb_dvd_title_scan( data->dvd, 
                             i + 1, data->min_title_duration ) );
             }
-            feature = hb_dvd_main_feature( data->dvd, data->list_title );
+            feature = hb_dvd_main_feature( data->dvd,
+                                           data->title_set->list_title );
         }
     }
     else if ( ( data->batch = hb_batch_init( data->path ) ) )
@@ -129,7 +137,7 @@ static void ScanFunc( void * _data )
             title = hb_batch_title_scan( data->batch, data->title_index );
             if ( title )
             {
-                hb_list_add( data->list_title, title );
+                hb_list_add( data->title_set->list_title, title );
             }
         }
         else
@@ -142,7 +150,7 @@ static void ScanFunc( void * _data )
                 title = hb_batch_title_scan( data->batch, i + 1 );
                 if ( title != NULL )
                 {
-                    hb_list_add( data->list_title, title );
+                    hb_list_add( data->title_set->list_title, title );
                 }
             }
         }
@@ -154,7 +162,7 @@ static void ScanFunc( void * _data )
         {
             title = hb_stream_title_scan( data->stream, title );
             if ( title )
-                hb_list_add( data->list_title, title );
+                hb_list_add( data->title_set->list_title, title );
         }
         else
         {
@@ -164,7 +172,7 @@ static void ScanFunc( void * _data )
         }
     }
 
-    for( i = 0; i < hb_list_count( data->list_title ); )
+    for( i = 0; i < hb_list_count( data->title_set->list_title ); )
     {
         int j;
         hb_state_t state;
@@ -174,7 +182,7 @@ static void ScanFunc( void * _data )
         {
             goto finish;
         }
-        title = hb_list_item( data->list_title, i );
+        title = hb_list_item( data->title_set->list_title, i );
 
 #define p state.param.scanning
         /* Update the UI */
@@ -183,7 +191,7 @@ static void ScanFunc( void * _data )
         p.title_count = data->dvd ? hb_dvd_title_count( data->dvd ) : 
                         data->bd ? hb_bd_title_count( data->bd ) :
                         data->batch ? hb_batch_title_count( data->batch ) :
-                                   hb_list_count(data->list_title);
+                                   hb_list_count(data->title_set->list_title);
         hb_set_state( data->h, &state );
 #undef p
 
@@ -192,7 +200,7 @@ static void ScanFunc( void * _data )
         if( !DecodePreviews( data, title ) )
         {
             /* TODO: free things */
-            hb_list_rem( data->list_title, title );
+            hb_list_rem( data->title_set->list_title, title );
             for( j = 0; j < hb_list_count( title->list_audio ); j++)
             {
                 audio = hb_list_item( title->list_audio, j );
@@ -235,7 +243,7 @@ static void ScanFunc( void * _data )
             for( j = 0; j < hb_list_count( title->list_subtitle ); j++ )
             {
                 hb_subtitle_t *subtitle = hb_list_item( title->list_subtitle, j );
-                if ( subtitle->source == VOBSUB )
+                if ( subtitle->source == VOBSUB || subtitle->source == PGSSUB )
                 {
                     subtitle->width = title->width;
                     subtitle->height = title->height;
@@ -245,63 +253,16 @@ static void ScanFunc( void * _data )
         i++;
     }
 
-    /* Init jobs templates */
-    for( i = 0; i < hb_list_count( data->list_title ); i++ )
+    data->title_set->feature = feature;
+
+    /* Mark title scan complete and init jobs */
+    for( i = 0; i < hb_list_count( data->title_set->list_title ); i++ )
     {
-        hb_job_t * job;
-
-        title      = hb_list_item( data->list_title, i );
-        job        = calloc( sizeof( hb_job_t ), 1 );
-        title->job = job;
-
-        job->title = title;
-        job->feature = feature;
-
-        /* Set defaults settings */
-        job->chapter_start = 1;
-        job->chapter_end   = hb_list_count( title->list_chapter );
-
-        /* Autocrop by default. Gnark gnark */
-        memcpy( job->crop, title->crop, 4 * sizeof( int ) );
-
-        /* Preserve a source's pixel aspect, if it's available. */
-        if( title->pixel_aspect_width && title->pixel_aspect_height )
-        {
-            job->anamorphic.par_width  = title->pixel_aspect_width;
-            job->anamorphic.par_height = title->pixel_aspect_height;
-        }
-
-        if( title->aspect != 0 && title->aspect != 1. &&
-            !job->anamorphic.par_width && !job->anamorphic.par_height)
-        {
-            hb_reduce( &job->anamorphic.par_width, &job->anamorphic.par_height,
-                       (int)(title->aspect * title->height + 0.5), title->width );
-        }
-
-        job->width = title->width - job->crop[2] - job->crop[3];
-        hb_fix_aspect( job, HB_KEEP_WIDTH );
-        if( job->height > title->height - job->crop[0] - job->crop[1] )
-        {
-            job->height = title->height - job->crop[0] - job->crop[1];
-            hb_fix_aspect( job, HB_KEEP_HEIGHT );
-        }
-
-        hb_log( "scan: title (%d) job->width:%d, job->height:%d",
-                i, job->width, job->height );
-
-        job->keep_ratio = 1;
-
-        job->vcodec     = HB_VCODEC_FFMPEG_MPEG4;
-        job->vquality   = -1.0;
-        job->vbitrate   = 1000;
-        job->pass       = 0;
-        job->vrate      = title->rate;
-        job->vrate_base = title->rate_base;
-
-        job->list_audio = hb_list_init();
-        job->list_subtitle = hb_list_init();
-
-        job->mux = HB_MUX_MP4;
+        title      = hb_list_item( data->title_set->list_title, i );
+        title->flags |= HBTF_SCAN_COMPLETE;
+#if defined(HB_TITLE_JOBS)
+        title->job = hb_job_init( title );
+#endif
     }
 
 finish:
@@ -343,17 +304,19 @@ static inline int clampBlack( int x )
     return x < 16 ? 16 : x;
 }
 
-static int row_all_dark( hb_work_info_t *info, uint8_t* luma, int row )
+static int row_all_dark( hb_buffer_t* buf, int row )
 {
-    luma += info->width * row;
+    int width = buf->plane[0].width;
+    int stride = buf->plane[0].stride;
+    uint8_t *luma = buf->plane[0].data + stride * row;
 
     // compute the average luma value of the row
     int i, avg = 0;
-    for ( i = 0; i < info->width; ++i )
+    for ( i = 0; i < width; ++i )
     {
         avg += clampBlack( luma[i] );
     }
-    avg /= info->width;
+    avg /= width;
     if ( avg >= DARK )
         return 0;
 
@@ -361,7 +324,7 @@ static int row_all_dark( hb_work_info_t *info, uint8_t* luma, int row )
     // all pixels are within +-16 of the average (this range is fairly coarse
     // but there's a lot of quantization noise for luma values near black
     // so anything less will fail to crop because of the noise).
-    for ( i = 0; i < info->width; ++i )
+    for ( i = 0; i < width; ++i )
     {
         if ( absdiff( avg, clampBlack( luma[i] ) ) > 16 )
             return 0;
@@ -369,12 +332,11 @@ static int row_all_dark( hb_work_info_t *info, uint8_t* luma, int row )
     return 1;
 }
 
-static int column_all_dark( hb_work_info_t *info, uint8_t* luma, int top, int bottom,
-                            int col )
+static int column_all_dark( hb_buffer_t* buf, int top, int bottom, int col )
 {
-    int stride = info->width;
-    int height = info->height - top - bottom;
-    luma += stride * top + col;
+    int stride = buf->plane[0].stride;
+    int height = buf->plane[0].height - top - bottom;
+    uint8_t *luma = buf->plane[0].data + stride * top + col;
 
     // compute the average value of the column
     int i = height, avg = 0, row = 0;
@@ -561,7 +523,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
     if (vcodec == WORK_DECMPEG2)
     {
         vcodec = WORK_DECAVCODECV;
-        title->video_codec_param = CODEC_ID_MPEG2VIDEO;
+        title->video_codec_param = AV_CODEC_ID_MPEG2VIDEO;
     }
 #endif
     hb_work_object_t *vid_decoder = hb_get_work( vcodec );
@@ -572,8 +534,6 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
     for( i = 0; i < data->preview_count; i++ )
     {
         int j;
-        FILE * file_preview;
-        char   filename[1024];
 
         if ( *data->die )
         {
@@ -664,7 +624,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
             while( ( buf_es = hb_list_item( list_es, 0 ) ) )
             {
                 hb_list_rem( list_es, buf_es );
-                if( buf_es->id == title->video_id && vid_buf == NULL )
+                if( buf_es->s.id == title->video_id && vid_buf == NULL )
                 {
                     vid_decoder->work( vid_decoder, &buf_es, &vid_buf );
                 }
@@ -707,13 +667,13 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         remember_info( info_list, &vid_info );
 
         if( is_close_to( vid_info.rate_base, 900900, 100 ) &&
-            ( vid_buf->flags & PIC_FLAG_REPEAT_FIRST_FIELD ) )
+            ( vid_buf->s.flags & PIC_FLAG_REPEAT_FIRST_FIELD ) )
         {
             /* Potentially soft telecine material */
             pulldown_count++;
         }
 
-        if( vid_buf->flags & PIC_FLAG_REPEAT_FRAME )
+        if( vid_buf->s.flags & PIC_FLAG_REPEAT_FRAME )
         {
             // AVCHD-Lite specifies that all streams are
             // 50 or 60 fps.  To produce 25 or 30 fps, camera
@@ -744,25 +704,11 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         
         if( data->store_previews )
         {
-            hb_get_tempory_filename( data->h, filename, "%d_%d_%d",
-                                     hb_get_instance_id(data->h), title->index, i );
-
-            file_preview = fopen( filename, "wb" );
-            if( file_preview )
-            {
-                fwrite( vid_buf->data, vid_info.width * vid_info.height * 3 / 2,
-                        1, file_preview );
-                fclose( file_preview );
-            }
-            else
-            {
-                hb_log( "scan: fopen failed (%s)", filename );
-            }
+            hb_save_preview( data->h, title->index, i, vid_buf );
         }
 
         /* Detect black borders */
 
-#define Y    vid_buf->data
         int top, bottom, left, right;
         int h4 = vid_info.height / 4, w4 = vid_info.width / 4;
 
@@ -778,7 +724,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
 
         for ( top = border; top < h4; ++top )
         {
-            if ( ! row_all_dark( &vid_info, Y, top ) )
+            if ( ! row_all_dark( vid_buf, top ) )
                 break;
         }
         if ( top <= border )
@@ -787,7 +733,7 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
             // didn't check are dark or if we shouldn't crop at all.
             for ( top = 0; top < border; ++top )
             {
-                if ( ! row_all_dark( &vid_info, Y, top ) )
+                if ( ! row_all_dark( vid_buf, top ) )
                     break;
             }
             if ( top >= border )
@@ -797,14 +743,14 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         }
         for ( bottom = border; bottom < h4; ++bottom )
         {
-            if ( ! row_all_dark( &vid_info, Y, vid_info.height - 1 - bottom ) )
+            if ( ! row_all_dark( vid_buf, vid_info.height - 1 - bottom ) )
                 break;
         }
         if ( bottom <= border )
         {
             for ( bottom = 0; bottom < border; ++bottom )
             {
-                if ( ! row_all_dark( &vid_info, Y, vid_info.height - 1 - bottom ) )
+                if ( ! row_all_dark( vid_buf, vid_info.height - 1 - bottom ) )
                     break;
             }
             if ( bottom >= border )
@@ -814,12 +760,12 @@ static int DecodePreviews( hb_scan_t * data, hb_title_t * title )
         }
         for ( left = 0; left < w4; ++left )
         {
-            if ( ! column_all_dark( &vid_info, Y, top, bottom, left ) )
+            if ( ! column_all_dark( vid_buf, top, bottom, left ) )
                 break;
         }
         for ( right = 0; right < w4; ++right )
         {
-            if ( ! column_all_dark( &vid_info, Y, top, bottom, vid_info.width - 1 - right ) )
+            if ( ! column_all_dark( vid_buf, top, bottom, vid_info.width - 1 - right ) )
                 break;
         }
 
@@ -913,6 +859,9 @@ skip_preview:
             title->pixel_aspect_width = vid_info.pixel_aspect_width;
             title->pixel_aspect_height = vid_info.pixel_aspect_height;
         }
+        title->color_prim = vid_info.color_prim;
+        title->color_transfer = vid_info.color_transfer;
+        title->color_matrix = vid_info.color_matrix;
 
         // compute the aspect ratio based on the storage dimensions and the
         // pixel aspect ratio (if supplied) or just storage dimensions if no PAR.
@@ -1013,7 +962,7 @@ static void LookForAudio( hb_title_t * title, hb_buffer_t * b )
     {
         audio = hb_list_item( title->list_audio, i );
         /* check if this elementary stream is one we want */
-        if ( audio->id == b->id )
+        if ( audio->id == b->s.id )
         {
             break;
         }
@@ -1076,23 +1025,22 @@ static void LookForAudio( hb_title_t * title, hb_buffer_t * b )
     audio->config.in.channel_layout = info.channel_layout;
     audio->config.in.channel_map = info.channel_map;
     audio->config.in.version = info.version;
+    audio->config.in.flags = info.flags;
     audio->config.in.mode = info.mode;
-    audio->config.flags.ac3 = info.flags;
 
     // update the audio description string based on the info we found
-    if ( audio->config.flags.ac3 & AUDIO_F_DOLBY )
+    if (audio->config.in.channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX)
     {
-        strcat( audio->config.lang.description, " (Dolby Surround)" );
+        strcat(audio->config.lang.description, " (Dolby Surround)");
     }
-    else
+    else if (audio->config.in.channel_layout)
     {
-        int layout = audio->config.in.channel_layout;
-        char *desc = audio->config.lang.description +
-                        strlen( audio->config.lang.description );
-        sprintf( desc, " (%d.%d ch)",
-                 HB_INPUT_CH_LAYOUT_GET_DISCRETE_FRONT_COUNT(layout) +
-                     HB_INPUT_CH_LAYOUT_GET_DISCRETE_REAR_COUNT(layout),
-                 HB_INPUT_CH_LAYOUT_GET_DISCRETE_LFE_COUNT(layout) );
+        int lfes     = (!!(audio->config.in.channel_layout & AV_CH_LOW_FREQUENCY) +
+                        !!(audio->config.in.channel_layout & AV_CH_LOW_FREQUENCY_2));
+        int channels = av_get_channel_layout_nb_channels(audio->config.in.channel_layout);
+        char *desc   = audio->config.lang.description +
+                        strlen(audio->config.lang.description);
+        sprintf(desc, " (%d.%d ch)", channels - lfes, lfes);
     }
 
     hb_log( "scan: audio 0x%x: %s, rate=%dHz, bitrate=%d %s", audio->id,

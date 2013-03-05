@@ -1,3 +1,12 @@
+/* hb.c
+
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
+   Homepage: <http://handbrake.fr/>.
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
+ 
 #include "hb.h"
 #include "hbffmpeg.h"
 #include <stdio.h>
@@ -27,7 +36,7 @@ struct hb_handle_s
     int            pid;
 
     /* DVD/file scan thread */
-    hb_list_t    * list_title;
+    hb_title_set_t title_set;
     hb_thread_t  * scan_thread;
 
     /* The thread which processes the jobs. Others threads are launched
@@ -55,14 +64,16 @@ struct hb_handle_s
        on multi-pass encodes where frames get dropped.     */
     hb_interjob_t * interjob;
 
-};
+    // Power Management opaque pointer
+    // For OSX, it's an IOPMAssertionID*
+    void          * hb_system_sleep_opaque;
+} ;
 
 hb_work_object_t * hb_objects = NULL;
 int hb_instance_counter = 0;
 int hb_process_initialized = 0;
 
 static void thread_func( void * );
-hb_title_t * hb_get_title_by_index( hb_handle_t *, int );
 
 static int ff_lockmgr_cb(void **mutex, enum AVLockOp op)
 {
@@ -96,21 +107,28 @@ void hb_avcodec_init()
     av_register_all();
 }
 
-int hb_avcodec_open(AVCodecContext *avctx, AVCodec *codec, AVDictionary **av_opts, int thread_count)
+int hb_avcodec_open(AVCodecContext *avctx, AVCodec *codec,
+                    AVDictionary **av_opts, int thread_count)
 {
     int ret;
 
-    if ( ( thread_count == HB_FFMPEG_THREADS_AUTO || thread_count > 0 ) && 
-         ( codec->type == AVMEDIA_TYPE_VIDEO ) )
+    if ((thread_count == HB_FFMPEG_THREADS_AUTO || thread_count > 0) && 
+        (codec->type == AVMEDIA_TYPE_VIDEO))
     {
-        avctx->thread_count = ( thread_count == HB_FFMPEG_THREADS_AUTO ) ? 
-                                hb_get_cpu_count() / 2 + 1 : thread_count;
+        avctx->thread_count = (thread_count == HB_FFMPEG_THREADS_AUTO) ?
+                               hb_get_cpu_count() / 2 + 1 : thread_count;
         avctx->thread_type = FF_THREAD_FRAME|FF_THREAD_SLICE;
         avctx->thread_safe_callbacks = 1;
     }
     else
     {
         avctx->thread_count = 1;
+    }
+
+    if (codec->capabilities & CODEC_CAP_EXPERIMENTAL)
+    {
+        // "experimental" encoders will not open without this
+        avctx->strict_std_compliance = FF_COMPLIANCE_EXPERIMENTAL;
     }
 
     ret = avcodec_open2(avctx, codec, av_opts);
@@ -124,20 +142,40 @@ int hb_avcodec_close(AVCodecContext *avctx)
     return ret;
 }
 
-static int handle_jpeg(enum PixelFormat *format)
+
+int hb_avpicture_fill(AVPicture *pic, hb_buffer_t *buf)
 {
-    switch (*format) {
-    case PIX_FMT_YUVJ420P: *format = PIX_FMT_YUV420P; return 1;
-    case PIX_FMT_YUVJ422P: *format = PIX_FMT_YUV422P; return 1;
-    case PIX_FMT_YUVJ444P: *format = PIX_FMT_YUV444P; return 1;
-    case PIX_FMT_YUVJ440P: *format = PIX_FMT_YUV440P; return 1;
-    default:                                          return 0;
+    int ret, ii;
+
+    for (ii = 0; ii < 4; ii++)
+        pic->linesize[ii] = buf->plane[ii].stride;
+
+    ret = av_image_fill_pointers(pic->data, buf->f.fmt,
+                                 buf->plane[0].height_stride,
+                                 buf->data, pic->linesize);
+    if (ret != buf->size)
+    {
+        hb_error("Internal error hb_avpicture_fill expected %d, got %d",
+                 buf->size, ret);
+    }
+    return ret;
+}
+
+static int handle_jpeg(enum AVPixelFormat *format)
+{
+    switch (*format)
+    {
+        case AV_PIX_FMT_YUVJ420P: *format = AV_PIX_FMT_YUV420P; return 1;
+        case AV_PIX_FMT_YUVJ422P: *format = AV_PIX_FMT_YUV422P; return 1;
+        case AV_PIX_FMT_YUVJ444P: *format = AV_PIX_FMT_YUV444P; return 1;
+        case AV_PIX_FMT_YUVJ440P: *format = AV_PIX_FMT_YUV440P; return 1;
+        default:                                                return 0;
     }
 }
 
 struct SwsContext*
-hb_sws_get_context(int srcW, int srcH, enum PixelFormat srcFormat,
-                   int dstW, int dstH, enum PixelFormat dstFormat,
+hb_sws_get_context(int srcW, int srcH, enum AVPixelFormat srcFormat,
+                   int dstW, int dstH, enum AVPixelFormat dstFormat,
                    int flags)
 {
     struct SwsContext * ctx;
@@ -181,138 +219,123 @@ hb_sws_get_context(int srcW, int srcH, enum PixelFormat srcFormat,
     return ctx;
 }
 
-int hb_ff_layout_xlat( int64_t ff_channel_layout, int channels )
+uint64_t hb_ff_mixdown_xlat(int hb_mixdown, int *downmix_mode)
 {
-    int hb_layout;
+    uint64_t ff_layout = 0;
+    int mode = AV_MATRIX_ENCODING_NONE;
+    switch (hb_mixdown)
+    {
+        // Passthru
+        case HB_AMIXDOWN_NONE:
+            break;
 
-    switch( ff_channel_layout )
-    {
-        case AV_CH_LAYOUT_MONO:
-            hb_layout = HB_INPUT_CH_LAYOUT_MONO;
+        case HB_AMIXDOWN_MONO:
+        case HB_AMIXDOWN_LEFT:
+        case HB_AMIXDOWN_RIGHT:
+            ff_layout = AV_CH_LAYOUT_MONO;
             break;
-        case AV_CH_LAYOUT_STEREO:
-        case AV_CH_LAYOUT_STEREO_DOWNMIX:
-            hb_layout = HB_INPUT_CH_LAYOUT_STEREO;
+
+        case HB_AMIXDOWN_DOLBY:
+            ff_layout = AV_CH_LAYOUT_STEREO;
+            mode = AV_MATRIX_ENCODING_DOLBY;
             break;
-        case AV_CH_LAYOUT_SURROUND:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F;
+
+        case HB_AMIXDOWN_DOLBYPLII:
+            ff_layout = AV_CH_LAYOUT_STEREO;
+            mode = AV_MATRIX_ENCODING_DPLII;
             break;
-        case AV_CH_LAYOUT_4POINT0:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F1R;
+
+        case HB_AMIXDOWN_STEREO:
+            ff_layout = AV_CH_LAYOUT_STEREO;
             break;
-        case AV_CH_LAYOUT_2_2:
-        case AV_CH_LAYOUT_QUAD:
-            hb_layout = HB_INPUT_CH_LAYOUT_2F2R;
+
+        case HB_AMIXDOWN_5POINT1:
+            ff_layout = AV_CH_LAYOUT_5POINT1;
             break;
-        case AV_CH_LAYOUT_5POINT0:
-        case AV_CH_LAYOUT_5POINT0_BACK:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F2R;
+
+        case HB_AMIXDOWN_6POINT1:
+            ff_layout = AV_CH_LAYOUT_6POINT1;
             break;
-        case AV_CH_LAYOUT_5POINT1:
-        case AV_CH_LAYOUT_5POINT1_BACK:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F2R|HB_INPUT_CH_LAYOUT_HAS_LFE;
+
+        case HB_AMIXDOWN_7POINT1:
+            ff_layout = AV_CH_LAYOUT_7POINT1;
             break;
-        case AV_CH_LAYOUT_7POINT0:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F4R;
+
+        case HB_AMIXDOWN_5_2_LFE:
+            ff_layout = (AV_CH_LAYOUT_5POINT1_BACK|
+                         AV_CH_FRONT_LEFT_OF_CENTER|
+                         AV_CH_FRONT_RIGHT_OF_CENTER);
             break;
-        case AV_CH_LAYOUT_7POINT1:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F4R|HB_INPUT_CH_LAYOUT_HAS_LFE;
-            break;
+
         default:
-            hb_layout = HB_INPUT_CH_LAYOUT_STEREO;
+            ff_layout = AV_CH_LAYOUT_STEREO;
+            hb_log("hb_ff_mixdown_xlat: unsupported mixdown %d", hb_mixdown);
             break;
     }
-    // Now make sure the chosen layout agrees with the number of channels
-    // ffmpeg tells us there are.  It seems ffmpeg is sometimes confused
-    // about this. So we will make a best guess based on the number
-    // of channels.
-    int chans = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT( hb_layout );
-    if( ff_channel_layout && chans == channels )
+    if (downmix_mode != NULL)
+        *downmix_mode = mode;
+    return ff_layout;
+}
+
+uint64_t hb_ff_layout_xlat(uint64_t ff_channel_layout, int nchannels)
+{
+    uint64_t hb_layout = ff_channel_layout;
+    if (!hb_layout || av_get_channel_layout_nb_channels(hb_layout) != nchannels)
     {
-        return hb_layout;
-    }
-    if( !ff_channel_layout )
-    {
-        hb_log( "No channel layout reported by Libav; guessing one from channel count." );
-    }
-    else
-    {
-        hb_log( "Channels reported by Libav (%d) != computed layout channels (%d). Guessing layout from channel count.", channels, chans );
-    }
-    switch( channels )
-    {
-        case 1:
-            hb_layout = HB_INPUT_CH_LAYOUT_MONO;
-            break;
-        case 2:
-            hb_layout = HB_INPUT_CH_LAYOUT_STEREO;
-            break;
-        case 3:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F;
-            break;
-        case 4:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F1R;
-            break;
-        case 5:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F2R;
-            break;
-        case 6:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F2R|HB_INPUT_CH_LAYOUT_HAS_LFE;
-            break;
-        case 7:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F4R;
-            break;
-        case 8:
-            hb_layout = HB_INPUT_CH_LAYOUT_3F4R|HB_INPUT_CH_LAYOUT_HAS_LFE;
-            break;
-        default:
-            hb_log( "Unsupported number of audio channels (%d).", channels );
-            hb_layout = 0;
-            break;
+        hb_layout = av_get_default_channel_layout(nchannels);
+        if (!hb_layout)
+        {
+            // This will likely not sound very good ;)
+            hb_layout = AV_CH_LAYOUT_STEREO;
+            hb_error("hb_ff_layout_xlat: unsupported layout 0x%"PRIx64" with %d channels",
+                     ff_channel_layout, nchannels);
+        }
     }
     return hb_layout;
 }
 
-// Set sample format to AV_SAMPLE_FMT_FLT if supported.
-// If it is not supported, we will have to translate using
-// av_audio_convert.
-void hb_ff_set_sample_fmt(AVCodecContext *context, AVCodec *codec)
+/*
+ * Set sample format to the request format if supported by the codec.
+ * The planar/packed variant of the requested format is the next best thing.
+ */
+void hb_ff_set_sample_fmt(AVCodecContext *context, AVCodec *codec,
+                          enum AVSampleFormat request_sample_fmt)
 {
-    if ( codec && codec->sample_fmts )
+    if (context != NULL && codec != NULL &&
+        codec->type == AVMEDIA_TYPE_AUDIO && codec->sample_fmts != NULL)
     {
-        if ( codec->type != AVMEDIA_TYPE_AUDIO )
-            return; // Not audio
-
         const enum AVSampleFormat *fmt;
+        enum AVSampleFormat next_best_fmt;
 
-        for ( fmt = codec->sample_fmts; *fmt != -1; fmt++ )
+        next_best_fmt = (av_sample_fmt_is_planar(request_sample_fmt)  ?
+                         av_get_packed_sample_fmt(request_sample_fmt) :
+                         av_get_planar_sample_fmt(request_sample_fmt));
+
+        context->request_sample_fmt = AV_SAMPLE_FMT_NONE;
+
+        for (fmt = codec->sample_fmts; *fmt != AV_SAMPLE_FMT_NONE; fmt++)
         {
-            if ( *fmt == AV_SAMPLE_FMT_FLT )
+            if (*fmt == request_sample_fmt)
             {
-                context->request_sample_fmt = AV_SAMPLE_FMT_FLT;
-                context->sample_fmt = AV_SAMPLE_FMT_FLT;
+                context->request_sample_fmt = request_sample_fmt;
                 break;
             }
+            else if (*fmt == next_best_fmt)
+            {
+                context->request_sample_fmt = next_best_fmt;
+            }
         }
-        if ( *fmt == -1 )
-            context->sample_fmt = codec->sample_fmts[0];
 
+        /*
+         * When encoding and AVCodec.sample_fmts exists, avcodec_open2()
+         * will error out if AVCodecContext.sample_fmt isn't set.
+         */
+        if (context->request_sample_fmt == AV_SAMPLE_FMT_NONE)
+        {
+            context->request_sample_fmt = codec->sample_fmts[0];
+        }
+        context->sample_fmt = context->request_sample_fmt;
     }
-}
-
-// Libav can decode DTS-ES 6.0/6.1 (5.0/5.1 core + XCh extension)
-// but we don't support 6.0/6.1 (and incorrectly assume 5.1/7.0)
-// request channels-1 to disable XCh processing in Libav
-int hb_ff_dts_disable_xch( AVCodecContext *c )
-{
-    if( ( c->codec_id == CODEC_ID_DTS ) &&
-        ( ( c->channel_layout & ~AV_CH_LOW_FREQUENCY ) == ( AV_CH_LAYOUT_5POINT0|AV_CH_BACK_CENTER ) ) )
-    {
-        c->request_channels = --c->channels;
-        c->channel_layout &= ~AV_CH_BACK_CENTER;
-        return 1;
-    }
-    return 0;
 }
 
 /**
@@ -387,6 +410,9 @@ hb_handle_t * hb_init( int verbose, int update_check )
     /* Check for an update on the website if asked to */
     h->build = -1;
 
+    /* Initialize opaque for PowerManagement purposes */
+    h->hb_system_sleep_opaque = hb_system_sleep_opaque_init();
+
     if( update_check )
     {
         hb_log( "hb_init: checking for updates" );
@@ -418,7 +444,7 @@ hb_handle_t * hb_init( int verbose, int update_check )
      */
     hb_buffer_pool_init();
 
-    h->list_title = hb_list_init();
+    h->title_set.list_title = hb_list_init();
     h->jobs       = hb_list_init();
 
     h->state_lock  = hb_lock_init();
@@ -446,12 +472,11 @@ hb_handle_t * hb_init( int verbose, int update_check )
     hb_register( &hb_decutf8sub );
     hb_register( &hb_dectx3gsub );
     hb_register( &hb_decssasub );
-	hb_register( &hb_render );
+    hb_register( &hb_decpgssub );
 	hb_register( &hb_encavcodec );
 	hb_register( &hb_encx264 );
     hb_register( &hb_enctheora );
 	hb_register( &hb_deca52 );
-	hb_register( &hb_decdca );
 	hb_register( &hb_decavcodeca );
 	hb_register( &hb_decavcodecv );
 	hb_register( &hb_declpcm );
@@ -492,6 +517,9 @@ hb_handle_t * hb_init_dl( int verbose, int update_check )
     /* Check for an update on the website if asked to */
     h->build = -1;
 
+    /* Initialize opaque for PowerManagement purposes */
+    h->hb_system_sleep_opaque = hb_system_sleep_opaque_init();
+
     if( update_check )
     {
         hb_log( "hb_init: checking for updates" );
@@ -518,7 +546,7 @@ hb_handle_t * hb_init_dl( int verbose, int update_check )
         }
     }
 
-    h->list_title = hb_list_init();
+    h->title_set.list_title = hb_list_init();
     h->jobs       = hb_list_init();
     h->current_job = NULL;
 
@@ -546,12 +574,10 @@ hb_handle_t * hb_init_dl( int verbose, int update_check )
     hb_register( &hb_decutf8sub );
     hb_register( &hb_dectx3gsub );
     hb_register( &hb_decssasub );
-	hb_register( &hb_render );
 	hb_register( &hb_encavcodec );
 	hb_register( &hb_encx264 );
     hb_register( &hb_enctheora );
 	hb_register( &hb_deca52 );
-	hb_register( &hb_decdca );
 	hb_register( &hb_decavcodeca );
 	hb_register( &hb_decavcodecv );
 	hb_register( &hb_declpcm );
@@ -620,7 +646,7 @@ void hb_remove_previews( hb_handle_t * h )
     dir = opendir( dirname );
     if (dir == NULL) return;
 
-    count = hb_list_count( h->list_title );
+    count = hb_list_count( h->title_set.list_title );
     while( ( entry = readdir( dir ) ) )
     {
         if( entry->d_name[0] == '.' )
@@ -629,7 +655,7 @@ void hb_remove_previews( hb_handle_t * h )
         }
         for( i = 0; i < count; i++ )
         {
-            title = hb_list_item( h->list_title, i );
+            title = hb_list_item( h->title_set.list_title, i );
             len = snprintf( filename, 1024, "%d_%d", h->id, title->index );
             if (strncmp(entry->d_name, filename, len) == 0)
             {
@@ -659,15 +685,15 @@ void hb_scan( hb_handle_t * h, const char * path, int title_index,
 
     /* Clean up from previous scan */
     hb_remove_previews( h );
-    while( ( title = hb_list_item( h->list_title, 0 ) ) )
+    while( ( title = hb_list_item( h->title_set.list_title, 0 ) ) )
     {
-        hb_list_rem( h->list_title, title );
+        hb_list_rem( h->title_set.list_title, title );
         hb_title_close( &title );
     }
 
     hb_log( "hb_scan: path=%s, title_index=%d", path, title_index );
     h->scan_thread = hb_scan_init( h, &h->scan_die, path, title_index, 
-                                   h->list_title, preview_count, 
+                                   &h->title_set, preview_count, 
                                    store_previews, min_duration );
 }
 
@@ -678,25 +704,103 @@ void hb_scan( hb_handle_t * h, const char * path, int title_index,
  */
 hb_list_t * hb_get_titles( hb_handle_t * h )
 {
-    return h->list_title;
+    return h->title_set.list_title;
 }
 
-/**
- * Create preview image of desired title a index of picture.
- * @param h Handle to hb_handle_t.
- * @param title_index Index of the title to get the preview for (1-based).
- * @param picture Index in title.
- * @param buffer Handle to buffer were image will be drawn.
- */
-void hb_get_preview_by_index( hb_handle_t * h, int title_index, int picture, uint8_t * buffer )
+hb_title_set_t * hb_get_title_set( hb_handle_t * h )
 {
-    hb_title_t * title;
+    return &h->title_set;
+}
 
-    title = hb_get_title_by_index( h, title_index );
-    if ( title != NULL )
+int hb_save_preview( hb_handle_t * h, int title, int preview, hb_buffer_t *buf )
+{
+    FILE * file;
+    char   filename[1024];
+
+    hb_get_tempory_filename( h, filename, "%d_%d_%d",
+                             hb_get_instance_id(h), title, preview );
+
+    file = fopen( filename, "wb" );
+    if( !file )
     {
-        hb_get_preview( h, title, picture, buffer );
-    } 
+        hb_error( "hb_save_preview: fopen failed (%s)", filename );
+        return -1;
+    }
+
+    int pp, hh;
+    for( pp = 0; pp < 3; pp++ )
+    {
+        uint8_t *data = buf->plane[pp].data;
+        int stride = buf->plane[pp].stride;
+        int w = buf->plane[pp].width;
+        int h = buf->plane[pp].height;
+
+        for( hh = 0; hh < h; hh++ )
+        {
+            fwrite( data, w, 1, file );
+            data += stride;
+        }
+    }
+    fclose( file );
+    return 0;
+}
+
+hb_buffer_t * hb_read_preview( hb_handle_t * h, int title_idx, int preview )
+{
+    FILE * file;
+    char   filename[1024];
+    hb_title_set_t *title_set;
+
+    hb_title_t * title = NULL;
+
+    title_set = hb_get_title_set(h);
+
+    int ii;
+    for (ii = 0; ii < hb_list_count(title_set->list_title); ii++)
+    {
+        title = hb_list_item( title_set->list_title, ii);
+        if (title != NULL && title->index == title_idx)
+        {
+            break;
+        }
+        title = NULL;
+    }
+    if (title == NULL)
+    {
+        hb_error( "hb_read_preview: invalid title (%d)", title_idx );
+        return NULL;
+    }
+
+    hb_get_tempory_filename( h, filename, "%d_%d_%d",
+                             hb_get_instance_id(h), title_idx, preview );
+
+    file = fopen( filename, "rb" );
+    if( !file )
+    {
+        hb_error( "hb_read_preview: fopen failed (%s)", filename );
+        return NULL;
+    }
+
+    hb_buffer_t * buf;
+    buf = hb_frame_buffer_init( AV_PIX_FMT_YUV420P, title->width, title->height );
+
+    int pp, hh;
+    for( pp = 0; pp < 3; pp++ )
+    {
+        uint8_t *data = buf->plane[pp].data;
+        int stride = buf->plane[pp].stride;
+        int w = buf->plane[pp].width;
+        int h = buf->plane[pp].height;
+
+        for( hh = 0; hh < h; hh++ )
+        {
+            fread( data, w, 1, file );
+            data += stride;
+        }
+    }
+    fclose( file );
+
+    return buf;
 }
 
 /**
@@ -706,77 +810,67 @@ void hb_get_preview_by_index( hb_handle_t * h, int title_index, int picture, uin
  * @param picture Index in title.
  * @param buffer Handle to buffer were image will be drawn.
  */
-void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
+void hb_get_preview( hb_handle_t * h, hb_job_t * job, int picture,
                      uint8_t * buffer )
 {
-    hb_job_t           * job = title->job;
+    hb_title_t         * title = job->title;
     char                 filename[1024];
-    FILE               * file;
-    uint8_t            * buf1, * buf2, * buf3, * pen;
+    hb_buffer_t        * in_buf, * deint_buf = NULL, * preview_buf;
+    uint8_t            * pen;
     uint32_t             swsflags;
     AVPicture            pic_in, pic_preview, pic_deint, pic_crop;
     struct SwsContext  * context;
-    int                  i, p;
-    int                  aligned_width = ((title->width + 7) & ~7);
-    int                  aligned_height = ((title->height + 7) & ~7);
+    int                  i;
     int                  preview_size;
 
     swsflags = SWS_LANCZOS | SWS_ACCURATE_RND;
 
-    buf1 = av_malloc( avpicture_get_size( PIX_FMT_YUV420P, aligned_width, aligned_height ) );
-    buf2 = av_malloc( avpicture_get_size( PIX_FMT_YUV420P, aligned_width, aligned_height ) );
-    buf3 = av_malloc( avpicture_get_size( PIX_FMT_RGB32, job->width, job->height ) );
-    avpicture_fill( &pic_in, buf1, PIX_FMT_YUV420P,
-                    aligned_width, aligned_height );
-    avpicture_fill( &pic_deint, buf2, PIX_FMT_YUV420P,
-                    aligned_width, aligned_height );
-    avpicture_fill( &pic_preview, buf3, PIX_FMT_RGB32,
-                    job->width, job->height );
+    preview_buf = hb_frame_buffer_init( AV_PIX_FMT_RGB32,
+                                        job->width, job->height );
+    hb_avpicture_fill( &pic_preview, preview_buf );
 
     // Allocate the AVPicture frames and fill in
 
     memset( filename, 0, 1024 );
 
-    hb_get_tempory_filename( h, filename, "%d_%d_%d",
-                             h->id, title->index, picture );
-
-    file = fopen( filename, "rb" );
-    if( !file )
+    in_buf = hb_read_preview( h, title->index, picture );
+    if ( in_buf == NULL )
     {
-        hb_log( "hb_get_preview: fopen failed" );
         return;
     }
 
-    for (p = 0; p < 3; p++)
-    {
-        int w = !p ? title->width : title->width >> 1;
-        int h = !p ? title->height : title->height >> 1;
-        pen = pic_in.data[p];
-        for (i = 0; i < h; i++)
-        {
-            fread( pen, w, 1, file );
-            pen += pic_in.linesize[p];
-        }
-    }
-    fclose( file );
+    hb_avpicture_fill( &pic_in, in_buf );
 
     if( job->deinterlace )
     {
+        int width = (in_buf->plane[0].width + 3) & ~0x3;
+        int height = (in_buf->plane[0].height + 3) & ~0x3;
+
         // Deinterlace and crop
-        avpicture_deinterlace( &pic_deint, &pic_in, PIX_FMT_YUV420P, aligned_width, aligned_height );
-        av_picture_crop( &pic_crop, &pic_deint, PIX_FMT_YUV420P, job->crop[0], job->crop[2] );
+        // avpicture_deinterlace requires 4 pixel aligned width and height
+        // we have aligned all buffers to 16 byte width and height strides
+        // so there is room in the buffers to accomodate a litte
+        // overscan.
+        deint_buf = hb_frame_buffer_init( AV_PIX_FMT_YUV420P,
+                                          title->width, title->height );
+        hb_avpicture_fill( &pic_deint, deint_buf );
+        avpicture_deinterlace( &pic_deint, &pic_in, AV_PIX_FMT_YUV420P,
+            width, height );
+
+        av_picture_crop( &pic_crop, &pic_deint, AV_PIX_FMT_YUV420P,
+                job->crop[0], job->crop[2] );
     }
     else
     {
         // Crop
-        av_picture_crop( &pic_crop, &pic_in, PIX_FMT_YUV420P, job->crop[0], job->crop[2] );
+        av_picture_crop( &pic_crop, &pic_in, AV_PIX_FMT_YUV420P, job->crop[0], job->crop[2] );
     }
 
     // Get scaling context
     context = hb_sws_get_context(title->width  - (job->crop[2] + job->crop[3]),
                              title->height - (job->crop[0] + job->crop[1]),
-                             PIX_FMT_YUV420P,
-                             job->width, job->height, PIX_FMT_RGB32,
+                             AV_PIX_FMT_YUV420P,
+                             job->width, job->height, AV_PIX_FMT_RGB32,
                              swsflags);
 
     // Scale
@@ -792,14 +886,14 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
     pen = buffer;
     for( i = 0; i < job->height; i++ )
     {
-        memcpy( pen, buf3 + preview_size * i, 4 * job->width );
+        memcpy( pen, pic_preview.data[0] + preview_size * i, 4 * job->width );
         pen += 4 * job->width;
     }
 
     // Clean up
-    avpicture_free( &pic_preview );
-    avpicture_free( &pic_deint );
-    avpicture_free( &pic_in );
+    hb_buffer_close( &in_buf );
+    hb_buffer_close( &deint_buf );
+    hb_buffer_close( &preview_buf );
 }
 
  /**
@@ -821,16 +915,12 @@ void hb_get_preview( hb_handle_t * h, hb_title_t * title, int picture,
  */
 int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int threshold, int prog_equal, int prog_diff, int prog_threshold )
 {
-    int width = buf->width;
-    int height = buf->height;
     int j, k, n, off, cc_1, cc_2, cc[3];
 	// int flag[3] ; // debugging flag
     uint16_t s1, s2, s3, s4;
     cc_1 = 0; cc_2 = 0;
 
-    int offset = 0;
-    
-    if ( buf->flags & 16 )
+    if ( buf->s.flags & 16 )
     {
         /* Frame is progressive, be more discerning. */
         color_diff = prog_diff;
@@ -841,21 +931,10 @@ int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int thre
     /* One pas for Y, one pass for Cb, one pass for Cr */    
     for( k = 0; k < 3; k++ )
     {
-        if( k == 1 )
-        {
-            /* Y has already been checked, now offset by Y's dimensions
-               and divide all the other values by 2, since Cr and Cb
-               are half-size compared to Y.                               */
-            offset = width * height;
-            width >>= 1;
-            height >>= 1;
-        }
-        else if ( k == 2 )
-        {
-            /* Y and Cb are done, so the offset needs to be bumped
-               so it's width*height + (width / 2) * (height / 2)  */
-            offset *= 5/4;
-        }
+        uint8_t * data = buf->plane[k].data;
+        int width = buf->plane[k].width;
+        int stride = buf->plane[k].stride;
+        int height = buf->plane[k].height;
 
         for( j = 0; j < width; ++j )
         {
@@ -864,10 +943,10 @@ int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int thre
             for( n = 0; n < ( height - 4 ); n = n + 2 )
             {
                 /* Look at groups of 4 sequential horizontal lines */
-                s1 = ( ( buf->data + offset )[ off + j             ] & 0xff );
-                s2 = ( ( buf->data + offset )[ off + j + width     ] & 0xff );
-                s3 = ( ( buf->data + offset )[ off + j + 2 * width ] & 0xff );
-                s4 = ( ( buf->data + offset )[ off + j + 3 * width ] & 0xff );
+                s1 = ( ( data )[ off + j              ] & 0xff );
+                s2 = ( ( data )[ off + j +     stride ] & 0xff );
+                s3 = ( ( data )[ off + j + 2 * stride ] & 0xff );
+                s4 = ( ( data )[ off + j + 3 * stride ] & 0xff );
 
                 /* Note if the 1st and 2nd lines are more different in
                    color than the 1st and 3rd lines are similar in color.*/
@@ -882,7 +961,7 @@ int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int thre
                         ++cc_2;
 
                 /* Now move down 2 horizontal lines before starting over.*/
-                off += 2 * width;
+                off += 2 * stride;
             }
         }
 
@@ -913,26 +992,6 @@ int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int thre
     /* Reaching this point means no combing detected. */
     return 0;
 
-}
-
-/**
- * Calculates job width and height for anamorphic content,
- *
- * @param h Instance handle
- * @param title_index Index of the title/job to inspect (1-based).
- * @param output_width Pointer to returned storage width
- * @param output_height Pointer to returned storage height
- * @param output_par_width Pointer to returned pixel width
- * @param output_par_height Pointer to returned pixel height
- */
-void hb_set_anamorphic_size_by_index( hb_handle_t * h, int title_index,
-        int *output_width, int *output_height,
-        int *output_par_width, int *output_par_height )
-{
-    hb_title_t * title;
-    title = hb_get_title_by_index( h, title_index );
-    
-    hb_set_anamorphic_size( title->job, output_width, output_height, output_par_width, output_par_height );
 }
 
 /**
@@ -1163,6 +1222,78 @@ void hb_set_anamorphic_size( hb_job_t * job,
 }
 
 /**
+ * Add a filter to a jobs filter list
+ *
+ * @param job Handle to hb_job_t
+ * @param settings to give the filter
+ */
+void hb_add_filter( hb_job_t * job, hb_filter_object_t * filter, const char * settings_in )
+{
+    char * settings = NULL;
+
+    if ( settings_in != NULL )
+    {
+        settings = strdup( settings_in );
+    }
+    filter->settings = settings;
+    if( filter->enforce_order )
+    {
+        // Find the position in the filter chain this filter belongs in
+        int i;
+        for( i = 0; i < hb_list_count( job->list_filter ); i++ )
+        {
+            hb_filter_object_t * f = hb_list_item( job->list_filter, i );
+            if( f->id > filter->id )
+            {
+                hb_list_insert( job->list_filter, i, filter );
+                return;
+            }
+            else if( f->id == filter->id )
+            {
+                // Don't allow the same filter to be added twice
+                hb_filter_close( &filter );
+                return;
+            }
+        }
+    }
+    // No position found or order not enforced for this filter
+    hb_list_add( job->list_filter, filter );
+}
+
+/**
+ * Validate and adjust dimensions if necessary
+ *
+ * @param job Handle to hb_job_t
+ */
+void hb_validate_size( hb_job_t * job )
+{
+    if ( job->anamorphic.mode )
+    {
+        hb_set_anamorphic_size( job, &job->width, &job->height,
+            &job->anamorphic.par_width, &job->anamorphic.par_height );
+    }
+    else
+    {
+        if ( job->maxHeight && ( job->height > job->maxHeight )  )
+        {
+            job->height = job->maxHeight;
+            hb_fix_aspect( job, HB_KEEP_HEIGHT );
+            hb_log( "Height out of bounds, scaling down to %i",
+                    job->maxHeight );
+            hb_log( "New dimensions %i * %i", job->width, job->height );
+        }
+        if ( job->maxWidth && ( job->width > job->maxWidth )  )
+        {
+            job->width = job->maxWidth;
+            hb_fix_aspect( job, HB_KEEP_WIDTH );
+            hb_log( "Width out of bounds, scaling down to %i",
+                    job->maxWidth );
+            hb_log( "New dimensions %i * %i", job->width, job->height );
+        }
+    }
+}
+
+/**
  * Calculates job width, height, and cropping parameters.
  * @param job Handle to hb_job_t.
  * @param aspect Desired aspect ratio. Value of -1 uses title aspect.
@@ -1278,53 +1409,6 @@ hb_job_t * hb_current_job( hb_handle_t * h )
 }
 
 /**
- * Applies information from the given job to the official job instance.
- * @param h Handle to hb_handle_t.
- * @param title_index Index of the title to apply the chapter name to (1-based).
- * @param chapter The chapter to apply the name to (1-based).
- * @param job Job information to apply.
- */
-void hb_set_chapter_name( hb_handle_t * h, int title_index, int chapter_index, const char * chapter_name )
-{
-    hb_title_t * title;
-    title = hb_get_title_by_index( h, title_index );
-    
-    hb_chapter_t * chapter = hb_list_item( title->list_chapter, chapter_index - 1 );
-    
-    strncpy(chapter->title, chapter_name, 1023);
-    chapter->title[1023] = '\0';
-}
-
-/**
- * Applies information from the given job to the official job instance.
- * Currently only applies information needed for anamorphic size calculation and previews.
- * @param h Handle to hb_handle_t.
- * @param title_index Index of the title to apply the job information to (1-based).
- * @param job Job information to apply.
- */
-void hb_set_job( hb_handle_t * h, int title_index, hb_job_t * job )
-{
-	int i;
-
-    hb_title_t * title;
-    title = hb_get_title_by_index( h, title_index );
-    
-    hb_job_t * job_target = title->job;
-    
-    job_target->deinterlace = job->deinterlace;
-    job_target->width = job->width;
-    job_target->height = job->height;
-    job_target->maxWidth = job->maxWidth;
-    job_target->maxHeight = job->maxHeight;
-    for (i = 0; i < 4; i++)
-    {
-        job_target->crop[i] = job->crop[i];
-    }
-	
-    job_target->anamorphic = job->anamorphic;
-}
-
-/**
  * Adds a job to the job list.
  * @param h Handle to hb_handle_t.
  * @param job Handle to hb_job_t.
@@ -1332,93 +1416,21 @@ void hb_set_job( hb_handle_t * h, int title_index, hb_job_t * job )
 void hb_add( hb_handle_t * h, hb_job_t * job )
 {
     hb_job_t      * job_copy;
-    hb_title_t    * title,    * title_copy;
-    hb_chapter_t  * chapter,  * chapter_copy;
     hb_audio_t    * audio;
     hb_subtitle_t * subtitle;
-    hb_attachment_t * attachment;
     int             i;
     char            audio_lang[4];
 
-    /* Copy the title */
-    title      = job->title;
-    title_copy = malloc( sizeof( hb_title_t ) );
-    memcpy( title_copy, title, sizeof( hb_title_t ) );
+    /* Copy the job */
+    job_copy        = calloc( sizeof( hb_job_t ), 1 );
+    memcpy( job_copy, job, sizeof( hb_job_t ) );
 
-    title_copy->list_chapter = hb_list_init();
-    for( i = 0; i < hb_list_count( title->list_chapter ); i++ )
-    {
-        chapter      = hb_list_item( title->list_chapter, i );
-        chapter_copy = malloc( sizeof( hb_chapter_t ) );
-        memcpy( chapter_copy, chapter, sizeof( hb_chapter_t ) );
-        hb_list_add( title_copy->list_chapter, chapter_copy );
-    }
-
-    /*
-     * Copy the metadata
-     */
-    if( title->metadata )
-    {
-        title_copy->metadata = malloc( sizeof( hb_metadata_t ) );
-        
-        if( title_copy->metadata ) 
-        {
-            memcpy( title_copy->metadata, title->metadata, sizeof( hb_metadata_t ) );
-
-            /*
-             * Need to copy the artwork seperatly (TODO).
-             */
-            if( title->metadata->coverart )
-            {
-                title_copy->metadata->coverart = malloc( title->metadata->coverart_size );
-                if( title_copy->metadata->coverart )
-                {
-                    memcpy( title_copy->metadata->coverart, title->metadata->coverart,
-                            title->metadata->coverart_size );
-                } else {
-                    title_copy->metadata->coverart_size = 0; 
-                }
-            }
-        }
-    }
-
-    /* Copy the audio track(s) we want */
-    title_copy->list_audio = hb_list_init();
-    for( i = 0; i < hb_list_count(job->list_audio); i++ )
-    {
-        if( ( audio = hb_list_item( job->list_audio, i ) ) )
-        {
-            hb_list_add( title_copy->list_audio, hb_audio_copy(audio) );
-        }
-    }
-
-    /* Initialize subtitle list - filled out further below */
-    title_copy->list_subtitle = hb_list_init();
-    
-    /* Copy all the attachments */
-    title_copy->list_attachment = hb_list_init();
-    for( i = 0; i < hb_list_count(title->list_attachment); i++ )
-    {
-        if( ( attachment = hb_list_item( title->list_attachment, i ) ) )
-        {
-            hb_list_add( title_copy->list_attachment, hb_attachment_copy(attachment) );
-        }
-    }
-    title_copy->video_codec_name = strdup( title->video_codec_name );
-
-    /*
-     * The following code is confusing, there are two ways in which
-     * we select subtitles and it depends on whether this is single or
-     * two pass mode.
+    /* If we're doing Foreign Audio Search, copy all subtitles matching the
+     * first audio track language we find in the audio list.
      *
-     * subtitle_scan may be enabled, in which case the first pass
-     * scans all subtitles of that language. The second pass does not
-     * select any because they are set at the end of the first pass.
-     *
-     * We may have manually selected a subtitle, in which case that is
-     * selected in the first pass of a single pass, or the second of a
-     * two pass.
-     */
+     * Otherwise, copy all subtitles found in the input job (which can be
+     * manually selected by the user, or added after the Foreign Audio
+     * Search pass). */
     memset( audio_lang, 0, sizeof( audio_lang ) );
 
     if( job->indepth_scan )
@@ -1434,77 +1446,58 @@ void hb_add( hb_handle_t * h, hb_job_t * job )
                 break;
             }
         }
-        for( i = 0; i < hb_list_count( title->list_subtitle ); i++ )
+
+        /*
+         * If doing a subtitle scan then add all the matching subtitles for this
+         * language.
+         */
+        job_copy->list_subtitle = hb_list_init();
+    
+        for( i = 0; i < hb_list_count( job->title->list_subtitle ); i++ )
         {
-            subtitle = hb_list_item( title->list_subtitle, i );
+            subtitle = hb_list_item( job->title->list_subtitle, i );
             if( strcmp( subtitle->iso639_2, audio_lang ) == 0 &&
-                subtitle->source == VOBSUB )
+                hb_subtitle_can_force( subtitle->source ) )
             {
-                /* Matched subtitle language with audio language, so
-                 * add this to our list to scan.
+                /* Matched subtitle language with audio language, so add this to
+                 * our list to scan.
                  *
-                 * We will update the subtitle list on the second pass
-                 * later after the first pass has completed. */
-                hb_list_add( title_copy->list_subtitle, hb_subtitle_copy( subtitle ) );
+                 * We will update the subtitle list on the next pass later, after
+                 * the subtitle scan pass has completed. */
+                hb_list_add( job_copy->list_subtitle,
+                             hb_subtitle_copy( subtitle ) );
             }
         }
     }
     else
     {
-        /*
-         * Not doing a subtitle scan in this pass, but maybe we are in the
-         * first pass?
-         */
-        if( job->pass != 1 )
-        {
-            /* Copy all subtitles from the input job to title_copy/job_copy. */
-            for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
-            {
-                if( ( subtitle = hb_list_item( job->list_subtitle, i ) ) )
-                {
-                    hb_list_add( title_copy->list_subtitle, hb_subtitle_copy( subtitle ) );
-                }
-            }
-        }
+        /* Copy all subtitles from the input job to title_copy/job_copy. */
+        job_copy->list_subtitle = hb_subtitle_list_copy( job->list_subtitle );
     }
 
-    /* Copy the job */
-    job_copy        = calloc( sizeof( hb_job_t ), 1 );
-    memcpy( job_copy, job, sizeof( hb_job_t ) );
-    title_copy->job = job_copy;
-    job_copy->title = title_copy;
-    job_copy->list_audio = title_copy->list_audio;
-    job_copy->list_subtitle = title_copy->list_subtitle;   // sharing list between title and job
-    job_copy->file  = strdup( job->file );
+    job_copy->list_chapter = hb_chapter_list_copy( job->list_chapter );
+    job_copy->list_audio = hb_audio_list_copy( job->list_audio );
+    job_copy->list_attachment = hb_attachment_list_copy( job->list_attachment );
+    job_copy->metadata = hb_metadata_copy( job->metadata );
+
+    if ( job->file )
+        job_copy->file  = strdup( job->file );
+    if ( job->advanced_opts )
+        job_copy->advanced_opts  = strdup( job->advanced_opts );
+    if ( job->x264_preset )
+        job_copy->x264_preset  = strdup( job->x264_preset );
+    if ( job->x264_tune )
+        job_copy->x264_tune  = strdup( job->x264_tune );
+    if ( job->h264_profile )
+        job_copy->h264_profile  = strdup( job->h264_profile );
+    if ( job->h264_level )
+        job_copy->h264_level  = strdup( job->h264_level );
+
     job_copy->h     = h;
     job_copy->pause = h->pause_lock;
 
     /* Copy the job filter list */
-    if( job->filters )
-    {
-        int i;
-        int filter_count = hb_list_count( job->filters );
-        job_copy->filters = hb_list_init();
-        for( i = 0; i < filter_count; i++ )
-        {
-            /*
-             * Copy the filters, since the MacGui reuses the global filter objects
-             * meaning that queued up jobs overwrite the previous filter settings.
-             * In reality, settings is probably the only field that needs duplicating
-             * since it's the only value that is ever changed. But name is duplicated
-             * as well for completeness. Not copying private_data since it gets
-             * created for each job in renderInit.
-             */
-            hb_filter_object_t * filter = hb_list_item( job->filters, i );
-            hb_filter_object_t * filter_copy = malloc( sizeof( hb_filter_object_t ) );
-            memcpy( filter_copy, filter, sizeof( hb_filter_object_t ) );
-            if( filter->name )
-                filter_copy->name = strdup( filter->name );
-            if( filter->settings )
-                filter_copy->settings = strdup( filter->settings );
-            hb_list_add( job_copy->filters, filter_copy );
-        }
-    }
+    job_copy->list_filter = hb_filter_list_copy( job->list_filter );
 
     /* Add the job to the list */
     hb_list_add( h->jobs, job_copy );
@@ -1558,7 +1551,7 @@ void hb_start( hb_handle_t * h )
     h->paused = 0;
 
     h->work_die    = 0;
-    h->work_thread = hb_work_init( h->jobs, &h->work_die, &h->work_error, &h->current_job );
+    h->work_thread = hb_work_init( h, h->jobs, &h->work_die, &h->work_error, &h->current_job );
 }
 
 /**
@@ -1577,6 +1570,8 @@ void hb_pause( hb_handle_t * h )
         hb_lock( h->state_lock );
         h->state.state = HB_STATE_PAUSED;
         hb_unlock( h->state_lock );
+
+        hb_allow_sleep( h );
     }
 }
 
@@ -1588,6 +1583,8 @@ void hb_resume( hb_handle_t * h )
 {
     if( h->paused )
     {
+        hb_prevent_sleep( h );
+
 #define job hb_current_job( h )
         if( job->st_pause_date != -1 )
         {
@@ -1626,52 +1623,6 @@ void hb_scan_stop( hb_handle_t * h )
     h->job_count_permanent = 0;
 
     hb_resume( h );
-}
-
-/**
- * Gets a filter object with the given type and settings.
- * @param filter_id The type of filter to get.
- * @param settings The filter settings to use.
- * @returns The requested filter object.
- */
-hb_filter_object_t * hb_get_filter_object(int filter_id, const char * settings)
-{
-    if (filter_id == HB_FILTER_ROTATE)
-    {
-        hb_filter_rotate.settings = (char*)settings;
-        return &hb_filter_rotate;
-    }
-
-    if (filter_id == HB_FILTER_DETELECINE)
-    {
-        hb_filter_detelecine.settings = (char*)settings;
-        return &hb_filter_detelecine;
-    }
-
-    if (filter_id == HB_FILTER_DECOMB)
-    {
-        hb_filter_decomb.settings = (char*)settings;
-        return &hb_filter_decomb;
-    }
-
-    if (filter_id == HB_FILTER_DEINTERLACE)
-    {
-        hb_filter_deinterlace.settings = (char*)settings;
-        return &hb_filter_deinterlace;
-    }
-
-    if (filter_id == HB_FILTER_DEBLOCK)
-    {
-        hb_filter_deblock.settings = (char*)settings;
-        return &hb_filter_deblock;
-    }
-
-    if (filter_id == HB_FILTER_DENOISE)
-    {
-        hb_filter_denoise.settings = (char*)settings;
-        return &hb_filter_denoise;
-    }
-    return NULL;
 }
 
 /**
@@ -1721,17 +1672,12 @@ void hb_close( hb_handle_t ** _h )
     
     hb_thread_close( &h->main_thread );
 
-    while( ( title = hb_list_item( h->list_title, 0 ) ) )
+    while( ( title = hb_list_item( h->title_set.list_title, 0 ) ) )
     {
-        hb_list_rem( h->list_title, title );
-        if( title->job && title->job->filters )
-        {
-            hb_list_close( &title->job->filters );
-        }
-        free( title->job );
+        hb_list_rem( h->title_set.list_title, title );
         hb_title_close( &title );
     }
-    hb_list_close( &h->list_title );
+    hb_list_close( &h->title_set.list_title );
 
     hb_list_close( &h->jobs );
     hb_lock_close( &h->state_lock );
@@ -1815,9 +1761,9 @@ static void thread_func( void * _h )
                 hb_title_t * title;
 
                 hb_remove_previews( h );
-                while( ( title = hb_list_item( h->list_title, 0 ) ) )
+                while( ( title = hb_list_item( h->title_set.list_title, 0 ) ) )
                 {
-                    hb_list_rem( h->list_title, title );
+                    hb_list_rem( h->title_set.list_title, title );
                     hb_title_close( &title );
                 }
 
@@ -1826,7 +1772,7 @@ static void thread_func( void * _h )
             else
             {
                 hb_log( "libhb: scan thread found %d valid title(s)",
-                        hb_list_count( h->list_title ) );
+                        hb_list_count( h->title_set.list_title ) );
             }
             hb_lock( h->state_lock );
             h->state.state = HB_STATE_SCANDONE; //originally state.state
@@ -1914,29 +1860,6 @@ int hb_get_instance_id( hb_handle_t * h )
 }
 
 /**
- * Returns the title with the given title index.
- * @param h Handle to hb_handle_t
- * @param title_index the index of the title to get
- * @returns The requested title
- */
-hb_title_t * hb_get_title_by_index( hb_handle_t * h, int title_index )
-{
-    hb_title_t * title;
-    int i;
-	int count = hb_list_count( h->list_title );
-    for (i = 0; i < count; i++)
-    {
-        title = hb_list_item( h->list_title, i );
-        if (title->index == title_index)
-        {
-            return title;
-        }
-    }
-    
-    return NULL;
-}
-
-/**
  * Sets the current state.
  * @param h Handle to hb_handle_t
  * @param s Handle to new hb_state_t
@@ -1967,61 +1890,18 @@ void hb_set_state( hb_handle_t * h, hb_state_t * s )
     hb_unlock( h->pause_lock );
 }
 
+void hb_prevent_sleep( hb_handle_t * h )
+{
+    hb_system_sleep_prevent( h->hb_system_sleep_opaque );
+}
+
+void hb_allow_sleep( hb_handle_t * h )
+{
+    hb_system_sleep_allow( h->hb_system_sleep_opaque );
+}
+
 /* Passes a pointer to persistent data */
 hb_interjob_t * hb_interjob_get( hb_handle_t * h )
 {
     return h->interjob;
-}
-
-/************************************************************************
- * encca_haac_available()
- ************************************************************************
- * Returns whether the Core Audio HE-AAC encoder is available for use
- * on the system. Under 10.5, if the encoder is available, register it.
- * The registration is actually only performed on the first call.
- ************************************************************************/
-int encca_haac_available()
-{
-#ifdef __APPLE__
-    static int encca_haac_available = -1;
-
-    if (encca_haac_available != -1)
-        return encca_haac_available;
-
-    encca_haac_available = 0;
-
-    long minorVersion, majorVersion, quickTimeVersion;
-    Gestalt(gestaltSystemVersionMajor, &majorVersion);
-    Gestalt(gestaltSystemVersionMinor, &minorVersion);
-    Gestalt(gestaltQuickTime, &quickTimeVersion);
-
-    if (majorVersion > 10 || (majorVersion == 10 && minorVersion >= 6))
-    {
-        // OS X 10.6+ - ca_haac is available and ready to use
-        encca_haac_available = 1;
-    }
-    else if (majorVersion == 10 && minorVersion >= 5 && quickTimeVersion >= 0x07630000)
-    {
-        // OS X 10.5, QuickTime 7.6.3+ - register the component
-        ComponentDescription cd;
-        cd.componentType         = kAudioEncoderComponentType;
-        cd.componentSubType      = kAudioFormatMPEG4AAC_HE;
-        cd.componentManufacturer = kAudioUnitManufacturer_Apple;
-        cd.componentFlags        = 0;
-        cd.componentFlagsMask    = 0;
-        ComponentResult (*ComponentRoutine) (ComponentParameters * cp, Handle componentStorage);
-        void *handle = dlopen("/System/Library/Components/AudioCodecs.component/Contents/MacOS/AudioCodecs", RTLD_LAZY|RTLD_LOCAL);
-        if (handle)
-        {
-            ComponentRoutine = dlsym(handle, "ACMP4AACHighEfficiencyEncoderEntry");
-            if (ComponentRoutine)
-                if (RegisterComponent(&cd, ComponentRoutine, 0, NULL, NULL, NULL))
-                    encca_haac_available = 1;
-        }
-    }
-
-    return encca_haac_available;
-#else
-    return 0;
-#endif
 }

@@ -1,7 +1,11 @@
-/* 
-   This file is part of the HandBrake source code.
+/* dectx3gsub.c
+
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 /*
  * Converts TX3G subtitles to UTF-8 subtitles with limited HTML-style markup (<b>, <i>, <u>).
@@ -164,8 +168,8 @@ static hb_buffer_t *tx3g_decode_to_utf8( hb_buffer_t *in )
     out->size = dst - out->data;
     
     // Copy metadata from the input packet to the output packet
-    out->start = in->start;
-    out->stop = in->stop;
+    out->s.start = in->s.start;
+    out->s.stop = in->s.stop;
     
 fail:
     free( startStyle );
@@ -197,7 +201,7 @@ static int dectx3gWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
     
     // Warn if the subtitle's duration has not been passed through by the demuxer,
     // which will prevent the subtitle from displaying at all
-    if ( in->stop == 0 ) {
+    if ( in->s.stop == 0 ) {
         hb_log( "dectx3gsub: subtitle packet lacks duration" );
     }
     

@@ -1,8 +1,11 @@
-/* $Id: ports.c,v 1.15 2005/10/15 18:05:03 titer Exp $
+/* ports.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #ifdef USE_PTHREAD
 #ifdef SYS_LINUX
@@ -61,6 +64,10 @@
 #include <sys/dvdio.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#endif
+
+#ifdef __APPLE__
+#include <IOKit/pwr_mgt/IOPMLib.h>
 #endif
 
 #include <stddef.h>
@@ -294,20 +301,20 @@ void hb_mkdir( char * name )
  ***********************************************************************/
 struct hb_thread_s
 {
-    char       * name;
-    int          priority;
-    void      (* function) ( void * );
-    void       * arg;
+    char          * name;
+    int             priority;
+    thread_func_t * function;
+    void          * arg;
 
-    hb_lock_t  * lock;
-    int          exited;
+    hb_lock_t     * lock;
+    int             exited;
 
 #if defined( SYS_BEOS )
-    thread_id    thread;
+    thread_id       thread;
 #elif USE_PTHREAD
-    pthread_t    thread;
+    pthread_t       thread;
 //#elif defined( SYS_CYGWIN )
-//    HANDLE       thread;
+//    HANDLE          thread;
 #endif
 };
 
@@ -346,7 +353,7 @@ static void attribute_align_thread hb_thread_func( void * _t )
 {
     hb_thread_t * t = (hb_thread_t *) _t;
 
-#if defined( SYS_DARWIN )
+#if defined( SYS_DARWIN ) || defined( SYS_FREEBSD )
     /* Set the thread priority */
     struct sched_param param;
     memset( &param, 0, sizeof( struct sched_param ) );
@@ -376,7 +383,7 @@ static void attribute_align_thread hb_thread_func( void * _t )
  * arg:      argument of the routine
  * priority: HB_LOW_PRIORITY or HB_NORMAL_PRIORITY
  ***********************************************************************/
-hb_thread_t * hb_thread_init( char * name, void (* function)(void *),
+hb_thread_t * hb_thread_init( const char * name, void (* function)(void *),
                               void * arg, int priority )
 {
     hb_thread_t * t = calloc( sizeof( hb_thread_t ), 1 );
@@ -489,7 +496,7 @@ hb_lock_t * hb_lock_init()
 
     pthread_mutexattr_init(&mta);
 
-#if defined( SYS_CYGWIN )
+#if defined( SYS_CYGWIN ) || defined( SYS_FREEBSD )
     pthread_mutexattr_settype(&mta, PTHREAD_MUTEX_NORMAL);
 #endif
 
@@ -566,6 +573,9 @@ hb_cond_t * hb_cond_init()
 {
     hb_cond_t * c = calloc( sizeof( hb_cond_t ), 1 );
 
+    if( c == NULL )
+        return NULL;
+
 #if defined( SYS_BEOS )
     c->thread = -1;
 #elif USE_PTHREAD
@@ -611,9 +621,7 @@ void hb_cond_wait( hb_cond_t * c, hb_lock_t * lock )
 void hb_clock_gettime( struct timespec *tp )
 {
     struct timeval tv;
-    time_t sec;
 
-    sec = time( NULL );
     gettimeofday( &tv, NULL );
     tp->tv_sec = tv.tv_sec;
     tp->tv_nsec = tv.tv_usec * 1000;
@@ -777,3 +785,70 @@ char *strtok_r(char *s, const char *delim, char **save_ptr)
     return token;
 }
 #endif
+
+/************************************************************************
+* OS Sleep Allow / Prevent
+***********************************************************************/
+
+#ifdef __APPLE__
+// 128 chars limit for IOPMAssertionCreateWithName
+static CFStringRef reasonForActivity= CFSTR("HandBrake is currently scanning and/or encoding");
+#endif
+
+void* hb_system_sleep_opaque_init()
+{
+    void* opaque;
+#ifdef __APPLE__
+    opaque = calloc( sizeof( IOPMAssertionID ), 1);
+    IOPMAssertionID * assertionID = (IOPMAssertionID *)opaque;
+    *assertionID = -1;
+#endif
+
+    return opaque;
+}
+
+void hb_system_sleep_opaque_close(void **_opaque)
+{
+#ifdef __APPLE__
+    IOPMAssertionID * assertionID = (IOPMAssertionID *) *_opaque;
+    free( assertionID );
+#endif
+    *_opaque = NULL;
+}
+
+void hb_system_sleep_allow(void *opaque)
+{
+#ifdef __APPLE__
+    IOPMAssertionID * assertionID = (IOPMAssertionID *)opaque;
+
+    if (*assertionID == -1)
+        return;
+
+    IOReturn success = IOPMAssertionRelease(*assertionID);
+
+    if (success == kIOReturnSuccess) {
+        hb_deep_log( 3, "osxsleep: IOPM assertion %d successfully released, sleep allowed", *assertionID );
+        *assertionID = -1;
+    } else {
+        hb_log( "osxsleep: error while trying to unset power management assertion" );
+    }
+#endif
+}
+
+void hb_system_sleep_prevent(void *opaque)
+{
+#ifdef __APPLE__
+    IOPMAssertionID * assertionID = (IOPMAssertionID *)opaque;
+
+    if (*assertionID != -1)
+        return;
+
+    IOReturn success = IOPMAssertionCreateWithName(kIOPMAssertionTypeNoIdleSleep,
+                                                   kIOPMAssertionLevelOn, reasonForActivity, assertionID);
+    if (success == kIOReturnSuccess) {
+        hb_deep_log( 3, "IOPM assertion %d successfully created, prevent sleep", *assertionID);
+    } else {
+        hb_log( "osxsleep: error while trying to set power management assertion" );
+    }
+#endif
+}

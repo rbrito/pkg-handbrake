@@ -1,7 +1,11 @@
-/* 
-   This file is part of the HandBrake source code.
+/* decutf8sub.c
+
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 /*
  * Decoder for UTF-8 subtitles obtained from file input-sources.
@@ -32,7 +36,7 @@ static int decutf8Work( hb_work_object_t * w, hb_buffer_t ** buf_in,
 
     // Warn if the subtitle's duration has not been passed through by the demuxer,
     // which will prevent the subtitle from displaying at all
-    if ( out->stop == 0 ) {
+    if ( out->s.stop == 0 ) {
         hb_log( "decutf8sub: subtitle packet lacks duration" );
     }
     

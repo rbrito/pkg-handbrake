@@ -1,10 +1,14 @@
-/* $Id: encavcodec.c,v 1.23 2005/10/13 23:47:06 titer Exp $
+/* encavcodec.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
+#include "hb_dict.h"
 #include "hbffmpeg.h"
 
 /*
@@ -66,11 +70,11 @@ int encavcodecInit( hb_work_object_t * w, hb_job_t * job )
 
     switch ( w->codec_param )
     {
-        case CODEC_ID_MPEG4:
+        case AV_CODEC_ID_MPEG4:
         {
             hb_log("encavcodecInit: MPEG-4 ASP encoder");
         } break;
-        case CODEC_ID_MPEG2VIDEO:
+        case AV_CODEC_ID_MPEG2VIDEO:
         {
             hb_log("encavcodecInit: MPEG-2 encoder");
         } break;
@@ -156,51 +160,21 @@ int encavcodecInit( hb_work_object_t * w, hb_job_t * job )
     context->time_base.num = fps.den;
     context->gop_size  = 10 * (int)( (double)job->vrate / (double)job->vrate_base + 0.5 );
 
-    /*
-        This section passes the string advanced_opts to avutil for parsing 
-        into an AVCodecContext.
-
-        The string is set up like this:
-        option1=value1:option2=value2
-
-        So, you have to iterate through based on the colons, and then put
-        the left side of the equals sign in "name" and the right side into
-        "value." Then you hand those strings off to avutil for interpretation.
-     */
-    AVDictionary *av_opts = NULL;
+    /* place job->advanced_opts in an hb_dict_t for convenience */
+    hb_dict_t * lavc_opts = NULL;
     if( job->advanced_opts != NULL && *job->advanced_opts != '\0' )
     {
-        char *opts, *opts_start;
-
-        opts = opts_start = strdup(job->advanced_opts);
-
-        if( opts_start )
-        {
-            while( *opts )
-            {
-                char *name = opts;
-                char *value;
-
-                opts += strcspn( opts, ":" );
-                if( *opts )
-                {
-                    *opts = 0;
-                    opts++;
-                }
-
-                value = strchr( name, '=' );
-                if( value )
-                {
-                    *value = 0;
-                    value++;
-                }
-
-                /* Here's where the strings are passed to avutil for parsing. */
-                av_dict_set( &av_opts, name, value, 0 );
-            }
-        }
-        free(opts_start);
+        lavc_opts = hb_encopts_to_dict( job->advanced_opts, job->vcodec );
     }
+    /* iterate through lavc_opts and have avutil parse the options for us */
+    AVDictionary * av_opts = NULL;
+    hb_dict_entry_t * entry = NULL;
+    while( ( entry = hb_dict_next( lavc_opts, entry ) ) )
+    {
+        /* Here's where the strings are passed to avutil for parsing. */
+        av_dict_set( &av_opts, entry->key, entry->value, 0 );
+    }
+    hb_dict_free( &lavc_opts );
 
     // Now set the things in context that we don't want to allow
     // the user to override.
@@ -224,7 +198,7 @@ int encavcodecInit( hb_work_object_t * w, hb_job_t * job )
     }
     context->width     = job->width;
     context->height    = job->height;
-    context->pix_fmt   = PIX_FMT_YUV420P;
+    context->pix_fmt   = AV_PIX_FMT_YUV420P;
 
     if( job->anamorphic.mode )
     {
@@ -334,8 +308,8 @@ void encavcodecClose( hb_work_object_t * w )
 static void save_frame_info( hb_work_private_t * pv, hb_buffer_t * in )
 {
     int i = pv->frameno_in & FRAME_INFO_MASK;
-    pv->frame_info[i].start = in->start;
-    pv->frame_info[i].stop = in->stop;
+    pv->frame_info[i].start = in->s.start;
+    pv->frame_info[i].stop = in->s.stop;
 }
 
 static int64_t get_frame_start( hb_work_private_t * pv, int64_t frameno )
@@ -356,7 +330,7 @@ static void compute_dts_offset( hb_work_private_t * pv, hb_buffer_t * buf )
     {
         if ( ( pv->frameno_in - 1 ) == pv->job->areBframes )
         {
-            pv->dts_delay = buf->start;
+            pv->dts_delay = buf->s.start;
             pv->job->config.h264.init_delay = pv->dts_delay;
         }
     }
@@ -401,7 +375,7 @@ static hb_buffer_t * process_delay_list( hb_work_private_t * pv, hb_buffer_t * b
             // Note that start Nth frame != start time this buffer since the
             // output buffers have rearranged start times.
             int64_t start = get_frame_start( pv, pv->frameno_out );
-            buf->renderOffset = start - pv->dts_delay;
+            buf->s.renderOffset = start - pv->dts_delay;
             return buf;
         }
         else
@@ -415,7 +389,7 @@ static hb_buffer_t * process_delay_list( hb_work_private_t * pv, hb_buffer_t * b
                 // Note that start Nth frame != start time this buffer since the
                 // output buffers have rearranged start times.
                 int64_t start = get_frame_start( pv, pv->frameno_out );
-                buf->renderOffset = start - pv->dts_delay;
+                buf->s.renderOffset = start - pv->dts_delay;
                 buf = buf->next;
             }
             buf = pv->delay_head;
@@ -425,7 +399,7 @@ static hb_buffer_t * process_delay_list( hb_work_private_t * pv, hb_buffer_t * b
     }
     else if ( buf )
     {
-        buf->renderOffset = buf->start - pv->dts_delay;
+        buf->s.renderOffset = buf->s.start - pv->dts_delay;
         return buf;
     }
     return NULL;
@@ -453,12 +427,13 @@ int encavcodecWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
     }
 
     frame              = avcodec_alloc_frame();
-    frame->data[0]     = in->data;
-    frame->data[1]     = frame->data[0] + job->width * job->height;
-    frame->data[2]     = frame->data[1] + job->width * job->height / 4;
-    frame->linesize[0] = job->width;
-    frame->linesize[1] = job->width / 2;
-    frame->linesize[2] = job->width / 2;
+    frame->data[0]     = in->plane[0].data;
+    frame->data[1]     = in->plane[1].data;
+    frame->data[2]     = in->plane[2].data;
+    frame->linesize[0] = in->plane[0].stride;
+    frame->linesize[1] = in->plane[1].stride;
+    frame->linesize[2] = in->plane[2].stride;
+
     // For constant quality, setting the quality in AVCodecContext 
     // doesn't do the trick.  It must be set in the AVFrame.
     frame->quality = pv->context->global_quality;
@@ -466,7 +441,7 @@ int encavcodecWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
     // Bizarro ffmpeg appears to require the input AVFrame.pts to be
     // set to a frame number.  Setting it to an actual pts causes
     // jerky video.
-    // frame->pts = in->start;
+    // frame->pts = in->s.start;
     frame->pts = ++pv->frameno_in;
 
     // Remember info about this frame that we need to pass across
@@ -476,67 +451,75 @@ int encavcodecWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
 
     if ( pv->context->codec )
     {
+        int ret;
+        AVPacket pkt;
+        int got_packet;
+
+        av_init_packet(&pkt);
         /* Should be way too large */
         buf = hb_video_buffer_init( job->width, job->height );
-        buf->size = avcodec_encode_video( pv->context, buf->data, buf->alloc,
-                                          frame );
-        if ( buf->size <= 0 )
+        pkt.data = buf->data;
+        pkt.size = buf->alloc;
+
+        ret = avcodec_encode_video2( pv->context, &pkt, frame, &got_packet );
+        if ( ret < 0 || pkt.size <= 0 || !got_packet )
         {
             hb_buffer_close( &buf );
         }
         else
         {
-            int64_t frameno = pv->context->coded_frame->pts;
-            buf->start  = get_frame_start( pv, frameno );
-            buf->stop  = get_frame_stop( pv, frameno );
-            buf->flags &= ~HB_FRAME_REF;
+            int64_t frameno = pkt.pts;
+            buf->size = pkt.size;
+            buf->s.start  = get_frame_start( pv, frameno );
+            buf->s.stop  = get_frame_stop( pv, frameno );
+            buf->s.flags &= ~HB_FRAME_REF;
             switch ( pv->context->coded_frame->pict_type )
             {
                 case AV_PICTURE_TYPE_P:
                 {
-                    buf->frametype = HB_FRAME_P;
+                    buf->s.frametype = HB_FRAME_P;
                 } break;
 
                 case AV_PICTURE_TYPE_B:
                 {
-                    buf->frametype = HB_FRAME_B;
+                    buf->s.frametype = HB_FRAME_B;
                 } break;
 
                 case AV_PICTURE_TYPE_S:
                 {
-                    buf->frametype = HB_FRAME_P;
+                    buf->s.frametype = HB_FRAME_P;
                 } break;
 
                 case AV_PICTURE_TYPE_SP:
                 {
-                    buf->frametype = HB_FRAME_P;
+                    buf->s.frametype = HB_FRAME_P;
                 } break;
 
                 case AV_PICTURE_TYPE_BI:
                 case AV_PICTURE_TYPE_SI:
                 case AV_PICTURE_TYPE_I:
                 {
-                    buf->flags |= HB_FRAME_REF;
-                    if ( pv->context->coded_frame->key_frame )
+                    buf->s.flags |= HB_FRAME_REF;
+                    if ( pkt.flags & AV_PKT_FLAG_KEY )
                     {
-                        buf->frametype = HB_FRAME_IDR;
+                        buf->s.frametype = HB_FRAME_IDR;
                     }
                     else
                     {
-                        buf->frametype = HB_FRAME_I;
+                        buf->s.frametype = HB_FRAME_I;
                     }
                 } break;
 
                 default:
                 {
-                    if ( pv->context->coded_frame->key_frame )
+                    if ( pkt.flags & AV_PKT_FLAG_KEY )
                     {
-                        buf->flags |= HB_FRAME_REF;
-                        buf->frametype = HB_FRAME_KEY;
+                        buf->s.flags |= HB_FRAME_REF;
+                        buf->s.frametype = HB_FRAME_KEY;
                     }
                     else
                     {
-                        buf->frametype = HB_FRAME_REF;
+                        buf->s.frametype = HB_FRAME_REF;
                     }
                 } break;
             }
@@ -556,7 +539,7 @@ int encavcodecWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
         hb_error( "encavcodec: codec context has uninitialized codec; skipping frame" );
     }
 
-    av_free( frame );
+    avcodec_free_frame(&frame);
 
     *buf_out = buf;
 

@@ -1,11 +1,15 @@
-/* $Id: deca52.c,v 1.14 2005/03/03 17:21:57 titer Exp $
+/* deca52.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
-#include "downmix.h"
+#include "audio_remap.h"
+#include "audio_resample.h"
 
 #include "a52dec/a52.h"
 #include "libavutil/crc.h"
@@ -17,11 +21,9 @@ struct hb_work_private_s
     /* liba52 handle */
     a52_state_t * state;
 
-    int           flags_in;
-    int           flags_out;
+    int           flags;
     int           rate;
     int           bitrate;
-    int           out_discrete_channels;
     int           error;
     int           frames;                   // number of good frames decoded
     int           crc_errors;               // number of frames with crc errors
@@ -33,6 +35,14 @@ struct hb_work_private_s
     hb_list_t    *list;
     const AVCRC  *crc_table;
     uint8_t       frame[3840];
+    uint8_t       buf[6][6][256 * sizeof(float)]; // decoded frame (up to 6 channels, 6 blocks * 256 samples)
+    uint8_t      *samples[6];                     // pointers to the start of each plane (1 per channel)
+
+    int                 nchannels;
+    int                 use_mix_levels;
+    uint64_t            channel_layout;
+    hb_audio_remap_t    *remap;
+    hb_audio_resample_t *resample;
 };
 
 static int  deca52Init( hb_work_object_t *, hb_job_t * );
@@ -50,6 +60,33 @@ hb_work_object_t hb_deca52 =
     deca52Close,
     0,
     deca52BSInfo
+};
+
+/* Translate acmod and lfeon on AV_CH_LAYOUT */
+static const uint64_t acmod2layout[] =
+{
+    AV_CH_LAYOUT_STEREO,         // A52_CHANNEL   (0)
+    AV_CH_LAYOUT_MONO,           // A52_MONO      (1)
+    AV_CH_LAYOUT_STEREO,         // A52_STEREO    (2)
+    AV_CH_LAYOUT_SURROUND,       // A52_3F        (3)
+    AV_CH_LAYOUT_2_1,            // A52_2F1R      (4)
+    AV_CH_LAYOUT_4POINT0,        // A52_3F1R      (5)
+    AV_CH_LAYOUT_2_2,            // A52_2F2R      (6)
+    AV_CH_LAYOUT_5POINT0,        // A52_3F2R      (7)
+    AV_CH_LAYOUT_MONO,           // A52_CHANNEL1  (8)
+    AV_CH_LAYOUT_MONO,           // A52_CHANNEL2  (9)
+    AV_CH_LAYOUT_STEREO_DOWNMIX, // A52_DOLBY    (10)
+    AV_CH_LAYOUT_STEREO,
+    AV_CH_LAYOUT_STEREO,
+    AV_CH_LAYOUT_STEREO,
+    AV_CH_LAYOUT_STEREO,
+    AV_CH_LAYOUT_STEREO,     // A52_CHANNEL_MASK (15)
+};
+
+static const uint64_t lfeon2layout[] =
+{
+    0,
+    AV_CH_LOW_FREQUENCY,
 };
 
 /***********************************************************************
@@ -86,29 +123,69 @@ static sample_t dynrng_call (sample_t c, void *data)
  ***********************************************************************
  * Allocate the work object, initialize liba52
  **********************************************************************/
-static int deca52Init( hb_work_object_t * w, hb_job_t * job )
+static int deca52Init(hb_work_object_t *w, hb_job_t *job)
 {
-    hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
-    hb_audio_t * audio = w->audio;
+    hb_work_private_t *pv = calloc(1, sizeof(hb_work_private_t));
+    hb_audio_t *audio = w->audio;
     w->private_data = pv;
 
-    pv->job   = job;
-
-    pv->crc_table = av_crc_get_table( AV_CRC_16_ANSI );
+    pv->job       = job;
+    pv->state     = a52_init(0);
     pv->list      = hb_list_init();
-    pv->state     = a52_init( 0 );
+    pv->crc_table = av_crc_get_table(AV_CRC_16_ANSI);
 
-    /* Decide what format we want out of a52dec
-    work.c has already done some of this deduction for us in do_job() */
+    /*
+     * Decoding, remapping, downmixing
+     */
+    if (audio->config.out.codec != HB_ACODEC_AC3_PASS)
+    {
+        /*
+         * Output AV_SAMPLE_FMT_FLT samples
+         */
+        pv->resample =
+            hb_audio_resample_init(AV_SAMPLE_FMT_FLT,
+                                   audio->config.out.mixdown,
+                                   audio->config.out.normalize_mix_level);
+        if (pv->resample == NULL)
+        {
+            hb_error("deca52Init: hb_audio_resample_init() failed");
+            return 1;
+        }
 
-    pv->flags_out = HB_AMIXDOWN_GET_A52_FORMAT(audio->config.out.mixdown);
+        /*
+         * Decode to AV_SAMPLE_FMT_FLTP
+         */
+        pv->level = 1.0;
+        pv->dynamic_range_compression =
+            audio->config.out.dynamic_range_compression;
+        hb_audio_resample_set_sample_fmt(pv->resample, AV_SAMPLE_FMT_FLTP);
 
-    /* pass the number of channels used into the private work data */
-    /* will only be actually used if we're not doing AC3 passthru */
-    pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
+        /*
+         * liba52 doesn't provide Lt/Rt mix levels, only Lo/Ro.
+         *
+         * When doing an Lt/Rt downmix, ignore mix levels
+         * (this matches what liba52's own downmix code does).
+         */
+        pv->use_mix_levels =
+            !(audio->config.out.mixdown == HB_AMIXDOWN_DOLBY ||
+              audio->config.out.mixdown == HB_AMIXDOWN_DOLBYPLII);
 
-    pv->level     = 1.0;
-    pv->dynamic_range_compression = audio->config.out.dynamic_range_compression;
+        /*
+         * Remap from liba52 to Libav channel order
+         */
+        pv->remap = hb_audio_remap_init(AV_SAMPLE_FMT_FLTP, &hb_libav_chan_map,
+                                        &hb_liba52_chan_map);
+        if (pv->remap == NULL)
+        {
+            hb_error("deca52Init: hb_audio_remap_init() failed");
+            return 1;
+        }
+    }
+    else
+    {
+        pv->remap    = NULL;
+        pv->resample = NULL;
+    }
 
     return 0;
 }
@@ -118,19 +195,22 @@ static int deca52Init( hb_work_object_t * w, hb_job_t * job )
  ***********************************************************************
  * Free memory
  **********************************************************************/
-static void deca52Close( hb_work_object_t * w )
+static void deca52Close(hb_work_object_t *w)
 {
-    hb_work_private_t * pv = w->private_data;
-
-    if ( pv->crc_errors )
-    {
-        hb_log( "deca52: %d frames decoded, %d crc errors, %d bytes dropped",
-                pv->frames, pv->crc_errors, pv->bytes_dropped );
-    }
-    a52_free( pv->state );
-    hb_list_empty( &pv->list );
-    free( pv );
+    hb_work_private_t *pv = w->private_data;
     w->private_data = NULL;
+
+    if (pv->crc_errors)
+    {
+        hb_log("deca52: %d frames decoded, %d crc errors, %d bytes dropped",
+               pv->frames, pv->crc_errors, pv->bytes_dropped);
+    }
+
+    hb_audio_resample_free(pv->resample);
+    hb_audio_remap_free(pv->remap);
+    hb_list_empty(&pv->list);
+    a52_free(pv->state);
+    free(pv);
 }
 
 /***********************************************************************
@@ -153,7 +233,7 @@ static int deca52Work( hb_work_object_t * w, hb_buffer_t ** buf_in,
         return HB_WORK_DONE;
     }
 
-    if ( (*buf_in)->start < -1 && pv->next_expected_pts == 0 )
+    if ( (*buf_in)->s.start < -1 && pv->next_expected_pts == 0 )
     {
         // discard buffers that start before video time 0
         *buf_out = NULL;
@@ -179,13 +259,12 @@ static int deca52Work( hb_work_object_t * w, hb_buffer_t ** buf_in,
  ***********************************************************************
  *
  **********************************************************************/
-static hb_buffer_t * Decode( hb_work_object_t * w )
+static hb_buffer_t* Decode(hb_work_object_t *w)
 {
-    hb_work_private_t * pv = w->private_data;
-    hb_buffer_t * buf;
-    hb_audio_t  * audio = w->audio;
-    int           i, j, k;
-    int           size = 0;
+    hb_work_private_t *pv = w->private_data;
+    hb_audio_t *audio = w->audio;
+    hb_buffer_t *out;
+    int size = 0;
 
     // check that we're at the start of a valid frame and align to the
     // start of a valid frame if we're not.
@@ -195,7 +274,7 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
     {
         /* check if this is a valid header */
         hb_list_seebytes( pv->list, pv->frame, 7 );
-        size = a52_syncinfo( pv->frame, &pv->flags_in, &pv->rate, &pv->bitrate );
+        size = a52_syncinfo(pv->frame, &pv->flags, &pv->rate, &pv->bitrate);
         if ( size > 0 )
         {
             // header looks valid - check the crc1
@@ -256,65 +335,104 @@ static hb_buffer_t * Decode( hb_work_object_t * w )
         ipts = -1;
     }
 
-    double pts = ( ipts != -1 ) ? ipts : pv->next_expected_pts;
     double frame_dur = (6. * 256. * 90000.) / pv->rate;
+    double pts       = (ipts != -1) ? (double)ipts : pv->next_expected_pts;
 
     /* AC3 passthrough: don't decode the AC3 frame */
-    if( audio->config.out.codec == HB_ACODEC_AC3_PASS )
+    if (audio->config.out.codec == HB_ACODEC_AC3_PASS)
     {
-        buf = hb_buffer_init( size );
-        memcpy( buf->data, pv->frame, size );
-        buf->start = pts;
-        buf->duration = frame_dur;
-        pts += frame_dur;
-        buf->stop  = pts;
-        pv->next_expected_pts = pts;
-        return buf;
+        out = hb_buffer_init(size);
+        memcpy(out->data, pv->frame, size);
     }
-
-    /* Feed liba52 */
-    a52_frame( pv->state, pv->frame, &pv->flags_out, &pv->level, 0 );
-
-    /* If a user specifies strong dynamic range compression (>1), adjust it.
-       If a user specifies default dynamic range compression (1), leave it alone.
-       If a user specifies no dynamic range compression (0), call a null function. */
-    if( pv->dynamic_range_compression > 1.0 )
+    else
     {
-        a52_dynrng( pv->state, dynrng_call, &pv->dynamic_range_compression );
-    }
-    else if( !pv->dynamic_range_compression )
-    {
-        a52_dynrng( pv->state, NULL, NULL );
-    }
+        int i, j;
+        float *block_samples;
 
-    /* 6 blocks per frame, 256 samples per block, channelsused channels */
-    buf        = hb_buffer_init( 6 * 256 * pv->out_discrete_channels * sizeof( float ) );
-    buf->start = pts;
-    buf->duration = frame_dur;
-    pts += frame_dur;
-    buf->stop  = pts;
-    pv->next_expected_pts = pts;
+        /*
+         * Feed liba52
+         */
+        a52_frame(pv->state, pv->frame, &pv->flags, &pv->level, 0);
 
-    for( i = 0; i < 6; i++ )
-    {
-        sample_t * samples_in;
-        float    * samples_out;
-
-        a52_block( pv->state );
-        samples_in  = a52_samples( pv->state );
-        samples_out = ((float *) buf->data) + 256 * pv->out_discrete_channels * i;
-
-        /* Interleave */
-        for( j = 0; j < 256; j++ )
+        /*
+         * If the user requested strong  DRC (>1), adjust it.
+         * If the user requested default DRC  (1), leave it alone.
+         * If the user requested no      DRC  (0), call a null function.
+         *
+         * a52_frame() resets the callback so it must be called for each frame.
+         */
+        if (pv->dynamic_range_compression > 1.0)
         {
-            for ( k = 0; k < pv->out_discrete_channels; k++ )
+            a52_dynrng(pv->state, dynrng_call, &pv->dynamic_range_compression);
+        }
+        else if (!pv->dynamic_range_compression)
+        {
+            a52_dynrng(pv->state, NULL, NULL);
+        }
+
+        /*
+         * Update input channel layout, prepare remapping and downmixing
+         */
+        uint64_t new_layout = (acmod2layout[(pv->flags & A52_CHANNEL_MASK)] |
+                               lfeon2layout[(pv->flags & A52_LFE) != 0]);
+
+        if (new_layout != pv->channel_layout)
+        {
+            pv->channel_layout = new_layout;
+            pv->nchannels      = av_get_channel_layout_nb_channels(new_layout);
+            hb_audio_remap_set_channel_layout(pv->remap,
+                                              pv->channel_layout,
+                                              pv->nchannels);
+            hb_audio_resample_set_channel_layout(pv->resample,
+                                                 pv->channel_layout,
+                                                 pv->nchannels);
+        }
+        if (pv->use_mix_levels)
+        {
+            hb_audio_resample_set_mix_levels(pv->resample,
+                                             (double)pv->state->slev,
+                                             (double)pv->state->clev);
+        }
+        if (hb_audio_resample_update(pv->resample))
+        {
+            hb_log("deca52: hb_audio_resample_update() failed");
+            return NULL;
+        }
+
+        /*
+         * decode all blocks before downmixing
+         */
+        for (i = 0; i < 6; i++)
+        {
+            a52_block(pv->state);
+            block_samples = (float*)a52_samples(pv->state);
+
+            /*
+             * reset pv->samples (may have been modified by hb_audio_remap)
+             *
+             * copy samples to our internal buffer
+             */
+            for (j = 0; j < pv->nchannels; j++)
             {
-                samples_out[(pv->out_discrete_channels*j)+k]   = samples_in[(256*k)+j];
+                pv->samples[j] = (uint8_t*)pv->buf[j];
+                memcpy(pv->buf[j][i], block_samples, 256 * sizeof(float));
+                block_samples += 256;
             }
         }
 
+        hb_audio_remap(pv->remap, pv->samples, 1536);
+        out = hb_audio_resample(pv->resample, pv->samples, 1536);
     }
-    return buf;
+
+    if (out != NULL)
+    {
+        out->s.start          = pts;
+        out->s.duration       = frame_dur;
+        pts                  += frame_dur;
+        out->s.stop           = pts;
+        pv->next_expected_pts = pts;
+    }
+    return out;
 }
 
 static int find_sync( const uint8_t *buf, int len )
@@ -376,7 +494,7 @@ static int deca52BSInfo( hb_work_object_t *w, const hb_buffer_t *b,
             // discard enough bytes from the front of the buffer to make
             // room for the new stuff
             int newlen = sizeof(w->audio->priv.config.a52.buf) - blen;
-            memcpy( buf, buf + len - newlen, newlen );
+            memmove( buf, buf + len - newlen, newlen );
             len = newlen;
         }
     }
@@ -418,57 +536,11 @@ static int deca52BSInfo( hb_work_object_t *w, const hb_buffer_t *b,
     info->mode = raw & 0x7;      /* bsmod is the following 3 bits */
     info->samples_per_frame = 1536;
 
-    if ( (flags & A52_CHANNEL_MASK) == A52_DOLBY )
-    {
-        info->flags |= AUDIO_F_DOLBY;
-    }
+    info->channel_layout = (acmod2layout[(flags & A52_CHANNEL_MASK)] |
+                            lfeon2layout[(flags & A52_LFE) != 0]);
 
-    switch( flags & A52_CHANNEL_MASK )
-    {
-        /* mono sources */
-        case A52_MONO:
-        case A52_CHANNEL1:
-        case A52_CHANNEL2:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_MONO;
-            break;
-        /* stereo input */
-        case A52_CHANNEL:
-        case A52_STEREO:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_STEREO;
-            break;
-        /* dolby (DPL1 aka Dolby Surround = 4.0 matrix-encoded) input */
-        case A52_DOLBY:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_DOLBY;
-            break;
-        /* 3F/2R input */
-        case A52_3F2R:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_3F2R;
-            break;
-        /* 3F/1R input */
-        case A52_3F1R:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_3F1R;
-            break;
-        /* other inputs */
-        case A52_3F:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_3F;
-            break;
-        case A52_2F1R:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_2F1R;
-            break;
-        case A52_2F2R:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_2F2R;
-            break;
-        /* unknown */
-        default:
-            info->channel_layout = HB_INPUT_CH_LAYOUT_STEREO;
-    }
-
-    if (flags & A52_LFE)
-    {
-        info->channel_layout |= HB_INPUT_CH_LAYOUT_HAS_LFE;
-    }
-
-    info->channel_map = &hb_ac3_chan_map;
+    // we remap to Libav order in Decode()
+    info->channel_map = &hb_libav_chan_map;
 
     return 1;
 }

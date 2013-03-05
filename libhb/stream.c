@@ -1,8 +1,11 @@
-/* $Id$
+/* stream.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include <string.h>
 #include <ctype.h>
@@ -29,9 +32,10 @@
  * U - Unknown (to be determined by further processing)
  * A - Audio
  * V - Video
+ * S - Subtitle
  * P - PCR
  */
-typedef enum { N, U, A, V, P } kind_t;
+typedef enum { N, U, A, V, P, S } kind_t;
 typedef struct {
     kind_t kind; /* not handled / unknown / audio / video */
     int codec;          /* HB worker object id of codec */
@@ -43,57 +47,57 @@ typedef struct {
  [id] = { kind, codec, codec_param, name }
 
 static const stream2codec_t st2codec[256] = {
-    st(0x00, U, 0,                 0,              NULL),
-    st(0x01, V, WORK_DECMPEG2,     0,              "MPEG1"),
-    st(0x02, V, WORK_DECMPEG2,     0,              "MPEG2"),
-    st(0x03, A, HB_ACODEC_FFMPEG,  CODEC_ID_MP2,   "MPEG1"),
-    st(0x04, A, HB_ACODEC_FFMPEG,  CODEC_ID_MP2,   "MPEG2"),
-    st(0x05, N, 0,                 0,              "ISO 13818-1 private section"),
-    st(0x06, U, 0,                 0,              "ISO 13818-1 PES private data"),
-    st(0x07, N, 0,                 0,              "ISO 13522 MHEG"),
-    st(0x08, N, 0,                 0,              "ISO 13818-1 DSM-CC"),
-    st(0x09, N, 0,                 0,              "ISO 13818-1 auxiliary"),
-    st(0x0a, N, 0,                 0,              "ISO 13818-6 encap"),
-    st(0x0b, N, 0,                 0,              "ISO 13818-6 DSM-CC U-N msgs"),
-    st(0x0c, N, 0,                 0,              "ISO 13818-6 Stream descriptors"),
-    st(0x0d, N, 0,                 0,              "ISO 13818-6 Sections"),
-    st(0x0e, N, 0,                 0,              "ISO 13818-1 auxiliary"),
-    st(0x0f, A, HB_ACODEC_FFAAC,   CODEC_ID_AAC,   "AAC"),
-    st(0x10, V, WORK_DECAVCODECV,  CODEC_ID_MPEG4, "MPEG4"),
-    st(0x11, A, HB_ACODEC_FFMPEG,  CODEC_ID_AAC_LATM, "LATM AAC"),
-    st(0x12, U, 0,                 0,              "MPEG4 generic"),
+    st(0x00, U, 0,                0,                      NULL),
+    st(0x01, V, WORK_DECMPEG2,    0,                      "MPEG1"),
+    st(0x02, V, WORK_DECMPEG2,    0,                      "MPEG2"),
+    st(0x03, A, HB_ACODEC_FFMPEG, AV_CODEC_ID_MP2,        "MPEG1"),
+    st(0x04, A, HB_ACODEC_FFMPEG, AV_CODEC_ID_MP2,        "MPEG2"),
+    st(0x05, N, 0,                0,                      "ISO 13818-1 private section"),
+    st(0x06, U, 0,                0,                      "ISO 13818-1 PES private data"),
+    st(0x07, N, 0,                0,                      "ISO 13522 MHEG"),
+    st(0x08, N, 0,                0,                      "ISO 13818-1 DSM-CC"),
+    st(0x09, N, 0,                0,                      "ISO 13818-1 auxiliary"),
+    st(0x0a, N, 0,                0,                      "ISO 13818-6 encap"),
+    st(0x0b, N, 0,                0,                      "ISO 13818-6 DSM-CC U-N msgs"),
+    st(0x0c, N, 0,                0,                      "ISO 13818-6 Stream descriptors"),
+    st(0x0d, N, 0,                0,                      "ISO 13818-6 Sections"),
+    st(0x0e, N, 0,                0,                      "ISO 13818-1 auxiliary"),
+    st(0x0f, A, HB_ACODEC_FFAAC,  AV_CODEC_ID_AAC,        "AAC"),
+    st(0x10, V, WORK_DECAVCODECV, AV_CODEC_ID_MPEG4,      "MPEG4"),
+    st(0x11, A, HB_ACODEC_FFMPEG, AV_CODEC_ID_AAC_LATM,   "LATM AAC"),
+    st(0x12, U, 0,                0,                      "MPEG4 generic"),
 
-    st(0x14, N, 0,                 0,              "ISO 13818-6 DSM-CC download"),
+    st(0x14, N, 0,                0,                      "ISO 13818-6 DSM-CC download"),
 
-    st(0x1b, V, WORK_DECAVCODECV,  CODEC_ID_H264,  "H.264"),
+    st(0x1b, V, WORK_DECAVCODECV, AV_CODEC_ID_H264,       "H.264"),
 
-    st(0x80, U, HB_ACODEC_FFMPEG,  CODEC_ID_PCM_BLURAY, "Digicipher II Video"),
-    st(0x81, A, HB_ACODEC_AC3,     0,              "AC3"),
-    st(0x82, A, HB_ACODEC_DCA,     0,              "DTS"),
+    st(0x80, U, HB_ACODEC_FFMPEG, AV_CODEC_ID_PCM_BLURAY, "Digicipher II Video"),
+    st(0x81, A, HB_ACODEC_AC3,    0,                      "AC3"),
+    st(0x82, A, HB_ACODEC_DCA,    AV_CODEC_ID_DTS,        "DTS"),
     // 0x83 can be LPCM or BD TrueHD.  Set to 'unknown' till we know more.
-    st(0x83, U, HB_ACODEC_LPCM,    0,              "LPCM"),
+    st(0x83, U, HB_ACODEC_LPCM,   0,                      "LPCM"),
     // BD E-AC3 Primary audio
-    st(0x84, U, 0,                 0,              "SDDS"),
-    st(0x85, U, 0,                 0,              "ATSC Program ID"),
+    st(0x84, U, 0,                0,                      "SDDS"),
+    st(0x85, U, 0,                0,                      "ATSC Program ID"),
     // 0x86 can be BD DTS-HD/DTS. Set to 'unknown' till we know more.
-    st(0x86, U, HB_ACODEC_DCA_HD,  CODEC_ID_DTS,   "DTS-HD MA"),
-    st(0x87, A, HB_ACODEC_FFMPEG,  CODEC_ID_EAC3,  "E-AC3"),
+    st(0x86, U, HB_ACODEC_DCA_HD, AV_CODEC_ID_DTS,        "DTS-HD MA"),
+    st(0x87, A, HB_ACODEC_FFMPEG, AV_CODEC_ID_EAC3,       "E-AC3"),
 
-    st(0x8a, A, HB_ACODEC_DCA,     0,              "DTS"),
+    st(0x8a, A, HB_ACODEC_DCA,    AV_CODEC_ID_DTS,        "DTS"),
 
-    st(0x90, N, 0,                 0,              "PGS Subtitle"),
+    st(0x90, S, WORK_DECPGSSUB,   0,                      "PGS Subtitle"),
     // 0x91 can be AC3 or BD Interactive Graphics Stream.
-    st(0x91, U, 0,                 0,              "AC3/IGS"),
-    st(0x92, N, 0,                 0,              "Subtitle"),
+    st(0x91, U, 0,                0,                      "AC3/IGS"),
+    st(0x92, N, 0,                0,                      "Subtitle"),
 
-    st(0x94, U, 0,                 0,              "SDDS"),
-    st(0xa0, V, 0,                 0,              "MSCODEC"),
+    st(0x94, U, 0,                0,                      "SDDS"),
+    st(0xa0, V, 0,                0,                      "MSCODEC"),
     // BD E-AC3 Secondary audio
-    st(0xa1, U, 0,                 0,              "E-AC3"),
+    st(0xa1, U, 0,                0,                      "E-AC3"),
     // BD DTS-HD Secondary audio
-    st(0xa2, U, 0,                 0,              "DTS-HD LBR"),
+    st(0xa2, U, 0,                0,                      "DTS-HD LBR"),
 
-    st(0xea, V, WORK_DECAVCODECV,  CODEC_ID_VC1,   "VC-1"),
+    st(0xea, V, WORK_DECAVCODECV, AV_CODEC_ID_VC1,        "VC-1"),
 };
 #undef st
 
@@ -252,6 +256,7 @@ static int64_t pes_timestamp( const uint8_t *pes );
 static int hb_ts_stream_init(hb_stream_t *stream);
 static hb_buffer_t * hb_ts_stream_decode(hb_stream_t *stream);
 static void hb_init_audio_list(hb_stream_t *stream, hb_title_t *title);
+static void hb_init_subtitle_list(hb_stream_t *stream, hb_title_t *title);
 static int hb_ts_stream_find_pids(hb_stream_t *stream);
 
 static void hb_ps_stream_init(hb_stream_t *stream);
@@ -946,11 +951,19 @@ hb_stream_t * hb_bd_stream_open( hb_title_t *title )
         update_ts_streams( d, pid, stream_id_ext, stream_type, A, NULL );
     }
 
-    // When scanning, title->job == NULL.  We don't need to wait for
-    // a PCR when scanning. In fact, it trips us up on the first
-    // preview of every title since we would have to read quite a
-    // lot of data before finding the PCR.
-    if ( title->job )
+    hb_subtitle_t * subtitle;
+    for ( ii = 0; ( subtitle = hb_list_item( title->list_subtitle, ii ) ); ++ii )
+    {
+        pid = subtitle->id & 0xFFFF;
+        stream_type = subtitle->stream_type;
+
+        update_ts_streams( d, pid, 0, stream_type, S, NULL );
+    }
+
+    // We don't need to wait for a PCR when scanning. In fact, it
+    // trips us up on the first preview of every title since we would
+    // have to read quite a lot of data before finding the PCR.
+    if ( title->flags & HBTF_SCAN_COMPLETE )
     {
         /* BD has PCRs, but the BD index always points to a packet
          * after a PCR packet, so we will not see the initial PCR
@@ -1034,6 +1047,7 @@ hb_title_t * hb_stream_title_scan(hb_stream_t *stream, hb_title_t * title)
     // - For program streams read the first 4MB and take every unique
     //   audio stream we find.
     hb_init_audio_list(stream, title);
+    hb_init_subtitle_list(stream, title);
 
     // set the video id, codec & muxer
     int idx = pes_index_of_video( stream );
@@ -1062,6 +1076,7 @@ hb_title_t * hb_stream_title_scan(hb_stream_t *stream, hb_title_t * title)
     // One Chapter
     hb_chapter_t * chapter;
     chapter = calloc( sizeof( hb_chapter_t ), 1 );
+    hb_chapter_set_title( chapter, "Chapter 1" );
     chapter->index = 1;
     chapter->duration = title->duration;
     chapter->hours = title->hours;
@@ -1183,14 +1198,13 @@ static int isRecoveryPoint( const uint8_t *buf, int len )
 {
     uint8_t *nal;
     int nal_len;
-    int ii, type, size, start;
+    int ii, type, size;
     int recovery_frames = 0;
 
     CreateDecodedNAL( &nal, &nal_len, buf, len );
 
     for ( ii = 0; ii+1 < nal_len; )
     {
-        start = ii;
         type = 0;
         while ( ii+1 < nal_len )
         {
@@ -1230,8 +1244,8 @@ static int isIframe( hb_stream_t *stream, const uint8_t *buf, int len )
     int vid = pes_index_of_video( stream );
     hb_pes_stream_t *pes = &stream->pes.list[vid];
     if ( pes->stream_type <= 2 ||
-         pes->codec_param == CODEC_ID_MPEG1VIDEO ||
-         pes->codec_param == CODEC_ID_MPEG2VIDEO )
+         pes->codec_param == AV_CODEC_ID_MPEG1VIDEO ||
+         pes->codec_param == AV_CODEC_ID_MPEG2VIDEO )
     {
         // This section of the code handles MPEG-1 and MPEG-2 video streams
         for (ii = 0; ii < len; ii++)
@@ -1265,7 +1279,7 @@ static int isIframe( hb_stream_t *stream, const uint8_t *buf, int len )
         // didn't find an I-frame
         return 0;
     }
-    if ( pes->stream_type == 0x1b || pes->codec_param == CODEC_ID_H264 )
+    if ( pes->stream_type == 0x1b || pes->codec_param == AV_CODEC_ID_H264 )
     {
         // we have an h.264 stream
         for (ii = 0; ii < len; ii++)
@@ -1299,7 +1313,7 @@ static int isIframe( hb_stream_t *stream, const uint8_t *buf, int len )
         // didn't find an I-frame
         return 0;
     }
-    if ( pes->stream_type == 0xea || pes->codec_param == CODEC_ID_VC1 )
+    if ( pes->stream_type == 0xea || pes->codec_param == AV_CODEC_ID_VC1 )
     {
         // we have an vc1 stream
         for (ii = 0; ii < len; ii++)
@@ -1992,34 +2006,167 @@ static void set_audio_description(
     }
     else
     {
-        codec_name = audio->config.in.codec == HB_ACODEC_AC3 ? "AC3" :
-                 audio->config.in.codec == HB_ACODEC_DCA ? "DTS" :
-                 audio->config.in.codec == HB_ACODEC_DCA_HD ? "DTS-HD" :
-                 audio->config.in.codec == HB_ACODEC_LPCM ? "LPCM" :
-                 (audio->config.in.codec & HB_ACODEC_FF_MASK) ? "FFmpeg" :
-                 "Unknown";
+        switch( audio->config.in.codec )
+        {
+            case HB_ACODEC_AC3:
+                codec_name = "AC3";
+                break;
+            case HB_ACODEC_DCA:
+                codec_name = "DTS";
+                break;
+            case HB_ACODEC_LPCM:
+                codec_name = "LPCM";
+                break;
+            case HB_ACODEC_MP3:
+                codec_name = "MP3";
+                break;
+            case HB_ACODEC_FFAAC:
+                codec_name = "AAC";
+                break;
+            case HB_ACODEC_DCA_HD:
+                codec_name = "DTS-HD";
+                break;
+            default:
+                codec_name = ( audio->config.in.codec & HB_ACODEC_FF_MASK ) ? "Unknown FFmpeg" : "Unknown";
+                break;
+        }
     }
 
+    snprintf( audio->config.lang.simple,
+              sizeof( audio->config.lang.simple ), "%s",
+              strlen( lang->native_name ) ? lang->native_name : lang->eng_name );
+    snprintf( audio->config.lang.iso639_2,
+              sizeof( audio->config.lang.iso639_2 ), "%s", lang->iso639_2 );
     snprintf( audio->config.lang.description,
               sizeof( audio->config.lang.description ), "%s (%s)",
-              strlen(lang->native_name) ? lang->native_name : lang->eng_name,
-              codec_name );
+              audio->config.lang.simple, codec_name );
 
-    if ( audio->config.in.channel_layout )
+    if (audio->config.in.channel_layout == AV_CH_LAYOUT_STEREO_DOWNMIX)
     {
-        int layout = audio->config.in.channel_layout;
-        char *desc = audio->config.lang.description +
-                        strlen( audio->config.lang.description );
-        sprintf( desc, " (%d.%d ch)",
-                 HB_INPUT_CH_LAYOUT_GET_DISCRETE_FRONT_COUNT(layout) +
-                     HB_INPUT_CH_LAYOUT_GET_DISCRETE_REAR_COUNT(layout),
-                 HB_INPUT_CH_LAYOUT_GET_DISCRETE_LFE_COUNT(layout) );
+        strcat(audio->config.lang.description, " (Dolby Surround)");
+    }
+    else if (audio->config.in.channel_layout)
+    {
+        int lfes     = (!!(audio->config.in.channel_layout & AV_CH_LOW_FREQUENCY) +
+                        !!(audio->config.in.channel_layout & AV_CH_LOW_FREQUENCY_2));
+        int channels = av_get_channel_layout_nb_channels(audio->config.in.channel_layout);
+        char *desc   = audio->config.lang.description +
+                        strlen(audio->config.lang.description);
+        sprintf(desc, " (%d.%d ch)", channels - lfes, lfes);
+    }
+}
+
+// Sort specifies the index in the audio list where you would
+// like sorted items to begin.
+static void pes_add_subtitle_to_title(
+    hb_stream_t *stream,
+    int         idx,
+    hb_title_t  *title,
+    int         sort)
+{
+    hb_pes_stream_t *pes = &stream->pes.list[idx];
+
+    // Sort by id when adding to the list
+    // This assures that they are always displayed in the same order
+    int id = get_id( pes );
+    int i;
+    hb_subtitle_t *tmp = NULL;
+
+    int count = hb_list_count( title->list_subtitle );
+
+    // Don't add the same audio twice.  Search for audio.
+    for ( i = 0; i < count; i++ )
+    {
+        tmp = hb_list_item( title->list_subtitle, i );
+        if ( id == tmp->id )
+            return;
     }
 
-    snprintf( audio->config.lang.simple, sizeof( audio->config.lang.simple ), "%s",
-              strlen(lang->native_name) ? lang->native_name : lang->eng_name );
-    snprintf( audio->config.lang.iso639_2, sizeof( audio->config.lang.iso639_2 ),
-              "%s", lang->iso639_2);
+    hb_subtitle_t *subtitle = calloc( sizeof( hb_subtitle_t ), 1 );
+    iso639_lang_t * lang;
+
+    subtitle->track = idx;
+    subtitle->id = id;
+    lang = lang_for_code( pes->lang_code );
+    snprintf( subtitle->lang, sizeof( subtitle->lang ), "%s",
+              strlen(lang->native_name) ? lang->native_name : lang->eng_name);
+    snprintf( subtitle->iso639_2, sizeof( subtitle->iso639_2 ), "%s",
+              lang->iso639_2);
+
+    switch ( pes->codec )
+    {
+        case WORK_DECPGSSUB:
+            subtitle->source = PGSSUB;
+            subtitle->format = PICTURESUB;
+            subtitle->config.dest = RENDERSUB;
+            break;
+        case WORK_DECVOBSUB:
+            subtitle->source = VOBSUB;
+            subtitle->format = PICTURESUB;
+            subtitle->config.dest = RENDERSUB;
+            break;
+        default:
+            // Unrecognized, don't add to list
+            hb_log("unregonized subtitle!");
+            free( subtitle );
+            return;
+    }
+    subtitle->reg_desc = stream->reg_desc;
+    subtitle->stream_type = pes->stream_type;
+    subtitle->substream_type = pes->stream_id_ext;
+    subtitle->codec = pes->codec;
+
+    // Create a default palette since vob files do not include the
+    // vobsub palette.
+    if ( subtitle->source == VOBSUB )
+    {
+        subtitle->palette[0] = 0x108080;
+        subtitle->palette[1] = 0x108080;
+        subtitle->palette[2] = 0x108080;
+        subtitle->palette[3] = 0xbff000;
+
+        subtitle->palette[4] = 0xbff000;
+        subtitle->palette[5] = 0x108080;
+        subtitle->palette[6] = 0x108080;
+        subtitle->palette[7] = 0x108080;
+
+        subtitle->palette[8] = 0xbff000;
+        subtitle->palette[9] = 0x108080;
+        subtitle->palette[10] = 0x108080;
+        subtitle->palette[11] = 0x108080;
+
+        subtitle->palette[12] = 0x108080;
+        subtitle->palette[13] = 0xbff000;
+        subtitle->palette[14] = 0x108080;
+        subtitle->palette[15] = 0x108080;
+    }
+
+    hb_log("stream id 0x%x (type 0x%x substream 0x%x) subtitle 0x%x",
+           pes->stream_id, pes->stream_type, pes->stream_id_ext, subtitle->id);
+
+    // Search for the sort position
+    if ( sort >= 0 )
+    {
+        sort = sort < count ? sort : count;
+        for ( i = sort; i < count; i++ )
+        {
+            tmp = hb_list_item( title->list_subtitle, i );
+            int sid = tmp->id & 0xffff;
+            int ssid = tmp->id >> 16;
+            if ( pes->stream_id < sid )
+                break;
+            else if ( pes->stream_id <= sid &&
+                      pes->stream_id_ext <= ssid )
+            {
+                break;
+            }
+        }
+        hb_list_insert( title->list_subtitle, i, subtitle );
+    }
+    else
+    {
+        hb_list_add( title->list_subtitle, subtitle );
+    }
 }
 
 // Sort specifies the index in the audio list where you would
@@ -2087,6 +2234,42 @@ static void pes_add_audio_to_title(
     else
     {
         hb_list_add( title->list_audio, audio );
+    }
+}
+
+static void hb_init_subtitle_list(hb_stream_t *stream, hb_title_t *title)
+{
+    int ii;
+    int map_idx;
+    int largest = -1;
+
+    // First add all that were found in a map.
+    for ( map_idx = 0; 1; map_idx++ )
+    {
+        for ( ii = 0; ii < stream->pes.count; ii++ )
+        {
+            if ( stream->pes.list[ii].stream_kind == S )
+            {
+                if ( stream->pes.list[ii].map_idx == map_idx )
+                {
+                    pes_add_subtitle_to_title( stream, ii, title, -1 );
+                }
+                if ( stream->pes.list[ii].map_idx > largest )
+                    largest = stream->pes.list[ii].map_idx;
+            }
+        }
+        if ( map_idx > largest )
+            break;
+    }
+
+    int count = hb_list_count( title->list_audio );
+    // Now add the reset.  Sort them by stream id.
+    for ( ii = 0; ii < stream->pes.count; ii++ )
+    {
+        if ( stream->pes.list[ii].stream_kind == S )
+        {
+            pes_add_subtitle_to_title( stream, ii, title, count );
+        }
     }
 }
 
@@ -2206,6 +2389,19 @@ static int hb_ts_stream_init(hb_stream_t *stream)
                         stream->ts.list[i].is_pcr ? " (PCR)" : "");
             }
         }
+        hb_log("    Subtitle PIDS : ");
+        for (i = 0; i < stream->ts.count; i++)
+        {
+            if ( ts_stream_kind( stream, i ) == S )
+            {
+                hb_log( "      0x%x type %s (0x%x)%s",
+                        stream->ts.list[i].pid,
+                        stream_type_name2(stream,
+                                &stream->pes.list[stream->ts.list[i].pes_list]),
+                        ts_stream_type( stream, i ),
+                        stream->ts.list[i].is_pcr ? " (PCR)" : "");
+            }
+        }
         hb_log("    Other PIDS : ");
         for (i = 0; i < stream->ts.count; i++)
         {
@@ -2272,6 +2468,19 @@ static void hb_ps_stream_init(hb_stream_t *stream)
         for (i = 0; i < stream->pes.count; i++)
         {
             if ( stream->pes.list[i].stream_kind == A )
+            {
+                hb_log( "      0x%x-0x%x type %s (0x%x)",
+                        stream->pes.list[i].stream_id,
+                        stream->pes.list[i].stream_id_ext,
+                        stream_type_name2(stream,
+                                         &stream->pes.list[i]),
+                        stream->pes.list[i].stream_type );
+            }
+        }
+        hb_log("    Subtitle Streams : ");
+        for (i = 0; i < stream->pes.count; i++)
+        {
+            if ( stream->pes.list[i].stream_kind == S )
             {
                 hb_log( "      0x%x-0x%x type %s (0x%x)",
                         stream->pes.list[i].stream_id,
@@ -2566,7 +2775,6 @@ int decode_program_map(hb_stream_t* stream)
     stream->pmt_info.PCR_PID = bits_get(&bb, 13);
     bits_get(&bb, 4);
     int program_info_length = bits_get(&bb, 12);
-
     int i;
     for (i = 0; i < program_info_length - 2; )
     {
@@ -2922,13 +3130,13 @@ static int parse_pes_header(
                 pes_info->dts = pes_info->pts;
             }
         }
-        // A user encountered a stream that has garbage DTS timestamps. 
-        // DTS should never be > PTS.  Such broken timestamps leads to 
-        // HandBrake computing negative buffer start times. 
-        if (pes_info->dts > pes_info->pts) 
-        { 
-            pes_info->dts = pes_info->pts; 
-        } 
+        // A user encountered a stream that has garbage DTS timestamps.
+        // DTS should never be > PTS.  Such broken timestamps leads to
+        // HandBrake computing negative buffer start times.
+        if (pes_info->dts > pes_info->pts)
+        {
+            pes_info->dts = pes_info->pts;
+        }
 
         if ( has_escr )
             bits_skip(&bb_hdr, 8 * 6);
@@ -3358,15 +3566,15 @@ static hb_buffer_t * hb_ps_stream_decode( hb_stream_t *stream )
         switch (stream->pes.list[idx].stream_kind)
         {
             case A:
-                buf->type = AUDIO_BUF;
+                buf->s.type = AUDIO_BUF;
                 break;
 
             case V:
-                buf->type = VIDEO_BUF;
+                buf->s.type = VIDEO_BUF;
                 break;
 
             default:
-                buf->type = OTHER_BUF;
+                buf->s.type = OTHER_BUF;
                 break;
         }
 
@@ -3374,25 +3582,25 @@ static hb_buffer_t * hb_ps_stream_decode( hb_stream_t *stream )
         {
             // we're looking for the first video frame because we're
             // doing random access during 'scan'
-            if ( buf->type != VIDEO_BUF ||
+            if ( buf->s.type != VIDEO_BUF ||
                  !isIframe( stream, buf->data, buf->size ) )
             {
                 // not the video stream or didn't find an I frame
                 // but we'll only wait 255 video frames for an I frame.
-                if ( buf->type != VIDEO_BUF || ++stream->need_keyframe < 512 )
+                if ( buf->s.type != VIDEO_BUF || ++stream->need_keyframe < 512 )
                 {
                     continue;
                 }
             }
             stream->need_keyframe = 0;
         }
-        if ( buf->type == VIDEO_BUF )
+        if ( buf->s.type == VIDEO_BUF )
             ++stream->frames;
 
-        buf->id = get_id( &stream->pes.list[idx] );
-        buf->pcr = stream->pes.scr;
-        buf->start = pes_info.pts;
-        buf->renderOffset = pes_info.dts;
+        buf->s.id = get_id( &stream->pes.list[idx] );
+        buf->s.pcr = stream->pes.scr;
+        buf->s.start = pes_info.pts;
+        buf->s.renderOffset = pes_info.dts;
         memmove( buf->data, buf->data + pes_info.header_len,
                  buf->size - pes_info.header_len );
         buf->size -= pes_info.header_len;
@@ -3728,10 +3936,10 @@ static void hb_ps_stream_find_streams(hb_stream_t *stream)
                 // Check dvd substream id
                 if ( ssid >= 0x20 && ssid <= 0x37 )
                 {
-                    // Skip dvd subtitles
                     int idx = update_ps_streams( stream, pes_info.stream_id,
                                             pes_info.bd_substream_id, 0, -1 );
-                    stream->pes.list[idx].stream_kind = N;
+                    stream->pes.list[idx].stream_kind = S;
+                    stream->pes.list[idx].codec = WORK_DECVOBSUB;
                     strncpy(stream->pes.list[idx].codec_name, 
                             "DVD Subtitle", 80);
                     continue;
@@ -3748,7 +3956,7 @@ static void hb_ps_stream_find_streams(hb_stream_t *stream)
                     int idx = update_ps_streams( stream, pes_info.stream_id,
                                             pes_info.bd_substream_id, 0, U );
                     stream->pes.list[idx].codec = HB_ACODEC_DCA_HD;
-                    stream->pes.list[idx].codec_param = CODEC_ID_DTS;
+                    stream->pes.list[idx].codec_param = AV_CODEC_ID_DTS;
                     continue;
                 }
                 else if ( ssid >= 0xa0 && ssid <= 0xaf )
@@ -3767,7 +3975,7 @@ static void hb_ps_stream_find_streams(hb_stream_t *stream)
                     int idx = update_ps_streams( stream, pes_info.stream_id,
                                             pes_info.bd_substream_id, 0, A );
                     stream->pes.list[idx].codec = HB_ACODEC_FFMPEG;
-                    stream->pes.list[idx].codec_param = CODEC_ID_TRUEHD;
+                    stream->pes.list[idx].codec_param = AV_CODEC_ID_TRUEHD;
                     continue;
                 }
                 else if ( ssid >= 0xc0 && ssid <= 0xcf )
@@ -3859,8 +4067,6 @@ static int probe_dts_profile( hb_pes_stream_t *pes )
     }
     switch (info.profile)
     {
-        /* When we improve handling of channels > 5.1, we should move
-         * DTS_ES down to use libav for decode */
         case FF_PROFILE_DTS:
         case FF_PROFILE_DTS_ES:
         case FF_PROFILE_DTS_96_24:
@@ -3935,28 +4141,32 @@ static int do_probe( hb_pes_stream_t *pes, hb_buffer_t *buf )
         if( !codec )
         {
             int i;
-            static const struct {
-                const char *name; enum CodecID id;
-            } fmt_id_type[] = {
-                { "g722"     , CODEC_ID_ADPCM_G722 },
-                { "mlp"      , CODEC_ID_MLP        },
-                { "truehd"   , CODEC_ID_TRUEHD     },
-                { "shn"      , CODEC_ID_SHORTEN    },
-                { "aac"      , CODEC_ID_AAC        },
-                { "ac3"      , CODEC_ID_AC3        },
-                { "dts"      , CODEC_ID_DTS        },
-                { "eac3"     , CODEC_ID_EAC3       },
-                { "h264"     , CODEC_ID_H264       },
-                { "m4v"      , CODEC_ID_MPEG4      },
-                { "mp3"      , CODEC_ID_MP3        },
-                { "mpegvideo", CODEC_ID_MPEG2VIDEO },
-                { "cavsvideo", CODEC_ID_CAVS },
-                { "dnxhd"    , CODEC_ID_DNXHD },
-                { "h261"     , CODEC_ID_H261 },
-                { "h263"     , CODEC_ID_H263 },
-                { "mjpeg"    , CODEC_ID_MJPEG },
-                { "vc1"      , CODEC_ID_VC1 },
-                { 0 }
+            static const struct
+            {
+                const char *name;
+                enum AVCodecID id;
+            }
+            fmt_id_type[] =
+            {
+                { "g722"     , AV_CODEC_ID_ADPCM_G722 },
+                { "mlp"      , AV_CODEC_ID_MLP        },
+                { "truehd"   , AV_CODEC_ID_TRUEHD     },
+                { "shn"      , AV_CODEC_ID_SHORTEN    },
+                { "aac"      , AV_CODEC_ID_AAC        },
+                { "ac3"      , AV_CODEC_ID_AC3        },
+                { "dts"      , AV_CODEC_ID_DTS        },
+                { "eac3"     , AV_CODEC_ID_EAC3       },
+                { "h264"     , AV_CODEC_ID_H264       },
+                { "m4v"      , AV_CODEC_ID_MPEG4      },
+                { "mp3"      , AV_CODEC_ID_MP3        },
+                { "mpegvideo", AV_CODEC_ID_MPEG2VIDEO },
+                { "cavsvideo", AV_CODEC_ID_CAVS       },
+                { "dnxhd"    , AV_CODEC_ID_DNXHD      },
+                { "h261"     , AV_CODEC_ID_H261       },
+                { "h263"     , AV_CODEC_ID_H263       },
+                { "mjpeg"    , AV_CODEC_ID_MJPEG      },
+                { "vc1"      , AV_CODEC_ID_VC1        },
+                { 0 },
             };
             for( i = 0; fmt_id_type[i].name; i++ )
             {
@@ -3975,22 +4185,22 @@ static int do_probe( hb_pes_stream_t *pes, hb_buffer_t *buf )
                 pes->stream_kind = V;
                 switch ( codec->id )
                 {
-                    case CODEC_ID_MPEG1VIDEO:
+                    case AV_CODEC_ID_MPEG1VIDEO:
                         pes->codec = WORK_DECMPEG2;
                         pes->stream_type = 0x01;
                         break;
 
-                    case CODEC_ID_MPEG2VIDEO:
+                    case AV_CODEC_ID_MPEG2VIDEO:
                         pes->codec = WORK_DECMPEG2;
                         pes->stream_type = 0x02;
                         break;
 
-                    case CODEC_ID_H264:
+                    case AV_CODEC_ID_H264:
                         pes->codec = WORK_DECAVCODECV;
                         pes->stream_type = 0x1b;
                         break;
 
-                    case CODEC_ID_VC1:
+                    case AV_CODEC_ID_VC1:
                         pes->codec = WORK_DECAVCODECV;
                         pes->stream_type = 0xea;
                         break;
@@ -4004,7 +4214,7 @@ static int do_probe( hb_pes_stream_t *pes, hb_buffer_t *buf )
                 pes->stream_kind = A;
                 switch ( codec->id )
                 {
-                    case CODEC_ID_AC3:
+                    case AV_CODEC_ID_AC3:
                         pes->codec = HB_ACODEC_AC3;
                         break;
                     default:
@@ -4046,7 +4256,7 @@ static void hb_ts_resolve_pid_types(hb_stream_t *stream)
             // To distinguish, Bluray streams have a reg_desc of HDMV
             update_ts_streams( stream, pid, 0, stype, A, &pes_idx );
             stream->pes.list[pes_idx].codec = HB_ACODEC_FFMPEG;
-            stream->pes.list[pes_idx].codec_param = CODEC_ID_PCM_BLURAY;
+            stream->pes.list[pes_idx].codec_param = AV_CODEC_ID_PCM_BLURAY;
             continue;
         }
 
@@ -4068,7 +4278,7 @@ static void hb_ts_resolve_pid_types(hb_stream_t *stream)
             update_ts_streams( stream, pid, HB_SUBSTREAM_BD_TRUEHD,
                                stype, A, &pes_idx );
             stream->pes.list[pes_idx].codec = HB_ACODEC_FFMPEG;
-            stream->pes.list[pes_idx].codec_param = CODEC_ID_TRUEHD;
+            stream->pes.list[pes_idx].codec_param = AV_CODEC_ID_TRUEHD;
             continue;
         }
         if ( ( stype == 0x84 || stype == 0xa1 ) &&
@@ -4079,7 +4289,7 @@ static void hb_ts_resolve_pid_types(hb_stream_t *stream)
             // To distinguish, Bluray streams have a reg_desc of HDMV
             update_ts_streams( stream, pid, 0, stype, A, &pes_idx );
             stream->pes.list[pes_idx].codec = HB_ACODEC_FFMPEG;
-            stream->pes.list[pes_idx].codec_param = CODEC_ID_EAC3;
+            stream->pes.list[pes_idx].codec_param = AV_CODEC_ID_EAC3;
             continue;
         }
         // 0xa2 is DTS-HD LBR used in HD-DVD and bluray for
@@ -4098,10 +4308,11 @@ static void hb_ts_resolve_pid_types(hb_stream_t *stream)
             update_ts_streams( stream, pid, HB_SUBSTREAM_BD_DTS,
                                stype, A, &pes_idx );
             stream->pes.list[pes_idx].codec = HB_ACODEC_DCA;
+            stream->pes.list[pes_idx].codec_param = AV_CODEC_ID_DTS;
 
             update_ts_streams( stream, pid, 0, stype, A, &pes_idx );
             stream->pes.list[pes_idx].codec = HB_ACODEC_DCA_HD;
-            stream->pes.list[pes_idx].codec_param = CODEC_ID_DTS;
+            stream->pes.list[pes_idx].codec_param = AV_CODEC_ID_DTS;
             continue;
         }
         if ( stype == 0x86 &&
@@ -4112,16 +4323,18 @@ static void hb_ts_resolve_pid_types(hb_stream_t *stream)
             update_ts_streams( stream, pid, HB_SUBSTREAM_BD_DTS,
                                stype, A, &pes_idx );
             stream->pes.list[pes_idx].codec = HB_ACODEC_DCA;
+            stream->pes.list[pes_idx].codec_param = AV_CODEC_ID_DTS;
 
             update_ts_streams( stream, pid, 0, stype, A, &pes_idx );
             stream->pes.list[pes_idx].codec = HB_ACODEC_DCA_HD;
-            stream->pes.list[pes_idx].codec_param = CODEC_ID_DTS;
+            stream->pes.list[pes_idx].codec_param = AV_CODEC_ID_DTS;
             continue;
         }
 
         // stype == 0 indicates a type not in st2codec table
         if ( stype != 0 &&
              ( ts_stream_kind( stream, ii ) == A ||
+               ts_stream_kind( stream, ii ) == S ||
                ts_stream_kind( stream, ii ) == V ) )
         {
             // Assuming there are no substreams.
@@ -4156,13 +4369,19 @@ static void hb_ts_resolve_pid_types(hb_stream_t *stream)
         total_size += buf->size;
 
         if ( total_size > HB_MAX_PROBE_SIZE * 2 )
+        {
+            hb_buffer_close(&buf);
             break;
+        }
 
         int idx;
-        idx = index_of_id( stream, buf->id );
+        idx = index_of_id( stream, buf->s.id );
 
         if (idx < 0 || stream->pes.list[idx].stream_kind != U )
+        {
+            hb_buffer_close(&buf);
             continue;
+        }
 
         hb_pes_stream_t *pes = &stream->pes.list[idx];
 
@@ -4180,6 +4399,7 @@ static void hb_ts_resolve_pid_types(hb_stream_t *stream)
                         pes->codec_name, pes->stream_id, pes->stream_id_ext);
             }
         }
+        hb_buffer_close(&buf);
     }
     // Clean up any probe buffers and set all remaining unknown
     // streams to 'kind' N
@@ -4203,6 +4423,7 @@ static void hb_ps_resolve_stream_types(hb_stream_t *stream)
         // stype == 0 indicates a type not in st2codec table
         if ( stype != 0 &&
              ( stream->pes.list[ii].stream_kind == A ||
+               stream->pes.list[ii].stream_kind == S ||
                stream->pes.list[ii].stream_kind == V ) )
         {
             stream->pes.list[ii].codec = st2codec[stype].codec;
@@ -4235,7 +4456,7 @@ static void hb_ps_resolve_stream_types(hb_stream_t *stream)
             break;
 
         int idx;
-        idx = index_of_id( stream, buf->id );
+        idx = index_of_id( stream, buf->s.id );
 
         if (idx < 0 || stream->pes.list[idx].stream_kind != U )
             continue;
@@ -4418,53 +4639,53 @@ static hb_buffer_t * generate_output_data(hb_stream_t *stream, int curstream)
             buf = tmp;
         }
 
-        buf->id = get_id( &stream->pes.list[pes_idx] );
+        buf->s.id = get_id( &stream->pes.list[pes_idx] );
         switch (stream->pes.list[pes_idx].stream_kind)
         {
             case A:
-                buf->type = AUDIO_BUF;
+                buf->s.type = AUDIO_BUF;
                 break;
 
             case V:
-                buf->type = VIDEO_BUF;
+                buf->s.type = VIDEO_BUF;
                 break;
 
             default:
-                buf->type = OTHER_BUF;
+                buf->s.type = OTHER_BUF;
                 break;
         }
 
-        if( b->cur > stream->ts.pcr_out )
+        if( b->sequence > stream->ts.pcr_out )
         {
             // we have a new pcr
-            stream->ts.pcr_out = b->cur;
-            buf->pcr = b->pcr;
-            if( b->cur >= stream->ts.pcr_discontinuity )
+            stream->ts.pcr_out = b->sequence;
+            buf->s.pcr = b->s.pcr;
+            if( b->sequence >= stream->ts.pcr_discontinuity )
                 stream->ts.pcr_current = stream->ts.pcr_discontinuity;
         }
         else
         {
-            buf->pcr = -1;
+            buf->s.pcr = -1;
         }
 
         // check if this packet was referenced to an older pcr and if that
         // pcr was prior to a discontinuity.
-        if( b->cur < stream->ts.pcr_current )
+        if( b->sequence < stream->ts.pcr_current )
         {
             // we've sent up a new pcr but have a packet referenced to an
             // old pcr and the difference was enough to trigger a discontinuity
             // correction. smash the timestamps or we'll mess up the correction.
-            buf->start = -1;
-            buf->renderOffset = -1;
-            buf->stop = -1;
-            buf->pcr = -1;
+            buf->s.start = -1;
+            buf->s.renderOffset = -1;
+            buf->s.stop = -1;
+            buf->s.pcr = -1;
         }
         else
         {
             // put the PTS & possible DTS into 'start' & 'renderOffset'
             // then strip off the PES header.
-            buf->start = pes_info.pts;
-            buf->renderOffset = pes_info.dts;
+            buf->s.start = pes_info.pts;
+            buf->s.renderOffset = pes_info.dts;
         }
         memcpy( buf->data, tdat, size );
     }
@@ -4548,7 +4769,13 @@ hb_buffer_t * hb_ts_decode_pkt( hb_stream_t *stream, const uint8_t * pkt )
         }
         // if there's an adaptation header & PCR_flag is set
         // get the PCR (Program Clock Reference)
-        if ( adapt_len > 7 && ( pkt[5] & 0x10 ) != 0 )
+        //
+        // JAS: I have a badly mastered BD that does adaptation field
+        // stuffing incorrectly which results in invalid PCRs.  Test
+        // for all 0xff to guard against this.
+        if ( adapt_len > 7 && ( pkt[5] & 0x10 ) != 0 &&
+            !(pkt[5] == 0xff && pkt[6] == 0xff && pkt[7] == 0xff &&
+              pkt[8] == 0xff && pkt[9] == 0xff && pkt[10] == 0xff))
         {
             int64_t pcr;
             pcr =    ( (uint64_t)pkt[6] << (33 - 8) ) |
@@ -4718,16 +4945,16 @@ hb_buffer_t * hb_ts_decode_pkt( hb_stream_t *stream, const uint8_t * pkt )
                 // Output data is ready.
                 // remember the pcr that was in effect when we started
                 // this packet.
-                stream->ts.list[curstream].buf->cur = stream->ts.pcr_in;
-                stream->ts.list[curstream].buf->pcr = stream->ts.pcr;
+                stream->ts.list[curstream].buf->sequence = stream->ts.pcr_in;
+                stream->ts.list[curstream].buf->s.pcr = stream->ts.pcr;
                 hb_ts_stream_append_pkt(stream, curstream, pkt + 4 + adapt_len,
                                         184 - adapt_len);
                 return buf;
             }
         }
         // remember the pcr that was in effect when we started this packet.
-        stream->ts.list[curstream].buf->cur = stream->ts.pcr_in;
-        stream->ts.list[curstream].buf->pcr = stream->ts.pcr;
+        stream->ts.list[curstream].buf->sequence = stream->ts.pcr_in;
+        stream->ts.list[curstream].buf->s.pcr = stream->ts.pcr;
     }
 
     // Add the payload for this packet to the current buffer
@@ -4875,13 +5102,13 @@ static int ffmpeg_open( hb_stream_t *stream, hb_title_t *title, int scan )
     return 1;
 
   fail:
-    if ( info_ic ) av_close_input_file( info_ic );
+    if ( info_ic ) avformat_close_input( &info_ic );
     return 0;
 }
 
 static void ffmpeg_close( hb_stream_t *d )
 {
-    av_close_input_file( d->ffmpeg_ic );
+    avformat_close_input( &d->ffmpeg_ic );
     if ( d->ffmpeg_pkt != NULL )
     {
         free( d->ffmpeg_pkt );
@@ -4889,62 +5116,52 @@ static void ffmpeg_close( hb_stream_t *d )
     }
 }
 
-static void add_ffmpeg_audio( hb_title_t *title, hb_stream_t *stream, int id )
+static void add_ffmpeg_audio(hb_title_t *title, hb_stream_t *stream, int id)
 {
     AVStream *st = stream->ffmpeg_ic->streams[id];
     AVCodecContext *codec = st->codec;
     AVDictionaryEntry *tag;
-    int layout;
 
-    // DTS: work around lack of 6.0/6.1 support in libhb
-    if( hb_ff_dts_disable_xch( codec ) )
+    // scan will ignore any audio without a bitrate. Since we've already typed the
+    // audio in order to determine its codec we set up the audio parameters here.
+    if (codec->bit_rate || codec->sample_rate)
     {
-        hb_deep_log( 2, "add_ffmpeg_audio: found DTS-ES, requesting DTS core" );
-    }
-
-    // scan will ignore any audio without a bitrate. Since we've already
-    // typed the audio in order to determine its codec we set up the audio
-    // paramters here.
-    layout = hb_ff_layout_xlat( codec->channel_layout, codec->channels );
-    if ( !layout )
-    {
-        // Unsupported layout
-        return;
-    }
-    if ( codec->bit_rate || codec->sample_rate )
-    {
-        hb_audio_t *audio = calloc( 1, sizeof(*audio) );;
-
+        hb_audio_t *audio = calloc(1, sizeof(*audio));
         audio->id = id;
-        if ( codec->codec_id == CODEC_ID_AC3 )
+
+        if (codec->codec_id == AV_CODEC_ID_AC3)
         {
             audio->config.in.codec = HB_ACODEC_AC3;
         }
-        /* When we improve handling of channels > 5.1, we should move
-         * DTS_ES down to use libav for decode */
-        else if ( codec->codec_id == CODEC_ID_DTS &&
-                ( codec->profile == FF_PROFILE_DTS ||
-                  codec->profile == FF_PROFILE_DTS_ES ||
-                  codec->profile == FF_PROFILE_DTS_96_24 ) )
-        {
-            audio->config.in.codec = HB_ACODEC_DCA;
-        }
         else
         {
-            if ( codec->codec_id == CODEC_ID_DTS &&
-               ( codec->profile == FF_PROFILE_DTS_HD_MA ||
-                 codec->profile == FF_PROFILE_DTS_HD_HRA ) )
+            if (codec->codec_id == AV_CODEC_ID_DTS)
             {
-                audio->config.in.codec = HB_ACODEC_DCA_HD;
+                if (codec->profile == FF_PROFILE_DTS_HD_MA ||
+                    codec->profile == FF_PROFILE_DTS_HD_HRA)
+                {
+                    audio->config.in.codec = HB_ACODEC_DCA_HD;
+                }
+                else if (codec->profile == FF_PROFILE_DTS ||
+                         codec->profile == FF_PROFILE_DTS_ES ||
+                         codec->profile == FF_PROFILE_DTS_96_24)
+                {
+                    audio->config.in.codec = HB_ACODEC_DCA;
+                }
+                else
+                {
+                    audio->config.in.codec = HB_ACODEC_FFMPEG;
+                }
             }
-            else if ( codec->codec_id == CODEC_ID_AAC )
+            else if (codec->codec_id == AV_CODEC_ID_AAC)
             {
                 int len = MIN(codec->extradata_size, HB_CONFIG_MAX_SIZE);
-                memcpy(audio->priv.config.extradata.bytes, codec->extradata, len);
+                memcpy(audio->priv.config.extradata.bytes, codec->extradata,
+                       len);
                 audio->priv.config.extradata.length = len;
                 audio->config.in.codec = HB_ACODEC_FFAAC;
             }
-            else if ( codec->codec_id == CODEC_ID_MP3 )
+            else if (codec->codec_id == AV_CODEC_ID_MP3)
             {
                 audio->config.in.codec = HB_ACODEC_MP3;
             }
@@ -4955,24 +5172,32 @@ static void add_ffmpeg_audio( hb_title_t *title, hb_stream_t *stream, int id )
             audio->config.in.codec_param = codec->codec_id;
 
             int bps = av_get_bits_per_sample(codec->codec_id);
-            if( bps && codec->sample_rate && codec->channels )
-                audio->config.in.bitrate = bps * codec->sample_rate * codec->channels;
-            else if( codec->bit_rate )
+            if (bps && codec->sample_rate && codec->channels)
+            {
+                audio->config.in.bitrate = (codec->channels *
+                                            codec->sample_rate * bps);
+            }
+            else if (codec->bit_rate)
+            {
                 audio->config.in.bitrate = codec->bit_rate;
+            }
             else
+            {
                 audio->config.in.bitrate = 1;
+            }
             audio->config.in.samplerate = codec->sample_rate;
             audio->config.in.samples_per_frame = codec->frame_size;
-            audio->config.in.channel_layout = layout;
-            audio->config.in.channel_map = &hb_smpte_chan_map;
+            audio->config.in.channel_map = &hb_libav_chan_map;
+            audio->config.in.channel_layout =
+                hb_ff_layout_xlat(codec->channel_layout, codec->channels);
         }
 
-        tag = av_dict_get( st->metadata, "language", NULL, 0 );
-        set_audio_description( stream, audio,
-            lang_for_code2( tag ? tag->value : "und" ) );
+        tag = av_dict_get(st->metadata, "language", NULL, 0);
+        set_audio_description(stream, audio,
+                              lang_for_code2(tag ? tag->value : "und"));
 
         audio->config.in.track = id;
-        hb_list_add( title->list_audio, audio );
+        hb_list_add(title->list_audio, audio);
     }
 }
 
@@ -5049,6 +5274,7 @@ static int ffmpeg_parse_vobsub_extradata_mkv( AVCodecContext *codec, hb_subtitle
         int i;
         for (i=0; i<16; i++)
             subtitle->palette[i] = hb_rgb2yuv(rgb[i]);
+        subtitle->palette_set = 1;
         return 0;
     }
     else
@@ -5072,6 +5298,7 @@ static int ffmpeg_parse_vobsub_extradata_mp4( AVCodecContext *codec, hb_subtitle
             codec->extradata[j+1] << 16 |   // Y
             codec->extradata[j+2] << 8  |   // Cb
             codec->extradata[j+3] << 0;     // Cr
+        subtitle->palette_set = 1;
     }
     if (codec->width <= 0 || codec->height <= 0)
     {
@@ -5109,28 +5336,38 @@ static void add_ffmpeg_subtitle( hb_title_t *title, hb_stream_t *stream, int id 
 
     switch ( codec->codec_id )
     {
-        case CODEC_ID_DVD_SUBTITLE:
+        case AV_CODEC_ID_DVD_SUBTITLE:
             subtitle->format = PICTURESUB;
             subtitle->source = VOBSUB;
             subtitle->config.dest = RENDERSUB;  // By default render (burn-in) the VOBSUB.
+            subtitle->codec = WORK_DECVOBSUB;
             if ( ffmpeg_parse_vobsub_extradata( codec, subtitle ) )
                 hb_log( "add_ffmpeg_subtitle: malformed extradata for VOB subtitle track; "
                         "subtitle colors likely to be wrong" );
             break;
-        case CODEC_ID_TEXT:
+        case AV_CODEC_ID_TEXT:
             subtitle->format = TEXTSUB;
             subtitle->source = UTF8SUB;
             subtitle->config.dest = PASSTHRUSUB;
+            subtitle->codec = WORK_DECUTF8SUB;
             break;
-        case CODEC_ID_MOV_TEXT: // TX3G
+        case AV_CODEC_ID_MOV_TEXT: // TX3G
             subtitle->format = TEXTSUB;
             subtitle->source = TX3GSUB;
             subtitle->config.dest = PASSTHRUSUB;
+            subtitle->codec = WORK_DECTX3GSUB;
             break;
-        case CODEC_ID_SSA:
+        case AV_CODEC_ID_SSA:
             subtitle->format = TEXTSUB;
             subtitle->source = SSASUB;
             subtitle->config.dest = PASSTHRUSUB;
+            subtitle->codec = WORK_DECSSASUB;
+            break;
+        case AV_CODEC_ID_HDMV_PGS_SUBTITLE:
+            subtitle->format = PICTURESUB;
+            subtitle->source = PGSSUB;
+            subtitle->config.dest = RENDERSUB;
+            subtitle->codec = WORK_DECPGSSUB;
             break;
         default:
             hb_log( "add_ffmpeg_subtitle: unknown subtitle stream type: 0x%x", (int) codec->codec_id );
@@ -5158,6 +5395,7 @@ static void add_ffmpeg_subtitle( hb_title_t *title, hb_stream_t *stream, int id 
 static char *get_ffmpeg_metadata_value( AVDictionary *m, char *key )
 {
     AVDictionaryEntry *tag = NULL;
+
     while ( (tag = av_dict_get(m, "", tag, AV_DICT_IGNORE_SUFFIX)) )
     {
         if ( !strcmp( key, tag->key ) )
@@ -5177,7 +5415,7 @@ static void add_ffmpeg_attachment( hb_title_t *title, hb_stream_t *stream, int i
     const char *name = get_ffmpeg_metadata_value( st->metadata, "filename" );
     switch ( codec->codec_id )
     {
-        case CODEC_ID_TTF:
+        case AV_CODEC_ID_TTF:
             // Libav sets codec ID based on mime type of the attachment
             type = FONT_TTF_ATTACH;
             break;
@@ -5210,6 +5448,64 @@ static void add_ffmpeg_attachment( hb_title_t *title, hb_stream_t *stream, int i
     attachment->size = codec->extradata_size;
 
     hb_list_add(title->list_attachment, attachment);
+}
+
+static int ffmpeg_decmetadata( AVDictionary *m, hb_title_t *title )
+{
+    int result = 0;
+    AVDictionaryEntry *tag = NULL;
+    while ( (tag = av_dict_get(m, "", tag, AV_DICT_IGNORE_SUFFIX)) )
+    {
+        if ( !strcasecmp( "TITLE", tag->key ) )
+        {
+            hb_metadata_set_name(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "ARTIST", tag->key ) )
+        {
+            hb_metadata_set_artist(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "DIRECTOR", tag->key ) ||
+                  !strcasecmp( "album_artist", tag->key ) )
+        {
+            hb_metadata_set_album_artist(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "COMPOSER", tag->key ) )
+        {
+            hb_metadata_set_composer(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "DATE_RELEASED", tag->key ) ||
+                  !strcasecmp( "date", tag->key ) )
+        {
+            hb_metadata_set_release_date(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "SUMMARY", tag->key ) ||
+                  !strcasecmp( "comment", tag->key ) )
+        {
+            hb_metadata_set_comment(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "GENRE", tag->key ) )
+        {
+            hb_metadata_set_genre(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "DESCRIPTION", tag->key ) )
+        {
+            hb_metadata_set_description(title->metadata, tag->value);
+            result = 1;
+        }
+        else if ( !strcasecmp( "SYNOPSIS", tag->key ) )
+        {
+            hb_metadata_set_long_description(title->metadata, tag->value);
+            result = 1;
+        }
+    }
+    return result;
 }
 
 static hb_title_t *ffmpeg_title_scan( hb_stream_t *stream, hb_title_t *title )
@@ -5246,7 +5542,7 @@ static hb_title_t *ffmpeg_title_scan( hb_stream_t *stream, hb_title_t *title )
              title->video_codec == 0 )
         {
             AVCodecContext *context = ic->streams[i]->codec;
-            if ( context->pix_fmt != PIX_FMT_YUV420P &&
+            if ( context->pix_fmt != AV_PIX_FMT_YUV420P &&
                  !sws_isSupportedInput( context->pix_fmt ) )
             {
                 hb_log( "ffmpeg_title_scan: Unsupported color space" );
@@ -5261,7 +5557,7 @@ static hb_title_t *ffmpeg_title_scan( hb_stream_t *stream, hb_title_t *title )
                 title->pixel_aspect_height = ic->streams[i]->sample_aspect_ratio.den;
             }
 
-            if ( context->codec_id == CODEC_ID_H264 )
+            if ( context->codec_id == AV_CODEC_ID_H264 )
                 title->flags |= HBTF_NO_IDR;
 
             title->video_codec = WORK_DECAVCODECV;
@@ -5300,15 +5596,33 @@ static hb_title_t *ffmpeg_title_scan( hb_stream_t *stream, hb_title_t *title )
                 chapter->index    = i+1;
                 chapter->duration = ( m->end / ( (double) m->time_base.num * m->time_base.den ) ) * 90000  - duration_sum;
                 duration_sum     += chapter->duration;
-                chapter->hours    = chapter->duration / 90000 / 3600;
-                chapter->minutes  = ( ( chapter->duration / 90000 ) % 3600 ) / 60;
-                chapter->seconds  = ( chapter->duration / 90000 ) % 60;
+
+                int seconds      = ( chapter->duration + 45000 ) / 90000;
+                chapter->hours   = ( seconds / 3600 );
+                chapter->minutes = ( seconds % 3600 ) / 60;
+                chapter->seconds = ( seconds % 60 );
+
                 tag = av_dict_get( m->metadata, "title", NULL, 0 );
-                strcpy( chapter->title, tag ? tag->value : "" );
+                /* Ignore generic chapter names set by MakeMKV
+                 * ("Chapter 00" etc.).
+                 * Our default chapter names are better. */
+                if( tag && tag->value &&
+                    ( strncmp( "Chapter ", tag->value, 8 ) ||
+                      strlen( tag->value ) > 11 ) )
+                {
+                    hb_chapter_set_title( chapter, tag->value );
+                }
+                else
+                {
+                    char chapter_title[80];
+                    sprintf( chapter_title, "Chapter %d", chapter->index );
+                    hb_chapter_set_title( chapter, chapter_title );
+                }
+
                 hb_deep_log( 2, "Added chapter %i, name='%s', dur=%"PRIu64", (%02i:%02i:%02i)",
-                            chapter->index, chapter->title,
-                            chapter->duration, chapter->hours,
-                            chapter->minutes, chapter->seconds );
+                             chapter->index, chapter->title, chapter->duration,
+                             chapter->hours, chapter->minutes, chapter->seconds );
+
                 hb_list_add( title->list_chapter, chapter );
             }
     }
@@ -5316,7 +5630,11 @@ static hb_title_t *ffmpeg_title_scan( hb_stream_t *stream, hb_title_t *title )
     /*
      * Fill the metadata.
      */
-    decmetadata( title );
+    // JJJ: is this necessary? can we just get this metadata from libav api's?
+    if (!decmetadata( title ))
+    {
+        ffmpeg_decmetadata( ic->metadata, title );
+    }
 
     if( hb_list_count( title->list_chapter ) == 0 )
     {
@@ -5347,7 +5665,7 @@ static int ffmpeg_is_keyframe( hb_stream_t *stream )
 
     switch ( stream->ffmpeg_ic->streams[stream->ffmpeg_video_id]->codec->codec_id )
     {
-        case CODEC_ID_VC1:
+        case AV_CODEC_ID_VC1:
             // XXX the VC1 codec doesn't mark key frames so to get previews
             // we do it ourselves here. The decoder gets messed up if it
             // doesn't get a SEQ header first so we consider that to be a key frame.
@@ -5357,7 +5675,7 @@ static int ffmpeg_is_keyframe( hb_stream_t *stream )
 
             return 0;
 
-        case CODEC_ID_WMV3:
+        case AV_CODEC_ID_WMV3:
             // XXX the ffmpeg WMV3 codec doesn't mark key frames.
             // Only M$ could make I-frame detection this complicated: there
             // are two to four bits of unused junk ahead of the frame type
@@ -5450,71 +5768,79 @@ hb_buffer_t * hb_ffmpeg_read( hb_stream_t *stream )
         buf = hb_buffer_init( stream->ffmpeg_pkt->size );
         memcpy( buf->data, stream->ffmpeg_pkt->data, stream->ffmpeg_pkt->size );
     }
-    buf->id = stream->ffmpeg_pkt->stream_index;
+    buf->s.id = stream->ffmpeg_pkt->stream_index;
 
     // compute a conversion factor to go from the ffmpeg
     // timebase for the stream to HB's 90kHz timebase.
     AVStream *s = stream->ffmpeg_ic->streams[stream->ffmpeg_pkt->stream_index];
     double tsconv = 90000. * (double)s->time_base.num / (double)s->time_base.den;
 
-    buf->start = av_to_hb_pts( stream->ffmpeg_pkt->pts, tsconv );
-    buf->renderOffset = av_to_hb_pts( stream->ffmpeg_pkt->dts, tsconv );
-    if ( buf->renderOffset >= 0 && buf->start == -1 )
+    buf->s.start = av_to_hb_pts( stream->ffmpeg_pkt->pts, tsconv );
+    buf->s.renderOffset = av_to_hb_pts( stream->ffmpeg_pkt->dts, tsconv );
+    if ( buf->s.renderOffset >= 0 && buf->s.start == -1 )
     {
-        buf->start = buf->renderOffset;
+        buf->s.start = buf->s.renderOffset;
     }
-    else if ( buf->renderOffset == -1 && buf->start >= 0 )
+    else if ( buf->s.renderOffset == -1 && buf->s.start >= 0 )
     {
-        buf->renderOffset = buf->start;
+        buf->s.renderOffset = buf->s.start;
     }
 
     /*
-     * Fill out buf->stop for subtitle packets
+     * Fill out buf->s.stop for subtitle packets
      *
-     * libavcodec's MKV demuxer stores the duration of UTF-8 subtitles (CODEC_ID_TEXT)
+     * libavcodec's MKV demuxer stores the duration of UTF-8 subtitles (AV_CODEC_ID_TEXT)
      * in the 'convergence_duration' field for some reason.
      *
      * Other subtitles' durations are stored in the 'duration' field.
      *
-     * VOB subtitles (CODEC_ID_DVD_SUBTITLE) do not have their duration stored in
+     * VOB subtitles (AV_CODEC_ID_DVD_SUBTITLE) do not have their duration stored in
      * either field. This is not a problem because the VOB decoder can extract this
      * information from the packet payload itself.
      *
-     * SSA subtitles (CODEC_ID_SSA) do not have their duration stored in
+     * SSA subtitles (AV_CODEC_ID_SSA) do not have their duration stored in
      * either field. This is not a problem because the SSA decoder can extract this
      * information from the packet payload itself.
      */
-    enum CodecID ffmpeg_pkt_codec;
+    enum AVCodecID ffmpeg_pkt_codec;
     enum AVMediaType codec_type;
     ffmpeg_pkt_codec = stream->ffmpeg_ic->streams[stream->ffmpeg_pkt->stream_index]->codec->codec_id;
     codec_type = stream->ffmpeg_ic->streams[stream->ffmpeg_pkt->stream_index]->codec->codec_type;
     switch ( codec_type )
     {
         case AVMEDIA_TYPE_VIDEO:
-            buf->type = VIDEO_BUF;
+            buf->s.type = VIDEO_BUF;
+            /*
+             * libav avcodec_decode_video2() needs AVPacket flagged with AV_PKT_FLAG_KEY
+             * for some codecs. For example, sequence of PNG in a mov container.
+             */
+            if ( stream->ffmpeg_pkt->flags & AV_PKT_FLAG_KEY )
+            {
+                buf->s.frametype |= HB_FRAME_KEY;
+            }
             break;
 
         case AVMEDIA_TYPE_AUDIO:
-            buf->type = AUDIO_BUF;
+            buf->s.type = AUDIO_BUF;
             break;
 
         case AVMEDIA_TYPE_SUBTITLE:
-            buf->type = SUBTITLE_BUF;
+            buf->s.type = SUBTITLE_BUF;
             break;
 
         default:
-            buf->type = OTHER_BUF;
+            buf->s.type = OTHER_BUF;
             break;
     }
-    if ( ffmpeg_pkt_codec == CODEC_ID_TEXT ) {
+    if ( ffmpeg_pkt_codec == AV_CODEC_ID_TEXT ) {
         int64_t ffmpeg_pkt_duration = stream->ffmpeg_pkt->convergence_duration;
         int64_t buf_duration = av_to_hb_pts( ffmpeg_pkt_duration, tsconv );
-        buf->stop = buf->start + buf_duration;
+        buf->s.stop = buf->s.start + buf_duration;
     }
-    if ( ffmpeg_pkt_codec == CODEC_ID_MOV_TEXT ) {
+    if ( ffmpeg_pkt_codec == AV_CODEC_ID_MOV_TEXT ) {
         int64_t ffmpeg_pkt_duration = stream->ffmpeg_pkt->duration;
         int64_t buf_duration = av_to_hb_pts( ffmpeg_pkt_duration, tsconv );
-        buf->stop = buf->start + buf_duration;
+        buf->s.stop = buf->s.start + buf_duration;
     }
 
     /*
@@ -5526,7 +5852,7 @@ hb_buffer_t * hb_ffmpeg_read( hb_stream_t *stream )
      * below handles both the chapters & no chapters case.
      */
     if ( stream->ffmpeg_pkt->stream_index == stream->ffmpeg_video_id &&
-         buf->start >= stream->chapter_end )
+         buf->s.start >= stream->chapter_end )
     {
         hb_chapter_t *chapter = hb_list_item( stream->title->list_chapter,
                                               stream->chapter+1 );
@@ -5534,15 +5860,16 @@ hb_buffer_t * hb_ffmpeg_read( hb_stream_t *stream )
         {
             stream->chapter++;
             stream->chapter_end += chapter->duration;
-            buf->new_chap = stream->chapter + 1;
+            buf->s.new_chap = stream->chapter + 1;
             hb_deep_log( 2, "ffmpeg_read starting chapter %i at %"PRId64,
-                         buf->new_chap, buf->start);
+                         stream->chapter + 1, buf->s.start);
         } else {
             // Must have run out of chapters, stop looking.
             stream->chapter_end = INT64_MAX;
+            buf->s.new_chap = 0;
         }
     } else {
-        buf->new_chap = 0;
+        buf->s.new_chap = 0;
     }
     av_free_packet( stream->ffmpeg_pkt );
     return buf;
@@ -5551,16 +5878,25 @@ hb_buffer_t * hb_ffmpeg_read( hb_stream_t *stream )
 static int ffmpeg_seek( hb_stream_t *stream, float frac )
 {
     AVFormatContext *ic = stream->ffmpeg_ic;
+    int res;
     if ( frac > 0. )
     {
         int64_t pos = (double)stream->ffmpeg_ic->duration * (double)frac +
                 ffmpeg_initial_timestamp( stream );
-        avformat_seek_file( ic, -1, 0, pos, pos, AVSEEK_FLAG_BACKWARD);
+        res = avformat_seek_file( ic, -1, 0, pos, pos, AVSEEK_FLAG_BACKWARD);
+        if (res < 0)
+        {
+            hb_error("avformat_seek_file failed");
+        }
     }
     else
     {
         int64_t pos = ffmpeg_initial_timestamp( stream );
-        avformat_seek_file( ic, -1, 0, pos, pos, AVSEEK_FLAG_BACKWARD);
+        res = avformat_seek_file( ic, -1, 0, pos, pos, AVSEEK_FLAG_BACKWARD);
+        if (res < 0)
+        {
+            hb_error("avformat_seek_file failed");
+        }
     }
     stream->need_keyframe = 1;
     return 1;

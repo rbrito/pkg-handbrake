@@ -1,3 +1,12 @@
+/* detelecine.c
+
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
+   Homepage: <http://handbrake.fr/>.
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
+
 #include "hb.h"
 #include "hbffmpeg.h"
 #include "mpeg2dec/mpeg2.h"
@@ -24,6 +33,7 @@ struct pullup_buffer
 {
     int lock[2];
     unsigned char **planes;
+    int *size;
 };
 
 struct pullup_field
@@ -80,41 +90,29 @@ struct pullup_context
 
 struct hb_filter_private_s
 {
-    int              pix_fmt;
-    int              width[3];
-    int              height[3];
-
     struct pullup_context * pullup_ctx;
     int                     pullup_fakecount;
     int                     pullup_skipflag;
-
-    AVPicture        pic_in;
-    AVPicture        pic_out;
-    hb_buffer_t    * buf_out;
 };
 
-hb_filter_private_t * hb_detelecine_init( int pix_fmt,
-                                          int width,
-                                          int height,
-                                          char * settings );
+static int hb_detelecine_init( hb_filter_object_t * filter,
+                               hb_filter_init_t * init );
 
-int hb_detelecine_work( const hb_buffer_t * buf_in,
-                        hb_buffer_t ** buf_out,
-                        int pix_fmt,
-                        int width,
-                        int height,
-                        hb_filter_private_t * pv );
+static int hb_detelecine_work( hb_filter_object_t * filter,
+                               hb_buffer_t ** buf_in,
+                               hb_buffer_t ** buf_out );
 
-void hb_detelecine_close( hb_filter_private_t * pv );
+static void hb_detelecine_close( hb_filter_object_t * filter );
 
 hb_filter_object_t hb_filter_detelecine =
 {
-    FILTER_DETELECINE,
-    "Detelecine (pullup)",
-    NULL,
-    hb_detelecine_init,
-    hb_detelecine_work,
-    hb_detelecine_close,
+    .id            = HB_FILTER_DETELECINE,
+    .enforce_order = 1,
+    .name          = "Detelecine (pullup)",
+    .settings      = NULL,
+    .init          = hb_detelecine_init,
+    .work          = hb_detelecine_work,
+    .close         = hb_detelecine_close,
 };
 
 /*
@@ -596,11 +594,13 @@ static void pullup_alloc_buffer( struct pullup_context * c,
     int i;
     if( b->planes ) return;
     b->planes = calloc( c->nplanes, sizeof(unsigned char *) );
+    b->size = calloc( c->nplanes, sizeof(int) );
     for ( i = 0; i < c->nplanes; i++ )
     {
-        b->planes[i] = malloc(c->h[i]*c->stride[i]);
+        b->size[i] = c->h[i] * c->stride[i];
+        b->planes[i] = malloc(b->size[i]);
         /* Deal with idiotic 128=0 for chroma: */
-        memset( b->planes[i], c->background[i], c->h[i]*c->stride[i] );
+        memset( b->planes[i], c->background[i], b->size[i] );
     }
 }
 
@@ -812,25 +812,11 @@ void pullup_flush_fields( struct pullup_context * c )
  *
  */
 
-hb_filter_private_t * hb_detelecine_init( int pix_fmt,
-                                          int width,
-                                          int height,
-                                          char * settings )
+static int hb_detelecine_init( hb_filter_object_t * filter,
+                               hb_filter_init_t * init )
 {
-    if( pix_fmt != PIX_FMT_YUV420P )
-    {
-        return 0;
-    }
-
-    hb_filter_private_t * pv = malloc( sizeof(struct hb_filter_private_s) );
-
-    pv->pix_fmt  = pix_fmt;
-    pv->width[0]  = width;
-    pv->height[0] = height;
-    pv->width[1]  = pv->width[2] = width >> 1;
-    pv->height[1] = pv->height[2] = height >> 1;
-
-    pv->buf_out = hb_video_buffer_init( width, height );
+    filter->private_data = calloc( sizeof(struct hb_filter_private_s), 1 );
+    hb_filter_private_t * pv = filter->private_data;
 
     struct pullup_context * ctx;
     pv->pullup_ctx = ctx = pullup_alloc_context();
@@ -841,9 +827,9 @@ hb_filter_private_t * hb_detelecine_init( int pix_fmt,
     ctx->metric_plane  = 0;
     ctx->parity = -1;
     
-    if( settings )
+    if( filter->settings )
     {
-        sscanf( settings, "%d:%d:%d:%d:%d:%d:%d",
+        sscanf( filter->settings, "%d:%d:%d:%d:%d:%d:%d",
                 &ctx->junk_left,
                 &ctx->junk_right,
                 &ctx->junk_top,
@@ -861,19 +847,19 @@ hb_filter_private_t * hb_detelecine_init( int pix_fmt,
     ctx->bpp[0] = ctx->bpp[1] = ctx->bpp[2] = 8;
     ctx->background[1] = ctx->background[2] = 128;
 
-    ctx->w[0]      = pv->width[0];
-    ctx->h[0]      = pv->height[0];
-    ctx->stride[0] = pv->width[0];
+    ctx->w[0]      = init->width;
+    ctx->h[0]      = hb_image_height( init->pix_fmt, init->height, 0 );
+    ctx->stride[0] = hb_image_stride( init->pix_fmt, init->width, 0 );
 
-    ctx->w[1]      = pv->width[1];
-    ctx->h[1]      = pv->height[1];
-    ctx->stride[1] = pv->width[1];
+    ctx->w[1]      = init->width >> 1;
+    ctx->h[1]      = hb_image_height( init->pix_fmt, init->height, 1 );
+    ctx->stride[1] = hb_image_stride( init->pix_fmt, init->width, 1 );
 
-    ctx->w[2]      = pv->width[2];
-    ctx->h[2]      = pv->height[2];
-    ctx->stride[2] = pv->width[2];
+    ctx->w[1]      = init->width >> 1;
+    ctx->h[2]      = hb_image_height( init->pix_fmt, init->height, 2 );
+    ctx->stride[2] = hb_image_stride( init->pix_fmt, init->width, 2 );
 
-    ctx->w[3]      = ((width+15)/16) * ((height+15)/16);
+    ctx->w[3]      = ((init->width+15)/16) * ((init->height+15)/16);
     ctx->h[3]      = 2;
     ctx->stride[3] = ctx->w[3];
 
@@ -886,19 +872,16 @@ hb_filter_private_t * hb_detelecine_init( int pix_fmt,
     pv->pullup_fakecount = 1;
     pv->pullup_skipflag = 0;
 
-    return pv;
+    return 0;
 }
 
-void hb_detelecine_close( hb_filter_private_t * pv )
+static void hb_detelecine_close( hb_filter_object_t * filter )
 {
+    hb_filter_private_t * pv = filter->private_data;
+
     if( !pv )
     {
         return;
-    }
-
-    if( pv->buf_out )
-    {
-        hb_buffer_close( &pv->buf_out );
     }
 
     if( pv->pullup_ctx )
@@ -907,21 +890,22 @@ void hb_detelecine_close( hb_filter_private_t * pv )
     }
 
     free( pv );
+    filter->private_data = NULL;
 }
 
-int hb_detelecine_work( const hb_buffer_t * buf_in,
-                        hb_buffer_t ** buf_out,
-                        int pix_fmt,
-                        int width,
-                        int height,
-                        hb_filter_private_t * pv )
+
+static int hb_detelecine_work( hb_filter_object_t * filter,
+                               hb_buffer_t ** buf_in,
+                               hb_buffer_t ** buf_out )
 {
-    if( !pv ||
-        pix_fmt != pv->pix_fmt ||
-        width != pv->width[0] ||
-        height != pv->height[0] )
+    hb_filter_private_t * pv = filter->private_data;
+    hb_buffer_t * in = *buf_in, * out;
+
+    if ( in->size <= 0 )
     {
-        return FILTER_FAILED;
+        *buf_out = in;
+        *buf_in = NULL;
+        return HB_FILTER_DONE;
     }
 
     struct pullup_context * ctx = pv->pullup_ctx;
@@ -934,26 +918,18 @@ int hb_detelecine_work( const hb_buffer_t * buf_in,
         frame = pullup_get_frame( ctx );
         pullup_release_frame( frame );
         hb_log( "Could not get buffer from pullup!" );
-        return FILTER_FAILED;
+        return HB_FILTER_FAILED;
     }
 
     /* Copy input buffer into pullup buffer */
-    avpicture_fill( &pv->pic_in, buf_in->data,
-                    pix_fmt, width, height );
-
-    hb_buffer_copy_settings( pv->buf_out, buf_in );
-
-    memcpy( buf->planes[0], pv->pic_in.data[0],
-            pv->width[0] * pv->height[0] * sizeof(uint8_t) );
-    memcpy( buf->planes[1], pv->pic_in.data[1],
-            pv->width[1] * pv->height[1] * sizeof(uint8_t) );
-    memcpy( buf->planes[2], pv->pic_in.data[2],
-            pv->width[2] * pv->height[2] * sizeof(uint8_t) );
+    memcpy( buf->planes[0], in->plane[0].data, buf->size[0] );
+    memcpy( buf->planes[1], in->plane[1].data, buf->size[1] );
+    memcpy( buf->planes[2], in->plane[2].data, buf->size[2] );
 
     /* Submit buffer fields based on buffer flags.
        Detelecine assumes BFF when the TFF flag isn't present. */
     int parity = 1;
-    if( buf_in->flags & PIC_FLAG_TOP_FIELD_FIRST )
+    if( in->s.flags & PIC_FLAG_TOP_FIELD_FIRST )
     {
         /* Source signals TFF */
         parity = 0;
@@ -971,7 +947,7 @@ int hb_detelecine_work( const hb_buffer_t * buf_in,
     }
     pullup_submit_field( ctx, buf, parity );
     pullup_submit_field( ctx, buf, parity^1 );
-    if( buf_in->flags & PIC_FLAG_REPEAT_FIRST_FIELD )
+    if( in->s.flags & PIC_FLAG_REPEAT_FIRST_FIELD )
     {
         pullup_submit_field( ctx, buf, parity );
     }
@@ -985,7 +961,8 @@ int hb_detelecine_work( const hb_buffer_t * buf_in,
         {
             pv->pullup_fakecount--;
 
-            memcpy( pv->buf_out->data, buf_in->data, buf_in->size );
+            *buf_in = NULL;
+            *buf_out = in;
 
             goto output_frame;
         }
@@ -1009,7 +986,7 @@ int hb_detelecine_work( const hb_buffer_t * buf_in,
         {
             pullup_release_frame( frame );
 
-            if( !(buf_in->flags & PIC_FLAG_REPEAT_FIRST_FIELD) )
+            if( !(in->s.flags & PIC_FLAG_REPEAT_FIRST_FIELD) )
             {
                 goto discard_frame;
             }
@@ -1034,30 +1011,30 @@ int hb_detelecine_work( const hb_buffer_t * buf_in,
         pullup_pack_frame( ctx, frame );
     }
 
-    /* Copy pullup frame buffer into output buffer */
-    avpicture_fill( &pv->pic_out, pv->buf_out->data,
-                    pix_fmt, width, height );
+    out = hb_video_buffer_init( in->f.width, in->f.height );
 
-    memcpy( pv->pic_out.data[0], frame->buffer->planes[0],
-            pv->width[0] * pv->height[0] * sizeof(uint8_t) );
-    memcpy( pv->pic_out.data[1], frame->buffer->planes[1],
-            pv->width[1] * pv->height[1] * sizeof(uint8_t) );
-    memcpy( pv->pic_out.data[2], frame->buffer->planes[2],
-            pv->width[2] * pv->height[2] * sizeof(uint8_t) );
+    /* Copy pullup frame buffer into output buffer */
+    memcpy( out->plane[0].data, frame->buffer->planes[0], frame->buffer->size[0] );
+    memcpy( out->plane[1].data, frame->buffer->planes[1], frame->buffer->size[1] );
+    memcpy( out->plane[2].data, frame->buffer->planes[2], frame->buffer->size[2] );
 
     pullup_release_frame( frame );
 
+    out->s = in->s;
+    hb_buffer_move_subs( out, in );
+
+    *buf_out = out;
+
 output_frame:
-    *buf_out = pv->buf_out;
-    return FILTER_OK;
+
+    return HB_FILTER_OK;
 
 /* This and all discard_frame calls shown above are
    the result of me restoring the functionality in
    pullup that huevos_rancheros disabled because
    HB couldn't handle it.                           */
 discard_frame:
-    *buf_out = pv->buf_out;
-    return FILTER_DROP;
+    return HB_FILTER_OK;
 
 }
 

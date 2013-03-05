@@ -1,8 +1,11 @@
-/* $Id: ports.h,v 1.7 2005/10/15 18:05:03 titer Exp $
+/* ports.h
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #ifndef HB_PORTS_H
 #define HB_PORTS_H
@@ -62,7 +65,8 @@ typedef struct hb_thread_s hb_thread_t;
 #  define HB_NORMAL_PRIORITY 0
 #endif
 
-hb_thread_t * hb_thread_init( char * name, void (* function)(void *),
+typedef void (thread_func_t)(void *);
+hb_thread_t * hb_thread_init( const char * name, thread_func_t *function,
                               void * arg, int priority );
 void          hb_thread_close( hb_thread_t ** );
 int           hb_thread_has_exited( hb_thread_t * );
@@ -97,6 +101,14 @@ hb_net_t * hb_net_open( char * address, int port );
 int        hb_net_send( hb_net_t *, char * );
 int        hb_net_recv( hb_net_t *, char *, int );
 void       hb_net_close( hb_net_t ** );
+
+/************************************************************************
+* OS Sleep Allow / Prevent
+***********************************************************************/
+void     * hb_system_sleep_opaque_init();
+void       hb_system_sleep_opaque_close( void ** opaque );
+void       hb_system_sleep_allow( void * opaque );
+void       hb_system_sleep_prevent( void * opaque );
 
 #endif /* __LIBHB__ */
 

@@ -1,9 +1,11 @@
-/* $Id: muxcommon.c,v 1.23 2005/03/30 17:27:19 titer Exp $
+/* muxcommon.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
-
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 #include "hb.h"
 
 #define MIN_BUFFERING (1024*1024*10)
@@ -188,7 +190,7 @@ static void MoveToInternalFifos( int tk, hb_mux_t *mux, hb_buffer_t * buf )
     // (b) we can control how data from multiple tracks is
     // interleaved in the output file.
     mf_push( mux, tk, buf );
-    if ( buf->stop >= mux->pts )
+    if ( buf->s.stop >= mux->pts )
     {
         // buffer is past our next interleave point so
         // note that this track is ready to be output.
@@ -201,7 +203,7 @@ static void OutputTrackChunk( hb_mux_t *mux, int tk, hb_mux_object_t *m )
     hb_track_t *track = mux->track[tk];
     hb_buffer_t *buf;
 
-    while ( ( buf = mf_peek( track ) ) != NULL && buf->start < mux->pts )
+    while ( ( buf = mf_peek( track ) ) != NULL && buf->s.start < mux->pts )
     {
         buf = mf_pull( mux, tk );
         track->frames += 1;
@@ -276,7 +278,7 @@ static int muxWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
             // Otherwise clear rdy.
             if ( ( mux->eof & (1 << i) ) == 0 &&
                  ( track->mf.out == track->mf.in ||
-                   track->mf.fifo[(track->mf.in-1) & (track->mf.flen-1)]->stop
+                   track->mf.fifo[(track->mf.in-1) & (track->mf.flen-1)]->s.stop
                      < mux->pts + mux->interleave ) )
             {
                 mux->rdy &=~ ( 1 << i );
@@ -439,7 +441,6 @@ static void mux_loop( void * _w )
 
 hb_work_object_t * hb_muxer_init( hb_job_t * job )
 {
-    hb_title_t  * title = job->title;
     int           i;
     hb_mux_t    * mux = calloc( sizeof( hb_mux_t ), 1 );
     hb_work_object_t  * w;
@@ -488,9 +489,9 @@ hb_work_object_t * hb_muxer_init( hb_job_t * job )
     add_mux_track( mux, job->mux_data, 1 );
     muxer->done = &muxer->private_data->mux->done;
 
-    for( i = 0; i < hb_list_count( title->list_audio ); i++ )
+    for( i = 0; i < hb_list_count( job->list_audio ); i++ )
     {
-        hb_audio_t  *audio = hb_list_item( title->list_audio, i );
+        hb_audio_t  *audio = hb_list_item( job->list_audio, i );
 
         w = hb_get_work( WORK_MUX );
         w->private_data = calloc( sizeof( hb_work_private_t ), 1 );
@@ -505,9 +506,9 @@ hb_work_object_t * hb_muxer_init( hb_job_t * job )
         w->thread = hb_thread_init( w->name, mux_loop, w, HB_NORMAL_PRIORITY );
     }
 
-    for( i = 0; i < hb_list_count( title->list_subtitle ); i++ )
+    for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
     {
-        hb_subtitle_t  *subtitle = hb_list_item( title->list_subtitle, i );
+        hb_subtitle_t  *subtitle = hb_list_item( job->list_subtitle, i );
 
         if (subtitle->config.dest != PASSTHRUSUB)
             continue;

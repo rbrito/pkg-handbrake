@@ -1,5 +1,5 @@
-Guide to Building HandBrake svn4394 (2012010401) on Cygwin
-**********************************************************
+Guide to Building HandBrake svn5208 (2013012701) on MinGW
+*********************************************************
 
 Table of Contents
 *****************
@@ -27,21 +27,20 @@ Appendix A Project Repository Details
 **************
 
 This guide documents the recommended process to build HandBrake on
-Cygwin hosts from the official source-code repository. Building from
-any other source is not supported.
+MinGW hosts from the official source-code repository. Building from any
+other source is not supported.
 
 2 Prerequisites
 ***************
 
 The following are the recommended specifications for building on
-Cygwin; but is not necessarily the only configuration that is possible:
+MinGW; but is not necessarily the only configuration that is possible:
 
-   * Intel 32-bit or 64-bit hardware (only 32-bit product binaries are
-     supported)
+   * Intel 32-bit or 64-bit hardware
 
-   * Cygwin, gcc 4.2.4
+   * MinGW on Fedora 17+, Ubuntu 12+ or Debian, gcc 4.5+
 
-   * yasm 0.7.2.2153 (for i386 or x86_64 architectures)
+   * yasm 1.2.x (for i386 or x86_64 architectures)
 
      Note: It is recommended to use the platform distribution's
      standard compiler for maximum C++ compatibility. If you build with
@@ -51,16 +50,19 @@ Cygwin; but is not necessarily the only configuration that is possible:
      with unbundled compilers, but be aware it is generally unsupported
      and left as an exercise to the reader.
 
-     Note: As of this writing, Cygwin has available to it several
-     versions of gcc; only one of which may be found and used in the
-     path as `gcc' and `g++'. Configure will thus find what is probably
-     the older version of gcc in a typical Cygwin environment. If you
-     desire to build with the newer gcc, it is found in the path as
-     `gcc-4' and `g++-4' respectively and you must indicate to
-     configure the desired versions. The following syntax should do the
-     trick:
+     Note: You must set the -cross flag with configure to cross compile
+     with windows.  See the Example below. Note that the cross compiler
+     name varies between distributions.
 
-     ../configure --gcc=gcc-4
+     As of this writing, MinGW has available to it several versions of
+     gcc; only one of which may be found and used in the path as `gcc'
+     and `g++'. Configure will thus find what is probably the older
+     version of gcc in a typical MinGW environment. If you desire to
+     build with the newer gcc, it is found in the path as `gcc-4' and
+     `g++-4' respectively and you must indicate to configure the
+     desired versions. The following syntax should do the trick:
+
+     ../configure --cross=i686-w64-mingw32 --gcc=gcc-4
 
 The following general tools are used on various platforms and it is
 recommended you use these versions or similar:
@@ -87,7 +89,7 @@ recommended you use these versions or similar:
 This chapter is for building from a terminal/shell environment in as
 few commands as possible. Upon completion of the following commands you
 should have a fresh build of HandBrake. Further instructions are
-available beginning with *note overview:: which describes procedures
+available beginning with *Note overview:: which describes procedures
 suitable for repeating builds. This chapter should be skipped by those
 seeking more than a minimalist build.
 
@@ -117,7 +119,7 @@ following steps:
 4 Overview
 **********
 
-Cygwin builds are performed from a terminal. There is no support for
+MinGW builds are performed from a terminal. There is no support for
 building from any IDEs.
 
 5 Building via Terminal
@@ -477,7 +479,7 @@ Appendix A Project Repository Details
      root:   svn://svn.handbrake.fr/HandBrake
      branch: trunk
      uuid:   b64f7644-9d1e-0410-96f1-a4d463321fa5
-     rev:    4394
-     date:   2011-12-30 17:21:44 -0500
+     rev:    5208
+     date:   2013-01-26 18:47:13 +0000
      type:   developer
 

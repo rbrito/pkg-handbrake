@@ -570,6 +570,8 @@ class ArchAction( Action ):
                 self.mode.mode = 'ppc64'
         elif host.match( '*-*-linux*' ):
             pass
+        elif host.match( '*-*-solaris*' ):
+            pass
         else:
             self.msg_pass = 'WARNING'
 
@@ -697,7 +699,7 @@ class RepoProbe( ShellProbe ):
         self.root      = 'svn://nowhere.com/project'
         self.branch    = 'unknown'
         self.uuid      = '00000000-0000-0000-0000-000000000000';
-        self.rev       = 4860
+        self.rev       = 0
         self.date      = '0000-00-00 00:00:00 -0000'
         self.official  = 0
         self.type      = 'unofficial'
@@ -764,7 +766,7 @@ class Project( Action ):
 
         self.vmajor = 0
         self.vminor = 9
-        self.vpoint = 8
+        self.vpoint = 6
 
     def _action( self ):
         ## add architecture to URL only for Mac
@@ -816,6 +818,7 @@ class ToolProbe( Action ):
         self.name = self.names[0]
         self.pretext = self.name
         self.pathname = self.names[0]
+        self.minversion = kwargs.get('minversion', None)
 
     def _action( self ):
         self.session = []
@@ -830,6 +833,8 @@ class ToolProbe( Action ):
                 break
         if self.fail:
             self.msg_end = 'not found'
+        elif self.minversion:
+            self.version = VersionProbe( [self.pathname, '--version'], minversion=self.minversion )
 
     def cli_add_option( self, parser ):
         parser.add_option( '--'+self.name, metavar='PROG',
@@ -842,6 +847,93 @@ class ToolProbe( Action ):
 
     def doc_add( self, doc ):
         doc.add( self.var, self.pathname )
+
+###############################################################################
+
+###############################################################################
+##
+## version probe: passes --version to command and only cares about first line
+## of output. If probe fails, a default version of '0.0.0' results.
+## The default rexpr is useful for some very simple version strings. A Custom
+## expression would be required for more complex version strings.
+##
+## command = full command and arguments to pipe
+## rexpr   = a regular expression which must return named subgroups:
+##              name: mandatory. The tool name.
+##              svers: mandatory. The whole version tuple to be represented as string.
+##              i0: mandatory. First element of version tuple to be parsed as int.
+##              i1: optional. Second element of version tuple to be parsed as int.
+##              i2: optional. Third element of version tuple to be parsed as int.
+##           All matching is case-insensitive.
+## abort   = if true configure will exit on probe fail
+## session = result. array of lines (stdout/stderr) from command
+## fail    = result. true if probe failed
+## svers   = result. string of version tuple
+## ivers   = result. int[3] of version tuple
+##
+class VersionProbe( Action ):
+    def __init__( self, command, minversion=None, rexpr=None, abort=False ):
+        super( VersionProbe, self ).__init__( 'version probe', os.path.basename(command[0]), abort )
+        self.command = command
+        self.minversion = minversion
+        if not rexpr:
+            rexpr = '(?P<name>[^.]+)\s+(?P<svers>(?P<i0>\d+)(\.(?P<i1>\d+))?(\.(?P<i2>\d+))?)'
+        self.rexpr = rexpr
+
+    def _action( self ):
+        ## pipe and redirect stderr to stdout; effects communicate result
+        pipe = subprocess.Popen( self.command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT )
+
+        ## read data into memory buffers
+        data = pipe.communicate()
+        self.fail = pipe.returncode != 0
+
+        if data[0]:
+            self.session = data[0].splitlines()
+        else:
+            self.session = []
+
+        self.svers = '0.0.0'
+        self.ivers = [0,0,0]
+
+        try:
+            if not self.fail and self.session and len(self.session):
+                self.fail = True
+                self._parse()
+            self.fail = False
+            self.msg_end = self.svers
+        except Exception, x:
+            self.svers = '0.0.0'
+            self.ivers = [0,0,0]
+            self.msg_end = str(x)
+
+    def _dumpSession( self, printf ):
+        printf( '  + %s\n', ' '.join(self.command) )
+        super( VersionProbe, self )._dumpSession( printf )
+
+    def _parse( self ):
+        mo = re.match( self.rexpr, self.session[0], re.IGNORECASE )
+        md = mo.groupdict()
+        self.svers = md['svers']
+        if 'i0' in md and md['i0']:
+            self.ivers[0] = int(md['i0'])
+        if 'i1' in md and md['i1']:
+            self.ivers[1] = int(md['i1'])
+        if 'i2' in md and md['i2']:
+            self.ivers[2] = int(md['i2'])
+
+    def inadequate( self ):
+        if not self.minversion:
+            return False
+        return self.lesser( self.minversion )
+
+    def lesser( self, ivers ):
+        for i in range(0,3):
+            if self.ivers[i] < ivers[i]:
+                return True
+            elif self.ivers[i] > ivers[i]:
+                return False
+        return False
 
 ###############################################################################
 
@@ -1111,6 +1203,8 @@ def createCLI():
 
     h = IfHost( 'Build and use local yasm', '*-*-*', none=optparse.SUPPRESS_HELP ).value
     grp.add_option( '--enable-local-yasm', default=False, action='store_true', help=h )
+    h = IfHost( 'Build and use local autotools', '*-*-*', none=optparse.SUPPRESS_HELP ).value
+    grp.add_option( '--enable-local-autotools', default=False, action='store_true', help=h )
 
     cli.add_option_group( grp )
 
@@ -1269,15 +1363,18 @@ try:
         else:
             gmake = ToolProbe( 'GMAKE.exe', 'gmake', 'make' )
 
-        m4     = ToolProbe( 'M4.exe',     'm4' )
-        mkdir  = ToolProbe( 'MKDIR.exe',  'mkdir' )
-        patch  = ToolProbe( 'PATCH.exe',  'gpatch', 'patch' )
-        rm     = ToolProbe( 'RM.exe',     'rm' )
-        ranlib = ToolProbe( 'RANLIB.exe', 'ranlib' )
-        strip  = ToolProbe( 'STRIP.exe',  'strip' )
-        tar    = ToolProbe( 'TAR.exe',    'gtar', 'tar' )
-        wget   = ToolProbe( 'WGET.exe',   'wget', abort=False )
-        yasm   = ToolProbe( 'YASM.exe',   'yasm', abort=False )
+        m4       = ToolProbe( 'M4.exe',       'm4' )
+        mkdir    = ToolProbe( 'MKDIR.exe',    'mkdir' )
+        patch    = ToolProbe( 'PATCH.exe',    'gpatch', 'patch' )
+        rm       = ToolProbe( 'RM.exe',       'rm' )
+        ranlib   = ToolProbe( 'RANLIB.exe',   'ranlib' )
+        strip    = ToolProbe( 'STRIP.exe',    'strip' )
+        tar      = ToolProbe( 'TAR.exe',      'gtar', 'tar' )
+        wget     = ToolProbe( 'WGET.exe',     'wget', abort=False )
+        yasm     = ToolProbe( 'YASM.exe',     'yasm', abort=False, minversion=[1,2,0] )
+        autoconf = ToolProbe( 'AUTOCONF.exe', 'autoconf', abort=False )
+        automake = ToolProbe( 'AUTOMAKE.exe', 'automake', abort=False )
+        libtool  = ToolProbe( 'LIBTOOL.exe',  'libtool', abort=False )
 
         xcodebuild = ToolProbe( 'XCODEBUILD.exe', 'xcodebuild', abort=False )
         lipo       = ToolProbe( 'LIPO.exe',       'lipo', abort=False )
@@ -1334,9 +1431,20 @@ try:
     for action in Action.actions:
         action.run()
 
-    ## enable local yasm when yasm probe fails
-    if Tools.yasm.fail and not options.enable_local_yasm:
-        options.enable_local_yasm = True
+    ## enable local yasm when yasm probe fails or version is too old
+    ## x264 requires 1.2.0+
+    if not options.enable_local_yasm:
+        if Tools.yasm.fail:
+            stdout.write( 'note: enabling local yasm: missing system yasm\n' )
+            options.enable_local_yasm = True
+        elif Tools.yasm.version.inadequate():
+            stdout.write( 'note: enabling local yasm: minimum required version is %s and %s is %s\n' % ('.'.join([str(i) for i in Tools.yasm.version.minversion]),Tools.yasm.pathname,Tools.yasm.version.svers) )
+            options.enable_local_yasm = True
+
+    ## enable local autotools when any of { autoconf, automake, libtool } probe fails
+    if not options.enable_local_autotools and (Tools.autoconf.fail or Tools.automake.fail or Tools.libtool.fail):
+        stdout.write( 'note: enabling local autotools\n' )
+        options.enable_local_autotools = True
 
     if build.system == 'mingw':
         dlfcn_test = """
@@ -1499,7 +1607,8 @@ int main ()
     doc.add( 'PREFIX/', cfg.prefix_final + os.sep )
     
     doc.addBlank()
-    doc.add( 'FEATURE.local_yasm', int( options.enable_local_yasm ) )
+    doc.add( 'FEATURE.local_yasm', int( options.enable_local_yasm ))
+    doc.add( 'FEATURE.local_autotools', int( options.enable_local_autotools ))
     doc.add( 'FEATURE.asm',        'disabled' )
     doc.add( 'FEATURE.gtk',        int( not options.disable_gtk ))
     doc.add( 'FEATURE.gtk.update.checks', int( not options.disable_gtk_update_checks ))
