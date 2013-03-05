@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * resources.c
- * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2013 <stebbins@stebbins>
  * 
  * resources.c is free software.
  * 
@@ -30,13 +30,13 @@ static GValue *resources;
 void
 ghb_resource_init()
 {
-	resources = ghb_plist_parse(resource_str, sizeof(resource_str)-1);
+    resources = ghb_plist_parse(resource_str, sizeof(resource_str)-1);
 }
 
 GValue*
 ghb_resource_get(const gchar *name)
 {
-	GValue *result;
-	result = ghb_dict_lookup(resources, name);
-	return result;
+    GValue *result;
+    result = ghb_dict_lookup(resources, name);
+    return result;
 }

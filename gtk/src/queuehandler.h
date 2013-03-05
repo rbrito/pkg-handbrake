@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * queuehandler.h
- * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2013 <stebbins@stebbins>
  * 
  * queuehandler.h is free software.
  * 
@@ -17,9 +17,9 @@
  * 
  * You should have received a copy of the GNU General Public License
  * along with callbacks.h.  If not, write to:
- * 	The Free Software Foundation, Inc.,
- * 	51 Franklin Street, Fifth Floor
- * 	Boston, MA  02110-1301, USA.
+ *  The Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor
+ *  Boston, MA  02110-1301, USA.
  */
 
 #if !defined(_QUEUEHANDLER_H_)

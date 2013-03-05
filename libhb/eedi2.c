@@ -1,8 +1,10 @@
-/* $Id: eedi2.c,v 1.0 2009/03/06 5:00:00 jbrjake Exp $
+/* eedi2.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License.
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
    
    The EEDI2 interpolator was created by tritical:
    http://web.missouri.edu/~kes25c/
@@ -1191,15 +1193,15 @@ void eedi2_interpolate_lattice( const int plane, uint8_t * dmskp, int dmsk_pitch
                 }
             }
             if( x > 1 && x < width - 2 && 
-                (     dstp[x] < MAX(   dstp[x-2],   dstp[x-1] ) - 3 &&
+                ( (   dstp[x] < MAX(   dstp[x-2],   dstp[x-1] ) - 3 &&
                       dstp[x] < MAX(   dstp[x+2],   dstp[x+1] ) - 3 &&
                     dstpnn[x] < MAX( dstpnn[x-2], dstpnn[x-1] ) - 3 &&
                     dstpnn[x] < MAX( dstpnn[x+2], dstpnn[x+1] ) - 3 )
                 ||
-                (     dstp[x] > MIN(   dstp[x-2],   dstp[x-1] ) + 3 &&
+                  (   dstp[x] > MIN(   dstp[x-2],   dstp[x-1] ) + 3 &&
                       dstp[x] > MIN(   dstp[x+2],   dstp[x+1] ) + 3 &&
                     dstpnn[x] > MIN( dstpnn[x-2], dstpnn[x-1] ) + 3 &&
-                    dstpnn[x] > MIN( dstpnn[x+2], dstpnn[x+1] ) + 3 ) )
+                    dstpnn[x] > MIN( dstpnn[x+2], dstpnn[x+1] ) + 3 ) ) )
             {
                 dstpn[x] = ( dstp[x] + dstpnn[x] + 1 ) >> 1;
                 dmskp[x] = 128;

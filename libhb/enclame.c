@@ -1,9 +1,11 @@
-/* $Id: enclame.c,v 1.9 2005/03/05 14:27:05 titer Exp $
+/* enclame.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
-
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 #include "hb.h"
 
 #include "lame/lame.h"
@@ -69,7 +71,7 @@ int enclameInit( hb_work_object_t * w, hb_job_t * job )
     lame_set_in_samplerate( pv->lame, audio->config.out.samplerate );
     lame_set_out_samplerate( pv->lame, audio->config.out.samplerate );
 
-    pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
+    pv->out_discrete_channels = hb_mixdown_get_discrete_channel_count( audio->config.out.mixdown );
     // Lame's default encoding mode is JOINT_STEREO.  This subtracts signal
     // that is "common" to left and right (within some threshold) and encodes
     // it separately.  This improves quality at low bitrates, but hurts 
@@ -144,14 +146,15 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
     }
 
     buf        = hb_buffer_init( pv->output_bytes );
-    buf->start = pts + 90000 * pos / pv->out_discrete_channels / sizeof( float ) / audio->config.out.samplerate;
-    buf->stop  = buf->start + 90000 * 1152 / audio->config.out.samplerate;
-    pv->pts = buf->stop;
+    buf->s.start = pts + 90000 * pos / pv->out_discrete_channels / sizeof( float ) / audio->config.out.samplerate;
+    buf->s.stop  = buf->s.start + 90000 * 1152 / audio->config.out.samplerate;
+    pv->pts = buf->s.stop;
     buf->size  = lame_encode_buffer_float( 
             pv->lame, samples[0], samples[1],
             1152, buf->data, LAME_MAXMP3BUFFER );
 
-    buf->frametype   = HB_FRAME_AUDIO;
+    buf->s.type = AUDIO_BUF;
+    buf->s.frametype = HB_FRAME_AUDIO;
 
     if( !buf->size )
     {
@@ -188,9 +191,12 @@ int enclameWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
 
         buf = hb_buffer_init( pv->output_bytes );
         buf->size = lame_encode_flush( pv->lame, buf->data, LAME_MAXMP3BUFFER );
-        buf->start = pv->pts;
-        buf->stop  = buf->start + 90000 * 1152 / audio->config.out.samplerate;
-        buf->frametype   = HB_FRAME_AUDIO;
+        buf->s.start = pv->pts;
+        buf->s.stop  = buf->s.start + 90000 * 1152 / audio->config.out.samplerate;
+
+        buf->s.type = AUDIO_BUF;
+        buf->s.frametype = HB_FRAME_AUDIO;
+
         if( buf->size <= 0 )
         {
             hb_buffer_close( &buf );

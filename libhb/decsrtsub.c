@@ -1,7 +1,11 @@
-/* 
-   This file is part of the HandBrake source code.
+/* decsrtsub.c
+
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -233,11 +237,11 @@ static hb_buffer_t *srt_read( hb_work_private_t *pv )
         case k_state_inEntry_or_new:
         {
             char *endpoint;
-            long entry_number;
             /*
              * Is this really new next entry begin?
+             * Look for entry number.
              */
-            entry_number = strtol(line_buffer, &endpoint, 10);
+            strtol(line_buffer, &endpoint, 10);
             if (endpoint == line_buffer ||
                 (endpoint && *endpoint != '\n' && *endpoint != '\r'))
             {
@@ -369,8 +373,8 @@ static hb_buffer_t *srt_read( hb_work_private_t *pv )
 
                 if( buffer )
                 {
-                    buffer->start = start_time - pv->start_time;
-                    buffer->stop = stop_time - pv->start_time;
+                    buffer->s.start = start_time - pv->start_time;
+                    buffer->s.stop = stop_time - pv->start_time;
 
                     memcpy( buffer->data, pv->current_entry.text, length + 1 );
                 }
@@ -438,8 +442,8 @@ static hb_buffer_t *srt_read( hb_work_private_t *pv )
 
         if( buffer )
         {
-            buffer->start = start_time - pv->start_time;
-            buffer->stop = stop_time - pv->start_time;
+            buffer->s.start = start_time - pv->start_time;
+            buffer->s.stop = stop_time - pv->start_time;
 
             memcpy( buffer->data, pv->current_entry.text, length + 1 );
         }
@@ -460,7 +464,6 @@ static int decsrtInit( hb_work_object_t * w, hb_job_t * job )
     hb_buffer_t *buffer;
     int i;
     hb_chapter_t * chapter;
-    hb_title_t *title = job->title;
 
     pv = calloc( 1, sizeof( hb_work_private_t ) );
     if( pv )
@@ -485,7 +488,7 @@ static int decsrtInit( hb_work_object_t * w, hb_job_t * job )
         pv->start_time = 0;
         for( i = 1; i < job->chapter_start; ++i )
         {
-            chapter = hb_list_item( title->list_chapter, i - 1 );
+            chapter = hb_list_item( job->list_chapter, i - 1 );
             if( chapter )
             {
                 pv->start_time += chapter->duration;
@@ -497,7 +500,7 @@ static int decsrtInit( hb_work_object_t * w, hb_job_t * job )
         pv->stop_time = pv->start_time;
         for( i = job->chapter_start; i <= job->chapter_end; ++i )
         {
-            chapter = hb_list_item( title->list_chapter, i - 1 );
+            chapter = hb_list_item( job->list_chapter, i - 1 );
             if( chapter )
             {
                 pv->stop_time += chapter->duration;

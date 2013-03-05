@@ -8,6 +8,17 @@ include $(SRC/)make/include/tool.defs
 
 ###############################################################################
 
+ifeq (1,$(FEATURE.local_autotools))
+    MODULES += contrib/autoconf
+    MODULES += contrib/automake
+    MODULES += contrib/libtool
+    MODULES += contrib/m4
+    AUTOTOOL_MODULES = AUTOCONF AUTOMAKE LIBTOOL M4
+    PATH := $(call fn.ABSOLUTE,$(CONTRIB.build/)bin):$(PATH)
+else
+    AUTOTOOL_MODULES =
+endif
+
 MODULES += contrib/a52dec
 
 ifneq (,$(filter $(BUILD.system),cygwin mingw))
@@ -17,26 +28,24 @@ endif
 endif
 
 ifneq (,$(filter $(BUILD.system),darwin cygwin mingw))
+    MODULES += contrib/fontconfig
+    MODULES += contrib/freetype
     MODULES += contrib/fribidi
+    MODULES += contrib/libxml2
+    MODULES += contrib/libass
+    MODULES += contrib/libogg
+    MODULES += contrib/libvorbis
+    MODULES += contrib/libtheora
+    MODULES += contrib/libsamplerate
 endif
 
-
+MODULES += contrib/lame
 MODULES += contrib/faac
 MODULES += contrib/ffmpeg
-MODULES += contrib/fontconfig
-MODULES += contrib/freetype
-MODULES += contrib/lame
-MODULES += contrib/libass
-MODULES += contrib/libdca
 MODULES += contrib/libdvdread
 MODULES += contrib/libdvdnav
 MODULES += contrib/libbluray
 MODULES += contrib/libmkv
-MODULES += contrib/libogg
-MODULES += contrib/libsamplerate
-MODULES += contrib/libtheora
-MODULES += contrib/libvorbis
-MODULES += contrib/libxml2
 MODULES += contrib/mp4v2
 MODULES += contrib/mpeg2dec
 

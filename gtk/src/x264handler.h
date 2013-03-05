@@ -1,7 +1,7 @@
 /* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
 /*
  * x264handler.h
- * Copyright (C) John Stebbins 2008-2011 <stebbins@stebbins>
+ * Copyright (C) John Stebbins 2008-2013 <stebbins@stebbins>
  * 
  * x264handler.h is free software.
  * 
@@ -17,9 +17,9 @@
  * 
  * You should have received a copy of the GNU General Public License
  * along with callbacks.h.  If not, write to:
- * 	The Free Software Foundation, Inc.,
- * 	51 Franklin Street, Fifth Floor
- * 	Boston, MA  02110-1301, USA.
+ *  The Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor
+ *  Boston, MA  02110-1301, USA.
  */
 
 #if !defined(_X264HANDLER_H_)
@@ -29,5 +29,6 @@
 
 void ghb_x264_parse_options(signal_user_data_t *ud, const gchar *options);
 gint ghb_lookup_badapt(const gchar *options);
+void ghb_show_hide_advanced_video( signal_user_data_t *ud );
 
 #endif // _X264HANDLER_H_

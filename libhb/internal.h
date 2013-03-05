@@ -1,8 +1,13 @@
-/* $Id: internal.h,v 1.41 2005/11/25 15:05:25 titer Exp $
+/* internal.h
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
+
+#include "hbffmpeg.h"
 
 /***********************************************************************
  * common.c
@@ -29,17 +34,18 @@ void hb_list_empty( hb_list_t ** );
 hb_title_t * hb_title_init( char * dvd, int index );
 void         hb_title_close( hb_title_t ** );
 
-void         hb_filter_close( hb_filter_object_t ** );
-
 /***********************************************************************
  * hb.c
  **********************************************************************/
 int  hb_get_pid( hb_handle_t * );
 void hb_set_state( hb_handle_t *, hb_state_t * );
+void hb_prevent_sleep( hb_handle_t * );
+void hb_allow_sleep( hb_handle_t * );
 
 /***********************************************************************
  * fifo.c
  **********************************************************************/
+
 /*
  * Holds a packet of data that is moving through the transcoding process.
  * 
@@ -51,7 +57,7 @@ struct hb_buffer_s
     int           size;     // size of this packet
     int           alloc;    // used internally by the packet allocator (hb_buffer_init)
     uint8_t *     data;     // packet data
-    int           cur;      // used internally by packet lists (hb_list_t)
+    int           offset;   // used internally by packet lists (hb_list_t)
 
     /*
      * Corresponds to the order that this packet was read from the demuxer.
@@ -66,40 +72,58 @@ struct hb_buffer_s
      */
     int64_t       sequence;
 
-    enum { AUDIO_BUF, VIDEO_BUF, SUBTITLE_BUF, OTHER_BUF } type;
+    struct settings
+    {
+        enum { AUDIO_BUF, VIDEO_BUF, SUBTITLE_BUF, FRAME_BUF, OTHER_BUF } type;
 
-    int           id;           // ID of the track that the packet comes from
-    int64_t       start;        // Video and subtitle packets: start time of frame/subtitle
-    double        duration;     // Actual duration, may be fractional ticks
-    int64_t       stop;         // Video and subtitle packets: stop time of frame/subtitle
-    int64_t       pcr;
-    uint8_t       discontinuity;
-    int           new_chap;     // Video packets: if non-zero, is the index of the chapter whose boundary was crossed
+        int           id;           // ID of the track that the packet comes from
+        int64_t       start;        // start time of frame
+        double        duration;     // Actual duration, may be fractional ticks
+        int64_t       stop;         // stop time of frame
+        int64_t       renderOffset; // DTS used by b-frame offsets in muxmp4
+        int64_t       pcr;
+        uint8_t       discontinuity;
+        int           new_chap;     // Video packets: if non-zero, is the index of the chapter whose boundary was crossed
 
-#define HB_FRAME_IDR    0x01
-#define HB_FRAME_I      0x02
-#define HB_FRAME_AUDIO  0x04
-#define HB_FRAME_P      0x10
-#define HB_FRAME_B      0x20
-#define HB_FRAME_BREF   0x40
-#define HB_FRAME_KEY    0x0F
-#define HB_FRAME_REF    0xF0
-    uint8_t       frametype;
-    uint16_t       flags;
+    #define HB_FRAME_IDR    0x01
+    #define HB_FRAME_I      0x02
+    #define HB_FRAME_AUDIO  0x04
+    #define HB_FRAME_P      0x10
+    #define HB_FRAME_B      0x20
+    #define HB_FRAME_BREF   0x40
+    #define HB_FRAME_KEY    0x0F
+    #define HB_FRAME_REF    0xF0
+        uint8_t       frametype;
+        uint16_t      flags;
+    } s;
 
-    /* Holds the output PTS from x264, for use by b-frame offsets in muxmp4.c */
-    int64_t     renderOffset;
+    struct format
+    {
+        int           x;
+        int           y;
+        int           width;
+        int           height;
+        int           fmt;
+    } f;
+
+    struct plane
+    {
+        uint8_t     * data;
+        int           stride;
+        int           width;
+        int           height;
+        int           height_stride;
+        int           size;
+    } plane[4]; // 3 Color components + alpha
 
     // PICTURESUB subtitle packets:
-    //   Location and size of the subpicture.
-    int           x;
-    int           y;
-    int           width;
-    int           height;
 
     // Video packets (after processing by the hb_sync_video work-object):
-    //   A (copy of a) PICTURESUB subtitle packet that needs to be burned into this video packet by the hb_render work-object.
-    //   Subtitles that are simply passed thru are NOT attached to the associated video packets.
+    //   A (copy of a) PICTURESUB subtitle packet that needs to be burned into 
+    //   this video packet by the vobsub renderer filter
+    //
+    //   Subtitles that are simply passed thru are NOT attached to the 
+    //   associated video packets.
     hb_buffer_t * sub;
 
     // Packets in a list:
@@ -111,11 +135,16 @@ void hb_buffer_pool_init( void );
 void hb_buffer_pool_free( void );
 
 hb_buffer_t * hb_buffer_init( int size );
+hb_buffer_t * hb_frame_buffer_init( int pix_fmt, int w, int h);
+void          hb_buffer_init_planes( hb_buffer_t * b );
 void          hb_buffer_realloc( hb_buffer_t *, int size );
+void          hb_video_buffer_realloc( hb_buffer_t * b, int w, int h );
 void          hb_buffer_reduce( hb_buffer_t * b, int size );
 void          hb_buffer_close( hb_buffer_t ** );
-void          hb_buffer_copy_settings( hb_buffer_t * dst,
-                                       const hb_buffer_t * src );
+hb_buffer_t * hb_buffer_dup( const hb_buffer_t * src );
+int           hb_buffer_copy( hb_buffer_t * dst, const hb_buffer_t * src );
+void          hb_buffer_swap_copy( hb_buffer_t *src, hb_buffer_t *dst );
+void          hb_buffer_move_subs( hb_buffer_t * dst, hb_buffer_t * src );
 
 hb_fifo_t   * hb_fifo_init( int capacity, int thresh );
 int           hb_fifo_size( hb_fifo_t * );
@@ -136,39 +165,62 @@ hb_buffer_t * hb_fifo_get_list_element( hb_fifo_t *fifo );
 void          hb_fifo_close( hb_fifo_t ** );
 void          hb_fifo_flush( hb_fifo_t * f );
 
+static inline int hb_image_stride( int pix_fmt, int width, int plane )
+{
+    int linesize = av_image_get_linesize( pix_fmt, width, plane );
+
+    // Make buffer SIMD friendly.
+    // Decomb requires stride aligned to 32 bytes
+    // TODO: eliminate extra buffer copies in decomb
+    linesize = MULTIPLE_MOD_UP( linesize, 32 );
+    return linesize;
+}
+
+static inline int hb_image_width(int pix_fmt, int width, int plane)
+{
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+
+    if (desc != NULL && (plane == 1 || plane == 2))
+    {
+        // The wacky arithmatic assures rounding up.
+        width = -((-width) >> desc->log2_chroma_w);
+    }
+
+    return width;
+}
+
+static inline int hb_image_height_stride(int pix_fmt, int height, int plane)
+{
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+
+    // Decomb requires 6 extra lines and stride aligned to 32 bytes
+    height = MULTIPLE_MOD_UP(height + 6, 32);
+    if (desc != NULL && (plane == 1 || plane == 2))
+    {
+        height = height >> desc->log2_chroma_h;
+    }
+
+    return height;
+}
+
+static inline int hb_image_height(int pix_fmt, int height, int plane)
+{
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+
+    if (desc != NULL && (plane == 1 || plane == 2))
+    {
+        // The wacky arithmatic assures rounding up.
+        height = -((-height) >> desc->log2_chroma_h);
+    }
+
+    return height;
+}
+
 // this routine gets a buffer for an uncompressed YUV420 video frame
 // with dimensions width x height.
 static inline hb_buffer_t * hb_video_buffer_init( int width, int height )
 {
-    // Y requires w x h bytes. U & V each require (w+1)/2 x
-    // (h+1)/2 bytes (the "+1" is to round up). We shift rather
-    // than divide by 2 since the compiler can't know these ints
-    // are positive so it generates very expensive integer divides
-    // if we do "/2". The code here matches the calculation for
-    // PIX_FMT_YUV420P in ffmpeg's avpicture_fill() which is required
-    // for most of HB's filters to work right.
-    hb_buffer_t * b = hb_buffer_init( width * height + ( ( width+1 ) >> 1 ) *
-                                      ( ( height+1 ) >> 1 ) * 2 );
-    b->width = width;
-    b->height = height;
-
-    return b;
-}
-
-// this routine 'moves' data from src to dst by interchanging 'data',
-// 'size' & 'alloc' between them and copying the rest of the fields
-// from src to dst.
-static inline void hb_buffer_swap_copy( hb_buffer_t *src, hb_buffer_t *dst )
-{
-    uint8_t *data  = dst->data;
-    int      size  = dst->size;
-    int      alloc = dst->alloc;
-
-    *dst = *src;
-
-    src->data  = data;
-    src->size  = size;
-    src->alloc = alloc;
+    return hb_frame_buffer_init( AV_PIX_FMT_YUV420P, width, height );
 }
 
 /***********************************************************************
@@ -177,9 +229,9 @@ static inline void hb_buffer_swap_copy( hb_buffer_t *src, hb_buffer_t *dst )
 hb_thread_t * hb_update_init( int * build, char * version );
 hb_thread_t * hb_scan_init( hb_handle_t *, volatile int * die, 
                             const char * path, int title_index, 
-                            hb_list_t * list_title, int preview_count, 
+                            hb_title_set_t * title_set, int preview_count, 
                             int store_previews, uint64_t min_duration );
-hb_thread_t * hb_work_init( hb_list_t * jobs,
+hb_thread_t * hb_work_init( hb_handle_t * handle, hb_list_t * jobs,
                             volatile int * die, int * error, hb_job_t ** job );
 void ReadLoop( void * _w );
 hb_work_object_t * hb_muxer_init( hb_job_t * );
@@ -215,7 +267,7 @@ extern const hb_muxer_t hb_demux[];
 /***********************************************************************
  * decmetadata.c
  **********************************************************************/
-extern void decmetadata( hb_title_t *title );
+extern int decmetadata( hb_title_t *title );
 
 /***********************************************************************
  * batch.c
@@ -356,7 +408,6 @@ enum
     WORK_ENCX264,
     WORK_ENCTHEORA,
     WORK_DECA52,
-    WORK_DECDCA,
     WORK_DECAVCODEC,
     WORK_DECAVCODECV,
     WORK_DECLPCM,
@@ -367,18 +418,19 @@ enum
     WORK_ENC_CA_HAAC,
     WORK_ENCAVCODEC_AUDIO,
     WORK_MUX,
-    WORK_READER
+    WORK_READER,
+    WORK_DECPGSSUB
 };
 
-enum
-{
-    FILTER_DEINTERLACE = 1,
-    FILTER_DEBLOCK,
-    FILTER_DENOISE,
-    FILTER_DETELECINE,
-    FILTER_DECOMB,
-    FILTER_ROTATE
-};
+extern hb_filter_object_t hb_filter_detelecine;
+extern hb_filter_object_t hb_filter_deinterlace;
+extern hb_filter_object_t hb_filter_deblock;
+extern hb_filter_object_t hb_filter_denoise;
+extern hb_filter_object_t hb_filter_decomb;
+extern hb_filter_object_t hb_filter_rotate;
+extern hb_filter_object_t hb_filter_crop_scale;
+extern hb_filter_object_t hb_filter_render_sub;
+extern hb_filter_object_t hb_filter_vfr;
 
 // Picture flags used by filters
 #ifndef PIC_FLAG_REPEAT_FIRST_FIELD

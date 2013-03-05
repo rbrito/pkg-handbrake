@@ -1,8 +1,11 @@
-/* $Id: fifo.c,v 1.17 2005/10/15 18:05:03 titer Exp $
+/* fifo.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
 
@@ -236,9 +239,9 @@ void hb_buffer_pool_free( void )
         count = 0;
         while( ( b = hb_fifo_get(buffers.pool[i]) ) )
         {
-            freed += b->alloc;
             if( b->data )
             {
+                freed += b->alloc;
                 free( b->data );
             }
             free( b );
@@ -339,7 +342,7 @@ void hb_buffer_realloc( hb_buffer_t * b, int size )
 {
     if ( size > b->alloc || b->data == NULL )
     {
-        uint32_t orig = b->alloc;
+        uint32_t orig = b->data != NULL ? b->alloc : 0;
         size = size_to_pool( size )->buffer_size;
         b->data  = realloc( b->data, size );
         b->alloc = size;
@@ -363,6 +366,162 @@ void hb_buffer_reduce( hb_buffer_t * b, int size )
     }
 }
 
+hb_buffer_t * hb_buffer_dup( const hb_buffer_t * src )
+{
+    hb_buffer_t * buf;
+
+    if ( src == NULL )
+        return NULL;
+
+    buf = hb_buffer_init( src->size );
+    if ( buf )
+    {
+        memcpy( buf->data, src->data, src->size );
+        buf->s = src->s;
+        buf->f = src->f;
+        if ( buf->s.type == FRAME_BUF )
+            hb_buffer_init_planes( buf );
+    }
+
+    return buf;
+}
+
+int hb_buffer_copy(hb_buffer_t * dst, const hb_buffer_t * src)
+{
+    if (src == NULL || dst == NULL)
+        return -1;
+
+    if ( dst->size < src->size )
+        return -1;
+
+    memcpy( dst->data, src->data, src->size );
+    dst->s = src->s;
+    dst->f = src->f;
+    if (dst->s.type == FRAME_BUF)
+        hb_buffer_init_planes(dst);
+
+    return 0;
+}
+
+static void hb_buffer_init_planes_internal( hb_buffer_t * b, uint8_t * has_plane )
+{
+    uint8_t * plane = b->data;
+    int p, tot = 0;
+
+    for( p = 0; p < 4; p++ )
+    {
+        if ( has_plane[p] )
+        {
+            b->plane[p].data = plane;
+            b->plane[p].stride = hb_image_stride( b->f.fmt, b->f.width, p );
+            b->plane[p].height_stride = hb_image_height_stride( b->f.fmt, b->f.height, p );
+            b->plane[p].width  = hb_image_width( b->f.fmt, b->f.width, p );
+            b->plane[p].height = hb_image_height( b->f.fmt, b->f.height, p );
+            b->plane[p].size   = b->plane[p].stride * b->plane[p].height_stride;
+            plane += b->plane[p].size;
+            tot += b->plane[p].size;
+        }
+    }
+}
+
+void hb_buffer_init_planes( hb_buffer_t * b )
+{
+    const AVPixFmtDescriptor *desc = &av_pix_fmt_descriptors[b->f.fmt];
+    int p;
+
+    uint8_t has_plane[4] = {0,};
+
+    for( p = 0; p < 4; p++ )
+    {
+        has_plane[desc->comp[p].plane] = 1;
+    }
+    hb_buffer_init_planes_internal( b, has_plane );
+}
+
+// this routine gets a buffer for an uncompressed picture
+// with pixel format pix_fmt and dimensions width x height.
+hb_buffer_t * hb_frame_buffer_init( int pix_fmt, int width, int height )
+{
+    const AVPixFmtDescriptor *desc = &av_pix_fmt_descriptors[pix_fmt];
+    hb_buffer_t * buf;
+    int p;
+    uint8_t has_plane[4] = {0,};
+
+    for( p = 0; p < 4; p++ )
+    {
+        has_plane[desc->comp[p].plane] = 1;
+    }
+
+    int size = 0;
+    for( p = 0; p < 4; p++ )
+    {
+        if ( has_plane[p] )
+        {
+            size += hb_image_stride( pix_fmt, width, p ) * 
+                    hb_image_height_stride( pix_fmt, height, p );
+        }
+    }
+
+    buf = hb_buffer_init( size );
+    if( buf == NULL )
+        return NULL;
+
+    buf->s.type = FRAME_BUF;
+    buf->f.width = width;
+    buf->f.height = height;
+    buf->f.fmt = pix_fmt;
+
+    hb_buffer_init_planes_internal( buf, has_plane );
+    return buf;
+}
+
+// this routine reallocs a buffer for an uncompressed YUV420 video frame
+// with dimensions width x height.
+void hb_video_buffer_realloc( hb_buffer_t * buf, int width, int height )
+{
+    const AVPixFmtDescriptor *desc = &av_pix_fmt_descriptors[buf->f.fmt];
+    int p;
+    uint8_t has_plane[4] = {0,};
+
+    for( p = 0; p < 4; p++ )
+    {
+        has_plane[desc->comp[p].plane] = 1;
+    }
+
+    int size = 0;
+    for( p = 0; p < 4; p++ )
+    {
+        if ( has_plane[p] )
+        {
+            size += hb_image_stride( buf->f.fmt, width, p ) * 
+                    hb_image_height_stride( buf->f.fmt, height, p );
+        }
+    }
+
+    hb_buffer_realloc(buf, size );
+
+    buf->f.width = width;
+    buf->f.height = height;
+
+    hb_buffer_init_planes_internal( buf, has_plane );
+}
+
+// this routine 'moves' data from src to dst by interchanging 'data',
+// 'size' & 'alloc' between them and copying the rest of the fields
+// from src to dst.
+void hb_buffer_swap_copy( hb_buffer_t *src, hb_buffer_t *dst )
+{
+    uint8_t *data  = dst->data;
+    int      size  = dst->size;
+    int      alloc = dst->alloc;
+
+    *dst = *src;
+
+    src->data  = data;
+    src->size  = size;
+    src->alloc = alloc;
+}
+
 // Frees the specified buffer list.
 void hb_buffer_close( hb_buffer_t ** _b )
 {
@@ -374,6 +533,9 @@ void hb_buffer_close( hb_buffer_t ** _b )
         hb_fifo_t *buffer_pool = size_to_pool( b->alloc );
 
         b->next = NULL;
+
+        // Close any attached subtitle buffers
+        hb_buffer_close( &b->sub );
 
         if( buffer_pool && b->data && !hb_fifo_is_full( buffer_pool ) )
         {
@@ -393,16 +555,15 @@ void hb_buffer_close( hb_buffer_t ** _b )
         free( b );
         b = next;
     }
+
     *_b = NULL;
 }
 
-void hb_buffer_copy_settings( hb_buffer_t * dst, const hb_buffer_t * src )
+void hb_buffer_move_subs( hb_buffer_t * dst, hb_buffer_t * src )
 {
-    dst->start     = src->start;
-    dst->stop      = src->stop;
-    dst->new_chap  = src->new_chap;
-    dst->frametype = src->frametype;
-    dst->flags     = src->flags;
+    // Note that dst takes ownership of the subtitles
+    dst->sub       = src->sub;
+    src->sub       = NULL;
 }
 
 hb_fifo_t * hb_fifo_init( int capacity, int thresh )
@@ -736,6 +897,9 @@ void hb_fifo_close( hb_fifo_t ** _f )
 {
     hb_fifo_t   * f = *_f;
     hb_buffer_t * b;
+
+    if ( f == NULL )
+        return;
 
     hb_deep_log( 2, "fifo_close: trashing %d buffer(s)", hb_fifo_size( f ) );
     while( ( b = hb_fifo_get( f ) ) )

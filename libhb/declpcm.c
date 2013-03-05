@@ -1,18 +1,22 @@
-/* $Id: declpcm.c,v 1.8 2005/11/04 14:44:01 titer Exp $
+/* declpcm.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
-#include "downmix.h"
+#include "hbffmpeg.h"
+#include "audio_resample.h"
 
 struct hb_work_private_s
 {
     hb_job_t    *job;
     uint32_t    size;       /* frame size in bytes */
-    uint32_t    chunks;     /* number of samples pairs if paired */
-    uint32_t    samples;    /* frame size in samples */
+    uint32_t    nchunks;     /* number of samples pairs if paired */
+    uint32_t    nsamples;   /* frame size in samples */
     uint32_t    pos;        /* buffer offset for next input data */
 
     int64_t     next_pts;   /* pts for next output frame */
@@ -26,6 +30,10 @@ struct hb_work_private_s
     uint8_t     sample_size; /* bits per sample */
 
     uint8_t     frame[HB_DVD_READ_BUFFER_SIZE*2];
+    uint8_t   * data;
+    uint32_t    alloc_size;
+
+    hb_audio_resample_t *resample;
 };
 
 static hb_buffer_t * Decode( hb_work_object_t * w );
@@ -48,11 +56,12 @@ hb_work_object_t hb_declpcm =
 
 static const int hdr2samplerate[] = { 48000, 96000, 44100, 32000 };
 static const int hdr2samplesize[] = { 16, 20, 24, 16 };
-static const int hdr2layout[] = {
-        HB_INPUT_CH_LAYOUT_MONO,   HB_INPUT_CH_LAYOUT_STEREO,
-        HB_INPUT_CH_LAYOUT_2F1R,   HB_INPUT_CH_LAYOUT_2F2R,
-        HB_INPUT_CH_LAYOUT_3F2R,   HB_INPUT_CH_LAYOUT_4F2R,
-        HB_INPUT_CH_LAYOUT_STEREO, HB_INPUT_CH_LAYOUT_STEREO,
+static const uint64_t hdr2layout[] =
+{
+    AV_CH_LAYOUT_MONO,         AV_CH_LAYOUT_STEREO,
+    AV_CH_LAYOUT_2_1,          AV_CH_LAYOUT_QUAD,
+    AV_CH_LAYOUT_5POINT0_BACK, AV_CH_LAYOUT_6POINT0_FRONT,
+    AV_CH_LAYOUT_6POINT1,      AV_CH_LAYOUT_7POINT1,
 };
 
 static void lpcmInfo( hb_work_object_t *w, hb_buffer_t *in )
@@ -95,8 +104,8 @@ static void lpcmInfo( hb_work_object_t *w, hb_buffer_t *in )
         hb_log( "declpcm: illegal frame offset %d", pv->offset );
         pv->offset = 2; /*XXX*/
     }
-    pv->samplerate = hdr2samplerate[ ( in->data[4] >> 4 ) & 0x3 ];
-    pv->nchannels  = ( in->data[4] & 7 ) + 1;
+    pv->nchannels   = ( in->data[4] & 7 ) + 1;
+    pv->samplerate  = hdr2samplerate[ ( in->data[4] >> 4 ) & 0x3 ];
     pv->sample_size = hdr2samplesize[in->data[4] >> 6];
 
     // 20 and 24 bit lpcm is always encoded in sample pairs.  So take this
@@ -138,19 +147,30 @@ static void lpcmInfo( hb_work_object_t *w, hb_buffer_t *in )
                    149 ) / 150;
 
     pv->duration = frames * 150;
-    pv->chunks =  ( pv->duration * pv->nchannels * pv->samplerate + 
+    pv->nchunks =  ( pv->duration * pv->nchannels * pv->samplerate + 
                     samples_per_chunk - 1 ) / ( 90000 * samples_per_chunk );
-    pv->samples = ( pv->duration * pv->nchannels * pv->samplerate ) / 90000;
-    pv->size = pv->chunks * chunk_size;
+    pv->nsamples = ( pv->duration * pv->samplerate ) / 90000;
+    pv->size = pv->nchunks * chunk_size;
 
-    pv->next_pts = in->start;
+    pv->next_pts = in->s.start;
 }
 
 static int declpcmInit( hb_work_object_t * w, hb_job_t * job )
 {
     hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
     w->private_data = pv;
-    pv->job   = job;
+    pv->job = job;
+
+    pv->resample =
+        hb_audio_resample_init(AV_SAMPLE_FMT_FLT,
+                               w->audio->config.out.mixdown,
+                               w->audio->config.out.normalize_mix_level);
+    if (pv->resample == NULL)
+    {
+        hb_error("declpcmInit: hb_audio_resample_init() failed");
+        return 1;
+    }
+
     return 0;
 }
 
@@ -213,18 +233,18 @@ static hb_buffer_t *Decode( hb_work_object_t *w )
     hb_work_private_t *pv = w->private_data;
     hb_buffer_t *out;
  
-    if (pv->samples == 0)
+    if (pv->nsamples == 0)
         return NULL;
 
-    out = hb_buffer_init( pv->samples * sizeof( float ) );
+    int size = pv->nsamples * pv->nchannels * sizeof( float );
+    if (pv->alloc_size != size)
+    {
+        pv->data = realloc( pv->data, size );
+        pv->alloc_size = size;
+    }
 
-    out->start  = pv->next_pts;
-    out->duration = pv->duration;
-    pv->next_pts += pv->duration;
-    out->stop = pv->next_pts;
-
-    float *odat = (float *)out->data;
-    int count = pv->chunks / pv->nchannels;
+    float *odat = (float *)pv->data;
+    int count = pv->nchunks / pv->nchannels;
 
     switch( pv->sample_size )
     {
@@ -308,14 +328,36 @@ static hb_buffer_t *Decode( hb_work_object_t *w )
             }
         } break;
     }
+
+    hb_audio_resample_set_channel_layout(pv->resample,
+                                         hdr2layout[pv->nchannels - 1],
+                                         pv->nchannels);
+    if (hb_audio_resample_update(pv->resample))
+    {
+        hb_log("declpcm: hb_audio_resample_update() failed");
+        return NULL;
+    }
+    out = hb_audio_resample(pv->resample, &pv->data, pv->nsamples);
+
+    if (out != NULL)
+    {
+        out->s.start    = pv->next_pts;
+        out->s.duration = pv->duration;
+        pv->next_pts   += pv->duration;
+        out->s.stop     = pv->next_pts;
+    }
     return out;
 }
 
 static void declpcmClose( hb_work_object_t * w )
 {
-    if ( w->private_data )
+    hb_work_private_t * pv = w->private_data;
+
+    if ( pv )
     {
-        free( w->private_data );
+        hb_audio_resample_free(pv->resample);
+        free( pv->data );
+        free( pv );
         w->private_data = 0;
     }
 }
@@ -338,7 +380,7 @@ static int declpcmBSInfo( hb_work_object_t *w, const hb_buffer_t *b,
     info->bitrate = bitrate;
     info->flags = ( b->data[3] << 16 ) | ( b->data[4] << 8 ) | b->data[5];
     info->channel_layout = hdr2layout[nchannels - 1];
-    info->channel_map = &hb_qt_chan_map;
+    info->channel_map = &hb_libav_chan_map;
     info->samples_per_frame = ( duration * rate ) / 90000;
 
     return 1;

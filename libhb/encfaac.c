@@ -1,10 +1,14 @@
-/* $Id: encfaac.c,v 1.13 2005/03/03 17:21:57 titer Exp $
+/* encfaac.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
+#include "audio_remap.h"
 
 #include "faac.h"
 
@@ -36,21 +40,6 @@ hb_work_object_t hb_encfaac =
     encfaacClose
 };
 
-static const int valid_rates[] =
-{
-    22050, 24000, 32000, 44100, 48000, 0
-};
-
-static int find_samplerate( int rate )
-{
-    int i;
-
-    for ( i = 0; valid_rates[i] && rate > valid_rates[i]; ++i )
-    {
-    }
-    return i;
-}
-
 /***********************************************************************
  * hb_work_encfaac_init
  ***********************************************************************
@@ -69,29 +58,7 @@ int encfaacInit( hb_work_object_t * w, hb_job_t * job )
     pv->job   = job;
 
 	/* pass the number of channels used into the private work data */
-    pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
-
-    /* if the sample rate is 'auto' and that has given us an invalid output */
-    /* rate, map it to the next highest output rate or 48K if above the highest. */
-    int rate_index = find_samplerate(audio->config.out.samplerate);
-    if ( audio->config.out.samplerate != valid_rates[rate_index] )
-    {
-        int rate = valid_rates[valid_rates[rate_index]? rate_index : rate_index - 1];
-        hb_log( "encfaac changing output samplerate from %d to %d",
-                audio->config.out.samplerate, rate );
-        audio->config.out.samplerate = rate;
-
-        /* if the new rate is over the max bandwidth per channel limit */
-        /* lower the bandwidth. */
-        double bw = audio->config.out.bitrate * 1000 / pv->out_discrete_channels;
-        if ( bw > (double)rate * (6144./1024.) )
-        {
-            int newbr = (double)rate * (6.144/1024.) * pv->out_discrete_channels;
-            hb_log( "encfaac changing output bitrate from %d to %d",
-                    audio->config.out.bitrate, newbr );
-            audio->config.out.bitrate = newbr;
-        }
-    }
+    pv->out_discrete_channels = hb_mixdown_get_discrete_channel_count(audio->config.out.mixdown);
 
     pv->faac = faacEncOpen( audio->config.out.samplerate, pv->out_discrete_channels,
                             &pv->input_samples, &pv->output_bytes );
@@ -106,41 +73,44 @@ int encfaacInit( hb_work_object_t * w, hb_job_t * job )
     cfg->aacObjectType = LOW;
     cfg->allowMidside  = 1;
 
-	if (pv->out_discrete_channels == 6) {
-		/* we are preserving 5.1 audio into 6-channel AAC,
-		so indicate that we have an lfe channel */
-		cfg->useLfe    = 1;
-	} else {
-		cfg->useLfe    = 0;
-	}
+    /* channel configuration & remapping */
+    uint64_t layout = hb_ff_mixdown_xlat(audio->config.out.mixdown, NULL);
+    hb_audio_remap_build_table(&hb_aac_chan_map, audio->config.in.channel_map,
+                               layout, cfg->channel_map);
+
+    switch (audio->config.out.mixdown)
+    {
+        case HB_AMIXDOWN_7POINT1:
+            cfg->channelConfiguration = 0;
+            cfg->numFrontChannels     = 3;
+            cfg->numSideChannels      = 2;
+            cfg->numBackChannels      = 2;
+            cfg->numLFEChannels       = 1;
+            break;
+
+        case HB_AMIXDOWN_6POINT1:
+            cfg->channelConfiguration = 0;
+            cfg->numFrontChannels     = 3;
+            cfg->numSideChannels      = 0;
+            cfg->numBackChannels      = 3;
+            cfg->numLFEChannels       = 1;
+            break;
+
+        case HB_AMIXDOWN_5_2_LFE:
+            cfg->channelConfiguration = 7;
+            break;
+
+        default:
+            cfg->channelConfiguration =
+                hb_mixdown_get_discrete_channel_count(audio->config.out.mixdown);
+            break;
+    }
 
     cfg->useTns        = 0;
     cfg->bitRate       = audio->config.out.bitrate * 1000 / pv->out_discrete_channels; /* Per channel */
     cfg->bandWidth     = 0;
     cfg->outputFormat  = 0;
     cfg->inputFormat   =  FAAC_INPUT_FLOAT;
-
-    if( ( audio->config.out.mixdown == HB_AMIXDOWN_6CH ) && ( audio->config.in.channel_map != &hb_qt_chan_map ) )
-    {
-        if( audio->config.in.channel_map == &hb_ac3_chan_map )
-        {
-            cfg->channel_map[0] = 2;
-            cfg->channel_map[1] = 1;
-            cfg->channel_map[2] = 3;
-            cfg->channel_map[3] = 4;
-            cfg->channel_map[4] = 5;
-            cfg->channel_map[5] = 0;
-        }
-        else if( audio->config.in.channel_map == &hb_smpte_chan_map )
-        {
-            cfg->channel_map[0] = 2;
-            cfg->channel_map[1] = 0;
-            cfg->channel_map[2] = 1;
-            cfg->channel_map[3] = 4;
-            cfg->channel_map[4] = 5;
-            cfg->channel_map[5] = 3;
-        }
-    }
 
     if( !faacEncSetConfiguration( pv->faac, cfg ) )
     {
@@ -231,10 +201,11 @@ static hb_buffer_t * Encode( hb_work_object_t * w )
         hb_buffer_t * buf = hb_buffer_init( size );
         memcpy( buf->data, pv->obuf, size );
         buf->size = size;
-        buf->start = pv->pts;
+        buf->s.start = pv->pts;
         pv->pts += pv->framedur;
-        buf->stop = pv->pts;
-        buf->frametype   = HB_FRAME_AUDIO;
+        buf->s.stop = pv->pts;
+        buf->s.type = AUDIO_BUF;
+        buf->s.frametype = HB_FRAME_AUDIO;
         return buf;
     }
     return NULL;

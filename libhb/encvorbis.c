@@ -1,10 +1,14 @@
-/* $Id: encvorbis.c,v 1.6 2005/03/05 15:08:32 titer Exp $
+/* encvorbis.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
+#include "audio_remap.h"
 
 #include "vorbis/vorbisenc.h"
 
@@ -25,154 +29,109 @@ hb_work_object_t hb_encvorbis =
 
 struct hb_work_private_s
 {
-    hb_job_t   * job;
+    uint8_t   *buf;
+    hb_job_t  *job;
+    hb_list_t *list;
 
-    vorbis_info        vi;
-    vorbis_comment     vc;
-    vorbis_dsp_state   vd;
-    vorbis_block       vb;
+    vorbis_dsp_state vd;
+    vorbis_comment   vc;
+    vorbis_block     vb;
+    vorbis_info      vi;
 
-    unsigned long   input_samples;
-    uint8_t       * buf;
-    uint64_t        pts;
+    unsigned  input_samples;
+    uint64_t  pts;
+    int64_t   prev_blocksize;
+    int       out_discrete_channels;
 
-    hb_list_t     * list;
-    int           out_discrete_channels;
-    int           channel_map[6];
-    int64_t       prev_blocksize;
+    int       remap_table[8];
 };
 
-int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
+int encvorbisInit(hb_work_object_t *w, hb_job_t *job)
 {
-    hb_audio_t * audio = w->audio;
+    hb_work_private_t *pv = calloc(1, sizeof(hb_work_private_t));
+    hb_audio_t *audio = w->audio;
+    w->private_data = pv;
+    pv->job = job;
+
     int i;
     ogg_packet header[3];
 
-    hb_work_private_t * pv = calloc( 1, sizeof( hb_work_private_t ) );
-    w->private_data = pv;
-    pv->out_discrete_channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(audio->config.out.mixdown);
-
-    pv->job   = job;
-
-    hb_log( "encvorbis: opening libvorbis" );
+    hb_log("encvorbis: opening libvorbis");
 
     /* init */
-    for( i = 0; i < 3; i++ )
+    for (i = 0; i < 3; i++)
     {
         // Zero vorbis headers so that we don't crash in mk_laceXiph
         // when vorbis_encode_setup_managed fails.
-        memset( w->config->vorbis.headers[i], 0, sizeof( ogg_packet ) );
+        memset(w->config->vorbis.headers[i], 0, sizeof(ogg_packet));
     }
-    vorbis_info_init( &pv->vi );
+    vorbis_info_init(&pv->vi);
 
-    if( audio->config.out.bitrate > 0 )
+    pv->out_discrete_channels =
+        hb_mixdown_get_discrete_channel_count(audio->config.out.mixdown);
+
+    if (audio->config.out.bitrate > 0)
     {
-        /* 28kbps/channel seems to be the minimum for 6ch vorbis. */
-        int min_bitrate = 28 * pv->out_discrete_channels;
-        if (pv->out_discrete_channels > 2 && audio->config.out.bitrate < min_bitrate)
+        if (vorbis_encode_setup_managed(&pv->vi, pv->out_discrete_channels,
+                                        audio->config.out.samplerate, -1,
+                                        audio->config.out.bitrate * 1000, -1))
         {
-            hb_log( "encvorbis: Selected bitrate (%d kbps) too low for %d channel audio.", audio->config.out.bitrate, pv->out_discrete_channels);
-            hb_log( "encvorbis: Resetting bitrate to %d kbps", min_bitrate);
-            /* Naughty! We shouldn't modify the audio from here. */
-            audio->config.out.bitrate = min_bitrate;
-        }
-
-        if( vorbis_encode_setup_managed( &pv->vi, pv->out_discrete_channels,
-              audio->config.out.samplerate, -1, 1000 * audio->config.out.bitrate, -1 ) )
-        {
-            hb_error( "encvorbis: vorbis_encode_setup_managed failed.\n" );
+            hb_error("encvorbis: vorbis_encode_setup_managed() failed");
             *job->die = 1;
             return -1;
         }
     }
-    else if( audio->config.out.quality != HB_INVALID_AUDIO_QUALITY )
+    else if (audio->config.out.quality != HB_INVALID_AUDIO_QUALITY)
     {
         // map VBR quality to Vorbis API (divide by 10)
-        if( vorbis_encode_setup_vbr( &pv->vi, pv->out_discrete_channels,
-              audio->config.out.samplerate, audio->config.out.quality/10 ) )
+        if (vorbis_encode_setup_vbr(&pv->vi, pv->out_discrete_channels,
+                                    audio->config.out.samplerate,
+                                    audio->config.out.quality / 10))
         {
-            hb_error( "encvorbis: vorbis_encode_setup_vbr failed.\n" );
+            hb_error("encvorbis: vorbis_encode_setup_vbr() failed");
             *job->die = 1;
             return -1;
         }
     }
 
-    if( vorbis_encode_ctl( &pv->vi, OV_ECTL_RATEMANAGE2_SET, NULL ) ||
-          vorbis_encode_setup_init( &pv->vi ) )
+    if (vorbis_encode_ctl(&pv->vi, OV_ECTL_RATEMANAGE2_SET, NULL) ||
+        vorbis_encode_setup_init(&pv->vi))
     {
-        hb_error( "encvorbis: vorbis_encode_ctl( ratemanage2_set ) OR vorbis_encode_setup_init failed.\n" );
+        hb_error("encvorbis: vorbis_encode_ctl(ratemanage2_set) OR vorbis_encode_setup_init() failed");
         *job->die = 1;
         return -1;
     }
 
     /* add a comment */
-    vorbis_comment_init( &pv->vc );
-    vorbis_comment_add_tag( &pv->vc, "Encoder", "HandBrake");
-    vorbis_comment_add_tag( &pv->vc, "LANGUAGE", w->config->vorbis.language);
+    vorbis_comment_init(&pv->vc);
+    vorbis_comment_add_tag(&pv->vc, "Encoder", "HandBrake");
+    vorbis_comment_add_tag(&pv->vc, "LANGUAGE", w->config->vorbis.language);
 
     /* set up the analysis state and auxiliary encoding storage */
-    vorbis_analysis_init( &pv->vd, &pv->vi);
-    vorbis_block_init( &pv->vd, &pv->vb);
+    vorbis_analysis_init(&pv->vd, &pv->vi);
+    vorbis_block_init(&pv->vd, &pv->vb);
 
     /* get the 3 headers */
-    vorbis_analysis_headerout( &pv->vd, &pv->vc,
-                               &header[0], &header[1], &header[2] );
-    for( i = 0; i < 3; i++ )
+    vorbis_analysis_headerout(&pv->vd, &pv->vc,
+                              &header[0], &header[1], &header[2]);
+    for (i = 0; i < 3; i++)
     {
-        memcpy( w->config->vorbis.headers[i], &header[i],
-                sizeof( ogg_packet ) );
-        memcpy( w->config->vorbis.headers[i] + sizeof( ogg_packet ),
-                header[i].packet, header[i].bytes );
+        memcpy(w->config->vorbis.headers[i], &header[i], sizeof(ogg_packet));
+        memcpy(w->config->vorbis.headers[i] + sizeof(ogg_packet),
+               header[i].packet, header[i].bytes);
     }
 
     pv->input_samples = pv->out_discrete_channels * OGGVORBIS_FRAME_SIZE;
     audio->config.out.samples_per_frame = OGGVORBIS_FRAME_SIZE;
-    pv->buf = malloc( pv->input_samples * sizeof( float ) );
+    pv->buf = malloc(pv->input_samples * sizeof(float));
 
     pv->list = hb_list_init();
 
-    switch (pv->out_discrete_channels) {
-        case 1:
-            pv->channel_map[0] = 0;
-            break;
-        case 6:
-            // Vorbis uses the following channel map = L C R Ls Rs Lfe
-            if( audio->config.in.channel_map == &hb_ac3_chan_map )
-            {
-                pv->channel_map[0] = 1;
-                pv->channel_map[1] = 2;
-                pv->channel_map[2] = 3;
-                pv->channel_map[3] = 4;
-                pv->channel_map[4] = 5;
-                pv->channel_map[5] = 0;
-            }
-            else if( audio->config.in.channel_map == &hb_smpte_chan_map )
-            {
-                pv->channel_map[0] = 0;
-                pv->channel_map[1] = 2;
-                pv->channel_map[2] = 1;
-                pv->channel_map[3] = 4;
-                pv->channel_map[4] = 5;
-                pv->channel_map[5] = 3;
-            }
-            else // &hb_qt_chan_map
-            {
-                pv->channel_map[0] = 1;
-                pv->channel_map[1] = 0;
-                pv->channel_map[2] = 2;
-                pv->channel_map[3] = 3;
-                pv->channel_map[4] = 4;
-                pv->channel_map[5] = 5;
-            }
-            break;
-        default:
-            hb_log("encvorbis.c: Unable to correctly proccess %d channels, assuming stereo.", pv->out_discrete_channels);
-        case 2:
-            // Assume stereo
-            pv->channel_map[0] = 0;
-            pv->channel_map[1] = 1;
-            break;
-    }
+    // channel remapping
+    uint64_t layout = hb_ff_mixdown_xlat(audio->config.out.mixdown, NULL);
+    hb_audio_remap_build_table(&hb_vorbis_chan_map,
+                               audio->config.in.channel_map, layout,
+                               pv->remap_table);
 
     return 0;
 }
@@ -182,20 +141,22 @@ int encvorbisInit( hb_work_object_t * w, hb_job_t * job )
  ***********************************************************************
  *
  **********************************************************************/
-void encvorbisClose( hb_work_object_t * w )
+void encvorbisClose(hb_work_object_t * w)
 {
-    hb_work_private_t * pv = w->private_data;
+    hb_work_private_t *pv = w->private_data;
 
-    vorbis_block_clear( &pv->vb );
-    vorbis_dsp_clear( &pv->vd );
-    vorbis_comment_clear( &pv->vc );
-    vorbis_info_clear( &pv->vi );
+    vorbis_comment_clear(&pv->vc);
+    vorbis_block_clear(&pv->vb);
+    vorbis_info_clear(&pv->vi);
+    vorbis_dsp_clear(&pv->vd);
 
     if (pv->list)
-        hb_list_empty( &pv->list );
+    {
+        hb_list_empty(&pv->list);
+    }
 
-    free( pv->buf );
-    free( pv );
+    free(pv->buf);
+    free(pv);
     w->private_data = NULL;
 }
 
@@ -224,9 +185,12 @@ static hb_buffer_t * Flush( hb_work_object_t * w )
             memcpy( buf->data + sizeof( ogg_packet ), op.packet,
                     op.bytes );
             blocksize = vorbis_packet_blocksize(&pv->vi, &op);
-            buf->frametype   = HB_FRAME_AUDIO;
-            buf->start = (int64_t)(vorbis_granule_time(&pv->vd, op.granulepos) * 90000);
-            buf->stop  = (int64_t)(vorbis_granule_time(&pv->vd, (pv->prev_blocksize + blocksize)/4 + op.granulepos) * 90000);
+
+            buf->s.type = AUDIO_BUF;
+            buf->s.frametype = HB_FRAME_AUDIO;
+
+            buf->s.start = (int64_t)(vorbis_granule_time(&pv->vd, op.granulepos) * 90000);
+            buf->s.stop  = (int64_t)(vorbis_granule_time(&pv->vd, (pv->prev_blocksize + blocksize)/4 + op.granulepos) * 90000);
             /* The stop time isn't accurate for the first ~3 packets, as the actual blocksize depends on the previous _and_ current packets. */
             pv->prev_blocksize = blocksize;
             return buf;
@@ -241,40 +205,42 @@ static hb_buffer_t * Flush( hb_work_object_t * w )
  ***********************************************************************
  *
  **********************************************************************/
-static hb_buffer_t * Encode( hb_work_object_t * w )
+static hb_buffer_t* Encode(hb_work_object_t *w)
 {
-    hb_work_private_t * pv = w->private_data;
-    hb_buffer_t * buf;
-    float ** buffer;
+    hb_work_private_t *pv = w->private_data;
+    hb_buffer_t *buf;
+    float **buffer;
     int i, j;
 
     /* Try to extract more data */
-    if( ( buf = Flush( w ) ) )
+    if ((buf = Flush(w)) != NULL)
     {
         return buf;
     }
 
-    if( hb_list_bytes( pv->list ) < pv->input_samples * sizeof( float ) )
+    /* Check if we need more data */
+    if (hb_list_bytes(pv->list) < pv->input_samples * sizeof(float))
     {
         return NULL;
     }
 
     /* Process more samples */
-    hb_list_getbytes( pv->list, pv->buf, pv->input_samples * sizeof( float ),
-                      &pv->pts, NULL );
-    buffer = vorbis_analysis_buffer( &pv->vd, OGGVORBIS_FRAME_SIZE );
-    for( i = 0; i < OGGVORBIS_FRAME_SIZE; i++ )
+    hb_list_getbytes(pv->list, pv->buf, pv->input_samples * sizeof(float),
+                     &pv->pts, NULL);
+    buffer = vorbis_analysis_buffer(&pv->vd, OGGVORBIS_FRAME_SIZE);
+    for (i = 0; i < OGGVORBIS_FRAME_SIZE; i++)
     {
-        for( j = 0; j < pv->out_discrete_channels; j++)
+        for (j = 0; j < pv->out_discrete_channels; j++)
         {
-            buffer[j][i] = ((float *) pv->buf)[(pv->out_discrete_channels * i + pv->channel_map[j])];
+            buffer[j][i] = ((float*)pv->buf)[(pv->out_discrete_channels * i +
+                                              pv->remap_table[j])];
         }
     }
 
-    vorbis_analysis_wrote( &pv->vd, OGGVORBIS_FRAME_SIZE );
+    vorbis_analysis_wrote(&pv->vd, OGGVORBIS_FRAME_SIZE);
 
     /* Try to extract again */
-    return Flush( w );
+    return Flush(w);
 }
 
 /***********************************************************************

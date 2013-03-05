@@ -92,7 +92,7 @@ LIBHB.dll = $(LIBHB.build/)hb.dll
 LIBHB.lib = $(LIBHB.build/)hb.lib
 
 LIBHB.dll.libs = $(foreach n, \
-        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
+        a52 ass avcodec avformat avutil avresample dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
         ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
         $(CONTRIB.build/)lib/lib$(n).a )
 
@@ -127,7 +127,7 @@ else
 endif
 
 LIBHB.GCC.args.extra.dylib++ += -Wl,--out-implib,$(LIBHB.lib)
-LIBHB.GCC.l += iberty ws2_32
+LIBHB.GCC.l += ws2_32
 ifeq ($(HAS.dlfcn),1)
     LIBHB.GCC.l += dl
 endif

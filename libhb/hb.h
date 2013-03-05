@@ -1,3 +1,12 @@
+/* hb.h
+
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
+   Homepage: <http://handbrake.fr/>.
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
+ 
 #ifndef HB_HB_H
 #define HB_HB_H
 
@@ -7,14 +16,7 @@ extern "C" {
 
 #include "project.h"
 #include "common.h"
-
-#ifdef __APPLE__
-#include <CoreServices/CoreServices.h> // for Gestalt
-#include <AudioToolbox/AudioToolbox.h>
-#include <dlfcn.h>
-#endif
-/* Whether the Core Audio HE-AAC encoder is available on the system. */
-int encca_haac_available();
+#include "hb_dict.h"
 
 /* hb_init()
    Initializes a libhb session (launches his own thread, detects CPUs,
@@ -47,36 +49,46 @@ void          hb_scan( hb_handle_t *, const char * path,
                        int title_index, int preview_count,
                        int store_previews, uint64_t min_duration );
 void          hb_scan_stop( hb_handle_t * );
-hb_filter_object_t * hb_get_filter_object(int filter_id, const char * settings);
 uint64_t      hb_first_duration( hb_handle_t * );
 
 /* hb_get_titles()
    Returns the list of valid titles detected by the latest scan. */
 hb_list_t   * hb_get_titles( hb_handle_t * );
 
+/* hb_get_title_set()
+   Returns the title set which contains a list of valid titles detected
+   by the latest scan and title set data. */
+hb_title_set_t   * hb_get_title_set( hb_handle_t * );
+
 /* hb_detect_comb()
    Analyze a frame for interlacing artifacts, returns true if they're found.
    Taken from Thomas Oestreich's 32detect filter in the Transcode project.  */
 int hb_detect_comb( hb_buffer_t * buf, int color_equal, int color_diff, int threshold, int prog_equal, int prog_diff, int prog_threshold );
 
-void          hb_get_preview_by_index( hb_handle_t *, int, int, uint8_t * );
-void          hb_get_preview( hb_handle_t *, hb_title_t *, int,
+// JJJ: title->job?
+int           hb_save_preview( hb_handle_t * h, int title, int preview, 
+                               hb_buffer_t *buf );
+hb_buffer_t * hb_read_preview( hb_handle_t * h, int title_idx, int preview );
+void          hb_get_preview( hb_handle_t *, hb_job_t *, int,
                               uint8_t * );
 void          hb_set_size( hb_job_t *, double ratio, int pixels );
-void          hb_set_anamorphic_size_by_index( hb_handle_t *, int,
-                int *output_width, int *output_height,
-                int *output_par_width, int *output_par_height );
 void          hb_set_anamorphic_size( hb_job_t *,
                 int *output_width, int *output_height,
                 int *output_par_width, int *output_par_height );
+void          hb_validate_size( hb_job_t * job );
+void          hb_add_filter( hb_job_t * job, hb_filter_object_t * filter, 
+                const char * settings );
 
 /* Handling jobs */
 int           hb_count( hb_handle_t * );
 hb_job_t *    hb_job( hb_handle_t *, int );
-void          hb_set_chapter_name( hb_handle_t *, int, int, const char * );
-void          hb_set_job( hb_handle_t *, int, hb_job_t * );
 void          hb_add( hb_handle_t *, hb_job_t * );
 void          hb_rem( hb_handle_t *, hb_job_t * );
+
+hb_job_t *    hb_job_init_by_index( hb_handle_t *h, int title_index );
+hb_job_t *    hb_job_init( hb_title_t * title );
+void          hb_job_reset( hb_job_t * job );
+void          hb_job_close( hb_job_t ** job );
 
 void          hb_start( hb_handle_t * );
 void          hb_pause( hb_handle_t * );

@@ -1,19 +1,22 @@
-/* $Id: work.c,v 1.43 2005/03/17 16:38:49 titer Exp $
+/* work.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "hb.h"
 #include "a52dec/a52.h"
-#include "dca.h"
 #include "libavformat/avformat.h"
 
 typedef struct
 {
-    hb_list_t * jobs;
-    hb_job_t  ** current_job;
-    int       * error;
+    hb_handle_t  * handle;
+    hb_list_t    * jobs;
+    hb_job_t    ** current_job;
+    int          * error;
     volatile int * die;
 
 } hb_work_t;
@@ -21,6 +24,7 @@ typedef struct
 static void work_func();
 static void do_job( hb_job_t *);
 static void work_loop( void * );
+static void filter_loop( void * );
 
 #define FIFO_UNBOUNDED 65536
 #define FIFO_UNBOUNDED_WAKE 65535
@@ -28,6 +32,8 @@ static void work_loop( void * );
 #define FIFO_LARGE_WAKE 16
 #define FIFO_SMALL 16
 #define FIFO_SMALL_WAKE 15
+#define FIFO_MINI 4
+#define FIFO_MINI_WAKE 3
 
 /**
  * Allocates work object and launches work thread with work_func.
@@ -35,14 +41,15 @@ static void work_loop( void * );
  * @param die Handle to user inititated exit indicator.
  * @param error Handle to error indicator.
  */
-hb_thread_t * hb_work_init( hb_list_t * jobs, volatile int * die, int * error, hb_job_t ** job )
+hb_thread_t * hb_work_init( hb_handle_t * handle, hb_list_t * jobs, volatile int * die, int * error, hb_job_t ** job )
 {
     hb_work_t * work = calloc( sizeof( hb_work_t ), 1 );
 
-    work->jobs      = jobs;
+    work->handle      = handle;
+    work->jobs        = jobs;
     work->current_job = job;
-    work->die       = die;
-    work->error     = error;
+    work->die         = die;
+    work->error       = error;
 
     return hb_thread_init( "work", work_func, work, HB_LOW_PRIORITY );
 }
@@ -76,15 +83,21 @@ static void work_func( void * _work )
 
     hb_log( "%d job(s) to process", hb_list_count( work->jobs ) );
 
+    hb_prevent_sleep( work->handle );
+
     while( !*work->die && ( job = hb_list_item( work->jobs, 0 ) ) )
     {
         hb_list_rem( work->jobs, job );
         job->die = work->die;
         *(work->current_job) = job;
+
         InitWorkState( job->h );
         do_job( job );
+
         *(work->current_job) = NULL;
     }
+
+    hb_allow_sleep( work->handle );
 
     *(work->error) = HB_ERROR_NONE;
 
@@ -111,7 +124,6 @@ hb_work_object_t * hb_codec_decoder( int codec )
     switch( codec )
     {
         case HB_ACODEC_AC3:  return hb_get_work( WORK_DECA52 );
-        case HB_ACODEC_DCA:  return hb_get_work( WORK_DECDCA );
         case HB_ACODEC_LPCM: return hb_get_work( WORK_DECLPCM );
         default:
             if ( codec & HB_ACODEC_FF_MASK )
@@ -136,19 +148,20 @@ hb_work_object_t * hb_codec_encoder( int codec )
         case HB_ACODEC_FFAAC:
         {
             w = hb_get_work( WORK_ENCAVCODEC_AUDIO );
-            w->codec_param = CODEC_ID_AAC;
+            w->codec_param = AV_CODEC_ID_AAC;
             return w;
         }
         case HB_ACODEC_FFFLAC:
+        case HB_ACODEC_FFFLAC24:
         {
             w = hb_get_work( WORK_ENCAVCODEC_AUDIO );
-            w->codec_param = CODEC_ID_FLAC;
+            w->codec_param = AV_CODEC_ID_FLAC;
             return w;
         }
         case HB_ACODEC_AC3:
         {
             w = hb_get_work( WORK_ENCAVCODEC_AUDIO );
-            w->codec_param = CODEC_ID_AC3;
+            w->codec_param = AV_CODEC_ID_AC3;
             return w;
         }
     }
@@ -271,6 +284,29 @@ void hb_display_job_info( hb_job_t * job )
             (float) job->pfr_vrate / (float) job->pfr_vrate_base );
     }
 
+    // Filters can modify dimensions.  So show them first.
+    if( hb_list_count( job->list_filter ) )
+    {
+        hb_log("   + %s", hb_list_count( job->list_filter) > 1 ? "filters" : "filter" );
+        for( i = 0; i < hb_list_count( job->list_filter ); i++ )
+        {
+            hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+            if( filter->settings )
+                hb_log("     + %s (%s)", filter->name, filter->settings);
+            else
+                hb_log("     + %s (default settings)", filter->name);
+            if( filter->info )
+            {
+                hb_filter_info_t info;
+                filter->info( filter, &info );
+                if( info.human_readable_desc[0] )
+                {
+                    hb_log("       + %s", info.human_readable_desc);
+                }
+            }
+        }
+    }
+    
     if( job->anamorphic.mode )
     {
         hb_log( "   + %s anamorphic", job->anamorphic.mode == 1 ? "strict" : job->anamorphic.mode == 2? "loose" : "custom" );
@@ -278,9 +314,8 @@ void hb_display_job_info( hb_job_t * job )
         {
             hb_log( "     + keeping source display aspect ratio"); 
         }
-        hb_log( "     + storage dimensions: %d * %d -> %d * %d, crop %d/%d/%d/%d, mod %i",
-                    title->width, title->height, job->width, job->height,
-                    job->crop[0], job->crop[1], job->crop[2], job->crop[3], job->modulus );
+        hb_log( "     + storage dimensions: %d * %d, mod %i",
+                    job->width, job->height, job->modulus );
         if( job->anamorphic.itu_par )
         {
             hb_log( "     + using ITU pixel aspect ratio values"); 
@@ -291,27 +326,13 @@ void hb_display_job_info( hb_job_t * job )
     }
     else
     {
-        hb_log( "   + dimensions: %d * %d -> %d * %d, crop %d/%d/%d/%d, mod %i",
-                title->width, title->height, job->width, job->height,
-                job->crop[0], job->crop[1], job->crop[2], job->crop[3], job->modulus );
+        hb_log( "   + dimensions: %d * %d, mod %i",
+                job->width, job->height, job->modulus );
     }
 
     if ( job->grayscale )
         hb_log( "   + grayscale mode" );
 
-    if( hb_list_count( job->filters ) )
-    {
-        hb_log("   + %s", hb_list_count( job->filters) > 1 ? "filters" : "filter" );
-        for( i = 0; i < hb_list_count( job->filters ); i++ )
-        {
-            hb_filter_object_t * filter = hb_list_item( job->filters, i );
-            if (filter->settings)
-                hb_log("     + %s (%s)", filter->name, filter->settings);
-            else
-                hb_log("     + %s (default settings)", filter->name);
-        }
-    }
-    
     if( !job->indepth_scan )
     {
         /* Video encoder */
@@ -327,23 +348,28 @@ void hb_display_job_info( hb_job_t * job )
         if( job->x264_preset && *job->x264_preset &&
             job->vcodec == HB_VCODEC_X264 )
         {
-            hb_log( "     + x264 preset: %s", job->x264_preset);
+            hb_log( "     + x264 preset: %s", job->x264_preset );
         }
         if( job->x264_tune && *job->x264_tune &&
             job->vcodec == HB_VCODEC_X264 )
         {
-            hb_log( "     + x264 tune: %s", job->x264_tune);
+            hb_log( "     + x264 tune: %s", job->x264_tune );
         }
         if( job->advanced_opts && *job->advanced_opts &&
             ( ( job->vcodec & HB_VCODEC_FFMPEG_MASK ) ||
               ( job->vcodec == HB_VCODEC_X264 ) ) )
         {
-            hb_log( "     + options: %s", job->advanced_opts);
+            hb_log( "     + options: %s", job->advanced_opts );
         }
-        if( job->x264_profile && *job->x264_profile &&
+        if( job->h264_profile && *job->h264_profile &&
             job->vcodec == HB_VCODEC_X264 )
         {
-            hb_log( "     + x264 profile: %s", job->x264_profile);
+            hb_log( "     + h264 profile: %s", job->h264_profile );
+        }
+        if( job->h264_level && *job->h264_level &&
+            job->vcodec == HB_VCODEC_X264 )
+        {
+            hb_log( "     + h264 level: %s", job->h264_level );
         }
 
         if( job->vquality >= 0 )
@@ -353,30 +379,53 @@ void hb_display_job_info( hb_job_t * job )
         else
         {
             hb_log( "     + bitrate: %d kbps, pass: %d", job->vbitrate, job->pass );
+            if( job->pass == 1 && job->fastfirstpass == 1 &&
+                job->vcodec == HB_VCODEC_X264 )
+            {
+                hb_log( "     + fast first pass" );
+                hb_log( "     + options: ref=1:8x8dct=0:me=dia:trellis=0" );
+                hb_log( "                analyse=i4x4 (if originally enabled, else analyse=none)" );
+                hb_log( "                subq=2 (if originally greater than 2, else subq unchanged)" );
+            }
         }
     }
 
-    for( i=0; i < hb_list_count( title->list_subtitle ); i++ )
+    if( job->indepth_scan )
     {
-        subtitle =  hb_list_item( title->list_subtitle, i );
+        hb_log( " * Foreign Audio Search: %s%s%s",
+                job->select_subtitle_config.dest == RENDERSUB ? "Render/Burn-in" : "Passthrough",
+                job->select_subtitle_config.force ? ", Forced Only" : "",
+                job->select_subtitle_config.default_track ? ", Default" : "" );
+    }
+
+    for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
+    {
+        subtitle = hb_list_item( job->list_subtitle, i );
 
         if( subtitle )
         {
-            if( subtitle->source == SRTSUB )
+            if( job->indepth_scan )
+            {
+                hb_log( "   + subtitle, %s (track %d, id 0x%x) %s [%s]",
+                        subtitle->lang, subtitle->track, subtitle->id,
+                        subtitle->format == PICTURESUB ? "Picture" : "Text",
+                        hb_subsource_name( subtitle->source ) );
+            }
+            else if( subtitle->source == SRTSUB )
             {
                 /* For SRT, print offset and charset too */
-                hb_log( " * subtitle track %i, %s (id 0x%x) %s [%s] -> %s%s, offset: %"PRId64", charset: %s",
-                        subtitle->track, subtitle->lang, subtitle->id, "Text", "SRT", "Pass-Through",
+                hb_log( " * subtitle track %d, %s (track %d, id 0x%x) Text [SRT] -> Passthrough%s, offset: %"PRId64", charset: %s",
+                        subtitle->out_track, subtitle->lang, subtitle->track, subtitle->id,
                         subtitle->config.default_track ? ", Default" : "",
                         subtitle->config.offset, subtitle->config.src_codeset );
             }
             else
             {
-                hb_log( " * subtitle track %i, %s (id 0x%x) %s [%s] -> %s%s%s", subtitle->track, subtitle->lang, subtitle->id,
+                hb_log( " * subtitle track %d, %s (track %d, id 0x%x) %s [%s] -> %s%s%s",
+                        subtitle->out_track, subtitle->lang, subtitle->track, subtitle->id,
                         subtitle->format == PICTURESUB ? "Picture" : "Text",
                         hb_subsource_name( subtitle->source ),
-                        job->indepth_scan ? "Foreign Audio Search" :
-                        subtitle->config.dest == RENDERSUB ? "Render/Burn in" : "Pass-Through",
+                        subtitle->config.dest == RENDERSUB ? "Render/Burn-in" : "Passthrough",
                         subtitle->config.force ? ", Forced Only" : "",
                         subtitle->config.default_track ? ", Default" : "" );
             }
@@ -385,9 +434,9 @@ void hb_display_job_info( hb_job_t * job )
 
     if( !job->indepth_scan )
     {
-        for( i = 0; i < hb_list_count( title->list_audio ); i++ )
+        for( i = 0; i < hb_list_count( job->list_audio ); i++ )
         {
-            audio = hb_list_item( title->list_audio, i );
+            audio = hb_list_item( job->list_audio, i );
 
             hb_log( " * audio track %d", audio->config.out.track );
             
@@ -396,10 +445,13 @@ void hb_display_job_info( hb_job_t * job )
 
             hb_log( "   + decoder: %s (track %d, id 0x%x)", audio->config.lang.description, audio->config.in.track + 1, audio->id );
 
-            if( ( audio->config.in.codec == HB_ACODEC_AC3 ) || ( audio->config.in.codec == HB_ACODEC_DCA) )
-            {
-                hb_log( "     + bitrate: %d kbps, samplerate: %d Hz", audio->config.in.bitrate / 1000, audio->config.in.samplerate );
-            }
+            if (audio->config.in.bitrate >= 1000)
+                hb_log("     + bitrate: %d kbps, samplerate: %d Hz",
+                       audio->config.in.bitrate / 1000,
+                       audio->config.in.samplerate);
+            else
+                hb_log("     + samplerate: %d Hz",
+                       audio->config.in.samplerate);
 
             if( audio->config.out.codec & HB_ACODEC_PASS_FLAG )
             {
@@ -422,6 +474,10 @@ void hb_display_job_info( hb_job_t * job )
                         break;
                     }
                 }
+                if( audio->config.out.normalize_mix_level != 0 )
+                {
+                    hb_log( "   + normalized mixing levels" );
+                }
                 if( audio->config.out.gain != 0.0 )
                 {
                     hb_log( "   + gain: %.fdB", audio->config.out.gain );
@@ -429,6 +485,11 @@ void hb_display_job_info( hb_job_t * job )
                 if( ( audio->config.out.dynamic_range_compression != 0.0 ) && ( audio->config.in.codec == HB_ACODEC_AC3 ) )
                 {
                     hb_log( "   + dynamic range compression: %f", audio->config.out.dynamic_range_compression );
+                }
+                if (hb_audio_dither_is_supported(audio->config.out.codec))
+                {
+                    hb_log("   + dither: %s",
+                           hb_audio_dither_get_description(audio->config.out.dither_method));
                 }
                 for( j = 0; j < hb_audio_encoders_count; j++ )
                 {
@@ -482,15 +543,16 @@ static void do_job( hb_job_t * job )
     hb_work_object_t * w;
     hb_work_object_t * sync;
     hb_work_object_t * muxer;
+    hb_work_object_t *reader = hb_get_work(WORK_READER);
     hb_interjob_t * interjob;
 
     hb_audio_t   * audio;
     hb_subtitle_t * subtitle;
     unsigned int subtitle_highest = 0;
-    unsigned int subtitle_highest_id = 0;
-    unsigned int subtitle_lowest = -1;
+    unsigned int subtitle_lowest = 0;
     unsigned int subtitle_lowest_id = 0;
     unsigned int subtitle_forced_id = 0;
+    unsigned int subtitle_forced_hits = 0;
     unsigned int subtitle_hit = 0;
 
     title = job->title;
@@ -505,308 +567,458 @@ static void do_job( hb_job_t * job )
 
     hb_log( "starting job" );
 
+    /* Look for the scanned subtitle in the existing subtitle list
+     * select_subtitle implies that we did a scan. */
+    if( !job->indepth_scan && interjob->select_subtitle )
+    {
+        /* Disable forced subtitles if we didn't find any in the scan, so that
+         * we display normal subtitles instead. */
+        if( interjob->select_subtitle->config.force &&
+            interjob->select_subtitle->forced_hits == 0 )
+        {
+            interjob->select_subtitle->config.force = 0;
+        }
+        for( i = 0; i < hb_list_count( job->list_subtitle ); )
+        {
+            subtitle = hb_list_item( job->list_subtitle, i );
+            if( subtitle )
+            {
+                /* Remove the scanned subtitle from the list if
+                 * it would result in:
+                 * - an emty track (forced and no forced hits)
+                 * - an identical, duplicate subtitle track:
+                 *   -> both (or neither) are forced 
+                 *   -> subtitle is not forced but all its hits are forced */
+                if( ( interjob->select_subtitle->id == subtitle->id ) &&
+                    ( ( subtitle->config.force &&
+                        interjob->select_subtitle->forced_hits == 0 ) ||
+                      ( subtitle->config.force == interjob->select_subtitle->config.force ) ||
+                      ( !subtitle->config.force &&
+                        interjob->select_subtitle->hits == interjob->select_subtitle->forced_hits ) ) )
+                {
+                    hb_list_rem( job->list_subtitle, subtitle );
+                    free( subtitle );
+                    continue;
+                }
+                /* Adjust output track number, in case we removed one.
+                 * Output tracks sadly still need to be in sequential order.
+                 * Note: out.track starts at 1, i starts at 0, and track 1 is interjob->select_subtitle */
+                subtitle->out_track = ++i + 1;
+            }
+            else
+            {
+                // avoid infinite loop is subtitle == NULL
+                i++;
+            }
+        }
+
+        /* Add the subtitle that we found on the subtitle scan pass.
+         *
+         * Make sure it's the first subtitle in the list so that it becomes the
+         * first burned subtitle (explicitly or after sanitizing) - which should
+         * ensure that it doesn't get dropped. */
+        interjob->select_subtitle->out_track = 1;
+        if (job->pass == 0 || job->pass == 2)
+        {
+            // final pass, interjob->select_subtitle is no longer needed
+            hb_list_insert(job->list_subtitle, 0, interjob->select_subtitle);
+            interjob->select_subtitle = NULL;
+        }
+        else
+        {
+            // this is not the final pass, so we need to copy it instead
+            hb_list_insert(job->list_subtitle, 0, hb_subtitle_copy(interjob->select_subtitle));
+        }
+    }
+
+    if ( !job->indepth_scan )
+    {
+        // Sanitize subtitles
+        uint8_t one_burned = 0;
+        for( i = 0; i < hb_list_count( job->list_subtitle ); )
+        {
+            subtitle = hb_list_item( job->list_subtitle, i );
+            if ( subtitle->config.dest == RENDERSUB )
+            {
+                if ( one_burned )
+                {
+                    if ( !hb_subtitle_can_pass(subtitle->source, job->mux) )
+                    {
+                        hb_log( "More than one subtitle burn-in requested, dropping track %d.", i );
+                        hb_list_rem( job->list_subtitle, subtitle );
+                        free( subtitle );
+                        continue;
+                    }
+                    else
+                    {
+                        hb_log( "More than one subtitle burn-in requested.  Changing track %d to soft subtitle.", i );
+                        subtitle->config.dest = PASSTHRUSUB;
+                    }
+                }
+                else if ( !hb_subtitle_can_burn(subtitle->source) )
+                {
+                    hb_log( "Subtitle burn-in requested and input track can not be rendered.  Changing track %d to soft subtitle.", i );
+                    subtitle->config.dest = PASSTHRUSUB;
+                }
+                else
+                {
+                    one_burned = 1;
+                }
+            }
+
+            if ( subtitle->config.dest == PASSTHRUSUB &&
+                 !hb_subtitle_can_pass(subtitle->source, job->mux) )
+            {
+                if ( !one_burned )
+                {
+                    hb_log( "Subtitle pass-thru requested and input track is not compatible with container.  Changing track %d to burned-in subtitle.", i );
+                    subtitle->config.dest = RENDERSUB;
+                    subtitle->config.default_track = 0;
+                    one_burned = 1;
+                }
+                else
+                {
+                    hb_log( "Subtitle pass-thru requested and input track is not compatible with container.  One track already burned, dropping track %d.", i );
+                    hb_list_rem( job->list_subtitle, subtitle );
+                    free( subtitle );
+                    continue;
+                }
+            }
+            /* Adjust output track number, in case we removed one.
+             * Output tracks sadly still need to be in sequential order.
+             * Note: out.track starts at 1, i starts at 0 */
+            subtitle->out_track = ++i;
+        }
+        if ( one_burned )
+        {
+            hb_filter_object_t * filter;
+
+            // Add subtitle rendering filter
+            // Note that if the filter is already in the filter chain, this
+            // has no effect. Note also that this means the front-end is
+            // not required to add the subtitle rendering filter since
+            // we will always try to do it here.
+            filter = hb_filter_init(HB_FILTER_RENDER_SUB);
+            hb_add_filter( job, filter, NULL );
+        }
+    }
+
+    // Filters have an effect on settings.
+    // So initialize the filters and update the job.
+    if( job->list_filter && hb_list_count( job->list_filter ) )
+    {
+        hb_filter_init_t init;
+
+        init.job = job;
+        init.pix_fmt = AV_PIX_FMT_YUV420P;
+        init.width = title->width;
+        init.height = title->height;
+        init.par_width = job->anamorphic.par_width;
+        init.par_height = job->anamorphic.par_height;
+        memcpy(init.crop, job->crop, sizeof(int[4]));
+        init.vrate_base = job->vrate_base;
+        init.vrate = job->vrate;
+        init.pfr_vrate_base = job->pfr_vrate_base;
+        init.pfr_vrate = job->pfr_vrate;
+        init.cfr = 0;
+        for( i = 0; i < hb_list_count( job->list_filter ); )
+        {
+            hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+            if( filter->init( filter, &init ) )
+            {
+                hb_log( "Failure to initialise filter '%s', disabling",
+                        filter->name );
+                hb_list_rem( job->list_filter, filter );
+                hb_filter_close( &filter );
+                continue;
+            }
+            i++;
+        }
+        job->width = init.width;
+        job->height = init.height;
+        job->anamorphic.par_width = init.par_width;
+        job->anamorphic.par_height = init.par_height;
+        memcpy(job->crop, init.crop, sizeof(int[4]));
+        job->vrate_base = init.vrate_base;
+        job->vrate = init.vrate;
+        job->pfr_vrate_base = init.pfr_vrate_base;
+        job->pfr_vrate = init.pfr_vrate;
+        job->cfr = init.cfr;
+    }
+
     if( job->anamorphic.mode )
     {
-        hb_set_anamorphic_size(job, &job->width, &job->height, &job->anamorphic.par_width, &job->anamorphic.par_height);
-
+        /* While x264 is smart enough to reduce fractions on its own, libavcodec and
+         * the MacGUI need some help with the math, so lose superfluous factors. */
+        hb_reduce( &job->anamorphic.par_width, &job->anamorphic.par_height,
+                    job->anamorphic.par_width,  job->anamorphic.par_height );
         if( job->vcodec & HB_VCODEC_FFMPEG_MASK )
         {
             /* Just to make working with ffmpeg even more fun,
-               lavc's MPEG-4 encoder can't handle PAR values >= 255,
-               even though AVRational does. Adjusting downwards
-               distorts the display aspect slightly, but such is life. */
-            while ((job->anamorphic.par_width & ~0xFF) ||
-                   (job->anamorphic.par_height & ~0xFF))
+             * lavc's MPEG-4 encoder can't handle PAR values >= 255,
+             * even though AVRational does. Adjusting downwards
+             * distorts the display aspect slightly, but such is life. */
+            while( ( job->anamorphic.par_width  & ~0xFF ) ||
+                   ( job->anamorphic.par_height & ~0xFF ) )
             {
-                job->anamorphic.par_width >>= 1;
+                job->anamorphic.par_width  >>= 1;
                 job->anamorphic.par_height >>= 1;
+                hb_reduce( &job->anamorphic.par_width, &job->anamorphic.par_height,
+                            job->anamorphic.par_width,  job->anamorphic.par_height );
             }
-            hb_reduce( &job->anamorphic.par_width, &job->anamorphic.par_height, job->anamorphic.par_width, job->anamorphic.par_height );
         }
     }
     
-    /* Keep width and height within these boundaries,
-       but ignore for anamorphic. For "loose" anamorphic encodes,
-       this stuff is covered in the pixel_ratio section above.    */
-    if ( job->maxHeight && ( job->height > job->maxHeight ) && ( !job->anamorphic.mode ) )
-    {
-        job->height = job->maxHeight;
-        hb_fix_aspect( job, HB_KEEP_HEIGHT );
-        hb_log( "Height out of bounds, scaling down to %i", job->maxHeight );
-        hb_log( "New dimensions %i * %i", job->width, job->height );
-    }
-    if ( job->maxWidth && ( job->width > job->maxWidth ) && ( !job->anamorphic.mode ) )
-    {
-        job->width = job->maxWidth;
-        hb_fix_aspect( job, HB_KEEP_WIDTH );
-        hb_log( "Width out of bounds, scaling down to %i", job->maxWidth );
-        hb_log( "New dimensions %i * %i", job->width, job->height );
-    }
-
-    if ( job->cfr == 0 )
-    {
-        /* Ensure we're using "Same as source" FPS */
-        job->vrate = title->rate;
-        job->vrate_base = title->rate_base;
-    }
-    else if ( job->cfr == 2 )
-    {
-        job->pfr_vrate = job->vrate;
-        job->pfr_vrate_base = job->vrate_base;
-
-        // Ensure we're using "Same as source" FPS, with peak set by pfr_vrate_* 
-        // For PFR, we want the framerate based on the source's actual 
-        // framerate, unless it's higher than the specified peak framerate. 
-        double source_fps = (double)job->title->rate / job->title->rate_base;
-        double peak_l_fps = (double)job->vrate / job->vrate_base;
-        if ( source_fps < peak_l_fps )
-        {
-            job->vrate_base = title->rate_base;
-            job->vrate = title->rate;
-        }
-    }
-
     job->fifo_mpeg2  = hb_fifo_init( FIFO_LARGE, FIFO_LARGE_WAKE );
     job->fifo_raw    = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
     job->fifo_sync   = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
-    job->fifo_render = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
     job->fifo_mpeg4  = hb_fifo_init( FIFO_LARGE, FIFO_LARGE_WAKE );
+    job->fifo_render = NULL; // Attached to filter chain
 
-    /*
-     * Audio fifos must be initialized before sync
-     */
-    if( !job->indepth_scan )
+    /* Audio fifos must be initialized before sync */
+    if (!job->indepth_scan)
     {
-    // apply Auto Passthru settings
-    hb_autopassthru_apply_settings( job, title );
-    // sanitize audio settings
-    for( i = 0; i < hb_list_count( title->list_audio ); )
-    {
-        audio = hb_list_item( title->list_audio, i );
-        if( audio->config.out.codec == HB_ACODEC_AUTO_PASS )
+        // apply Auto Passthru settings
+        hb_autopassthru_apply_settings(job);
+        // sanitize audio settings
+        for (i = 0; i < hb_list_count(job->list_audio);)
         {
-            // Auto Passthru should have been handled above
-            // remove track to avoid a crash
-            hb_log( "Auto Passthru error, dropping track %d",
-                    audio->config.out.track  );
-            hb_list_rem( title->list_audio, audio );
-            free( audio );
-            continue;
-        }
-        if( ( audio->config.out.codec & HB_ACODEC_PASS_FLAG ) &&
-           !( audio->config.in.codec & audio->config.out.codec & HB_ACODEC_PASS_MASK ) )
-        {
-            hb_log( "Passthru requested and input codec is not the same as output codec for track %d, dropping track",
-                    audio->config.out.track );
-            hb_list_rem( title->list_audio, audio );
-            free( audio );
-            continue;
-        }
-        if( !(audio->config.out.codec & HB_ACODEC_PASS_FLAG) )
-        {
-            if( audio->config.out.samplerate > 48000 )
+            audio = hb_list_item(job->list_audio, i);
+            if (audio->config.out.codec == HB_ACODEC_AUTO_PASS)
             {
-                hb_log( "Sample rate %d not supported. Down-sampling to 48kHz.",
-                        audio->config.out.samplerate );
-                audio->config.out.samplerate = 48000;
+                // Auto Passthru should have been handled above
+                // remove track to avoid a crash
+                hb_log("Auto Passthru error, dropping track %d",
+                       audio->config.out.track);
+                hb_list_rem(job->list_audio, audio);
+                free(audio);
+                continue;
             }
-            // if not specified, set to same as input
-            if( audio->config.out.samplerate < 0 )
+            if ((audio->config.out.codec & HB_ACODEC_PASS_FLAG) &&
+                !(audio->config.in.codec &
+                  audio->config.out.codec & HB_ACODEC_PASS_MASK))
             {
+                hb_log("Passthru requested and input codec is not the same as output codec for track %d, dropping track",
+                       audio->config.out.track);
+                hb_list_rem(job->list_audio, audio);
+                free(audio);
+                continue;
+            }
+            /* Adjust output track number, in case we removed one.
+             * Output tracks sadly still need to be in sequential order.
+             * Note: out.track starts at 1, i starts at 0 */
+            audio->config.out.track = ++i;
+        }
+
+        int best_mixdown    = 0;
+        int best_bitrate    = 0;
+        int best_samplerate = 0;
+
+        for (i = 0; i < hb_list_count(job->list_audio); i++)
+        {
+            audio = hb_list_item(job->list_audio, i);
+
+            /* set up the audio work structures */
+            audio->priv.fifo_raw  = hb_fifo_init(FIFO_SMALL, FIFO_SMALL_WAKE);
+            audio->priv.fifo_sync = hb_fifo_init(FIFO_SMALL, FIFO_SMALL_WAKE);
+            audio->priv.fifo_out  = hb_fifo_init(FIFO_LARGE, FIFO_LARGE_WAKE);
+            audio->priv.fifo_in   = hb_fifo_init(FIFO_LARGE, FIFO_LARGE_WAKE);
+
+            /* Passthru audio, nothing to sanitize here */
+            if (audio->config.out.codec & HB_ACODEC_PASS_FLAG)
+                continue;
+
+            /* Vorbis language information */
+            if (audio->config.out.codec == HB_ACODEC_VORBIS)
+                audio->priv.config.vorbis.language = audio->config.lang.simple;
+
+            /* sense-check the requested samplerate */
+            if (audio->config.out.samplerate < 0)
+            {
+                // if not specified, set to same as input
                 audio->config.out.samplerate = audio->config.in.samplerate;
             }
-        }
-        if( audio->config.out.codec == HB_ACODEC_CA_HAAC )
-        {
-            if( !encca_haac_available() )
+            best_samplerate =
+                hb_get_best_samplerate(audio->config.out.codec,
+                                       audio->config.out.samplerate, NULL);
+            if (best_samplerate != audio->config.out.samplerate)
             {
-                // user chose Core Audio HE-AAC but the encoder is unavailable
-                hb_log( "Core Audio HE-AAC unavailable. Using Core Audio AAC for track %d",
-                        audio->config.out.track );
-                audio->config.out.codec = HB_ACODEC_CA_AAC;
-            }
-            else if( audio->config.out.samplerate < 32000 )
-            {
-                // Core Audio HE-AAC doesn't support samplerates < 32 kHz
-                hb_log( "Sample rate %d not supported (ca_haac). Using 32kHz for track %d",
-                        audio->config.out.samplerate, audio->config.out.track );
-                audio->config.out.samplerate = 32000;
-            }
-        }
-        /* Adjust output track number, in case we removed one.
-         * Output tracks sadly still need to be in sequential order.
-         * Note: out.track starts at 1, i starts at 0 */
-        audio->config.out.track = ++i;
-    }
-
-    int requested_mixdown = 0;
-    int requested_mixdown_index = 0;
-    int best_mixdown = 0;
-    int best_bitrate = 0;
-
-    for( i = 0; i < hb_list_count( title->list_audio ); i++ )
-    {
-        audio = hb_list_item( title->list_audio, i );
-
-        /* sense-check the requested mixdown */
-        if( audio->config.out.mixdown <= 0 &&
-            !( audio->config.out.codec & HB_ACODEC_PASS_FLAG ) )
-        {
-            /*
-             * Mixdown wasn't specified and this is not pass-through,
-             * set a default mixdown
-             */
-            audio->config.out.mixdown = hb_get_default_mixdown( audio->config.out.codec,
-                                                                audio->config.in.channel_layout );
-            for (j = 0; j < hb_audio_mixdowns_count; j++)
-            {
-                if (hb_audio_mixdowns[j].amixdown == audio->config.out.mixdown)
+                int ii;
+                for (ii = 0; ii < hb_audio_rates_count; ii++)
                 {
-                    hb_log("work: mixdown not specified, track %i setting mixdown %s", audio->config.out.track, hb_audio_mixdowns[j].human_readable_name);
-                    break;
+                    if (best_samplerate == hb_audio_rates[ii].rate)
+                    {
+                        hb_log("work: sanitizing track %d unsupported samplerate %d Hz to %s kHz",
+                               audio->config.out.track, audio->config.out.samplerate,
+                               hb_audio_rates[ii].string);
+                        break;
+                    }
+                }
+                audio->config.out.samplerate = best_samplerate;
+            }
+
+            /* sense-check the requested mixdown */
+            if (audio->config.out.mixdown <= HB_AMIXDOWN_NONE)
+            {
+                /* Mixdown not specified, set the default mixdown */
+                audio->config.out.mixdown =
+                    hb_get_default_mixdown(audio->config.out.codec,
+                                           audio->config.in.channel_layout);
+                for (j = 0; j < hb_audio_mixdowns_count; j++)
+                {
+                    if (hb_audio_mixdowns[j].amixdown == audio->config.out.mixdown)
+                    {
+                        hb_log("work: mixdown not specified, track %d setting mixdown %s",
+                               audio->config.out.track,
+                               hb_audio_mixdowns[j].human_readable_name);
+                        break;
+                    }
                 }
             }
-        }
-
-        /* log the requested mixdown */
-        for (j = 0; j < hb_audio_mixdowns_count; j++) {
-            if (hb_audio_mixdowns[j].amixdown == audio->config.out.mixdown) {
-                requested_mixdown = audio->config.out.mixdown;
-                requested_mixdown_index = j;
-                break;
-            }
-        }
-
-        best_mixdown = hb_get_best_mixdown( audio->config.out.codec,
-                                            audio->config.in.channel_layout, 0 );
-
-        if ( audio->config.out.mixdown > best_mixdown )
-        {
-            audio->config.out.mixdown = best_mixdown;
-        }
-
-        if ( audio->config.out.mixdown != requested_mixdown )
-        {
-            /* log the output mixdown */
-            for (j = 0; j < hb_audio_mixdowns_count; j++)
+            else
             {
-                if (hb_audio_mixdowns[j].amixdown == audio->config.out.mixdown)
+                best_mixdown =
+                    hb_get_best_mixdown(audio->config.out.codec,
+                                        audio->config.in.channel_layout,
+                                        audio->config.out.mixdown);
+                if (audio->config.out.mixdown != best_mixdown)
                 {
-                    hb_log("work: sanitizing track %i mixdown %s to %s", 
-                        audio->config.out.track, 
-                        hb_audio_mixdowns[requested_mixdown_index].human_readable_name, 
-                        hb_audio_mixdowns[j].human_readable_name);
-                    break;
+                    int prev_mix_idx = 0, best_mix_idx = 0;
+                    for (j = 0; j < hb_audio_mixdowns_count; j++)
+                    {
+                        if (hb_audio_mixdowns[j].amixdown == audio->config.out.mixdown)
+                        {
+                            prev_mix_idx = j;
+                        }
+                        else if (hb_audio_mixdowns[j].amixdown == best_mixdown)
+                        {
+                            best_mix_idx = j;
+                        }
+                    }
+                    /* log the output mixdown */
+                    hb_log("work: sanitizing track %d mixdown %s to %s",
+                           audio->config.out.track,
+                           hb_audio_mixdowns[prev_mix_idx].human_readable_name,
+                           hb_audio_mixdowns[best_mix_idx].human_readable_name);
+                    audio->config.out.mixdown = best_mixdown;
                 }
             }
-        }
-        
-        /* sense-check the requested compression level */
-        if( audio->config.out.compression_level < 0 )
-        {
-            audio->config.out.compression_level =
-                hb_get_default_audio_compression( audio->config.out.codec );
-            if( audio->config.out.compression_level >= 0 )
-            {
-                hb_log( "work: compression level not specified, track %d setting compression level %.2f",
-                    audio->config.out.track, audio->config.out.compression_level );
-            }
-        }
 
-        if( audio->config.out.compression_level >= 0 )
-        {
-            float best_compression = hb_get_best_audio_compression( 
-                                        audio->config.out.codec, 
-                                        audio->config.out.compression_level );
-            if( best_compression != audio->config.out.compression_level )
+            /* sense-check the requested compression level */
+            if (audio->config.out.compression_level < 0)
             {
-                if( best_compression == -1 )
+                audio->config.out.compression_level =
+                    hb_get_default_audio_compression(audio->config.out.codec);
+                if (audio->config.out.compression_level >= 0)
                 {
-                    hb_log( "work: compression levels not supported by codec" );
+                    hb_log("work: compression level not specified, track %d setting compression level %.2f",
+                           audio->config.out.track,
+                           audio->config.out.compression_level);
+                }
+            }
+            else
+            {
+                float best_compression =
+                    hb_get_best_audio_compression(audio->config.out.codec,
+                                                  audio->config.out.compression_level);
+                if (best_compression != audio->config.out.compression_level)
+                {
+                    if (best_compression == -1)
+                    {
+                        hb_log("work: track %d, compression level not supported by codec",
+                               audio->config.out.track);
+                    }
+                    else
+                    {
+                        hb_log("work: sanitizing track %d compression level %.2f to %.2f",
+                               audio->config.out.track,
+                               audio->config.out.compression_level,
+                               best_compression);
+                    }
+                    audio->config.out.compression_level = best_compression;
+                }
+            }
+
+            /* sense-check the requested quality */
+            if (audio->config.out.quality != HB_INVALID_AUDIO_QUALITY)
+            {
+                float best_quality =
+                    hb_get_best_audio_quality(audio->config.out.codec,
+                                              audio->config.out.quality);
+                if (best_quality != audio->config.out.quality)
+                {
+                    if (best_quality == HB_INVALID_AUDIO_QUALITY)
+                    {
+                        hb_log("work: track %d, quality mode not supported by codec",
+                               audio->config.out.track);
+                    }
+                    else
+                    {
+                        hb_log("work: sanitizing track %d quality %.2f to %.2f",
+                               audio->config.out.track,
+                               audio->config.out.quality, best_quality);
+                    }
+                    audio->config.out.quality = best_quality;
+                }
+            }
+
+            /* sense-check the requested bitrate */
+            if (audio->config.out.quality == HB_INVALID_AUDIO_QUALITY)
+            {
+                if (audio->config.out.bitrate <= 0)
+                {
+                    /* Bitrate not specified, set the default bitrate */
+                    audio->config.out.bitrate =
+                        hb_get_default_audio_bitrate(audio->config.out.codec,
+                                                     audio->config.out.samplerate,
+                                                     audio->config.out.mixdown);
+                    if (audio->config.out.bitrate > 0)
+                    {
+                        hb_log("work: bitrate not specified, track %d setting bitrate %d Kbps",
+                               audio->config.out.track,
+                               audio->config.out.bitrate);
+                    }
                 }
                 else
                 {
-                    hb_log( "work: sanitizing track %d audio compression level %.2f to %.2f", 
-                            audio->config.out.track,
-                            audio->config.out.compression_level,
-                            best_compression );
-                }
-                audio->config.out.compression_level = best_compression;
-            }
-        }
-        
-        /* sense-check the requested quality */
-        if( audio->config.out.quality != HB_INVALID_AUDIO_QUALITY )
-        {
-            float best_quality = hb_get_best_audio_quality( 
-                    audio->config.out.codec, audio->config.out.quality );
-            if( best_quality != audio->config.out.quality )
-            {
-                if( best_quality == HB_INVALID_AUDIO_QUALITY )
-                {
-                    hb_log( "work: quality mode not supported by codec" );
-                }
-                else
-                {
-                    hb_log( "work: sanitizing track %d audio quality %.2f to %.2f", 
-                            audio->config.out.track,
-                            audio->config.out.quality,
-                            best_quality );
-                }
-                audio->config.out.quality = best_quality;
-            }
-        }
-        
-        /* sense-check the requested bitrate */
-        if( audio->config.out.quality == HB_INVALID_AUDIO_QUALITY )
-        {
-            if( audio->config.out.bitrate <= 0 )
-            {
-                /*
-                 * Bitrate wasn't specified and this is not pass-through,
-                 * set a default bitrate
-                 */
-                audio->config.out.bitrate = 
-                    hb_get_default_audio_bitrate( audio->config.out.codec,
+                    best_bitrate =
+                        hb_get_best_audio_bitrate(audio->config.out.codec,
+                                                  audio->config.out.bitrate,
                                                   audio->config.out.samplerate,
-                                                  audio->config.out.mixdown );
-                
-                if( audio->config.out.bitrate > 0 )
-                {
-                    hb_log( "work: bitrate not specified, track %d setting bitrate %d",
-                        audio->config.out.track, audio->config.out.bitrate );
+                                                  audio->config.out.mixdown);
+                    if (best_bitrate > 0 &&
+                        best_bitrate != audio->config.out.bitrate)
+                    {
+                        /* log the output bitrate */
+                        hb_log("work: sanitizing track %d bitrate %d to %d Kbps",
+                               audio->config.out.track,
+                               audio->config.out.bitrate, best_bitrate);
+                    }
+                    audio->config.out.bitrate = best_bitrate;
                 }
             }
-            
-            /* log the requested bitrate */
-            best_bitrate = hb_get_best_audio_bitrate( audio->config.out.codec, 
-                                                      audio->config.out.bitrate,
-                                                      audio->config.out.samplerate,
-                                                      audio->config.out.mixdown );
-            
-            if ( audio->config.out.bitrate != best_bitrate && 
-                 best_bitrate > 0 )
+
+            /* sense-check the requested dither */
+            if (hb_audio_dither_is_supported(audio->config.out.codec))
             {
-                /* log the output bitrate */
-                hb_log( "work: sanitizing track %d audio bitrate %d to %d", 
-                        audio->config.out.track,
-                        audio->config.out.bitrate,
-                        best_bitrate );
+                if (audio->config.out.dither_method ==
+                    hb_audio_dither_get_default())
+                {
+                    /* "auto", enable with default settings */
+                    audio->config.out.dither_method =
+                        hb_audio_dither_get_default_method();
+                }
             }
-            audio->config.out.bitrate = best_bitrate;
+            else if (audio->config.out.dither_method !=
+                     hb_audio_dither_get_default())
+            {
+                /* specific dither requested but dithering not supported */
+                hb_log("work: track %d, dithering not supported by codec",
+                       audio->config.out.track);
+            }
         }
-
-        if (audio->config.out.codec == HB_ACODEC_VORBIS)
-            audio->priv.config.vorbis.language = audio->config.lang.simple;
-
-        /* set up the audio work structures */
-        audio->priv.fifo_raw  = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
-        audio->priv.fifo_sync = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
-        audio->priv.fifo_out  = hb_fifo_init( FIFO_LARGE, FIFO_LARGE_WAKE );
-        audio->priv.fifo_in   = hb_fifo_init( FIFO_LARGE, FIFO_LARGE_WAKE );
     }
 
-    }
     /* Synchronization */
     sync = hb_sync_init( job );
 
@@ -816,7 +1028,7 @@ static void do_job( hb_job_t * job )
     if (vcodec == WORK_DECMPEG2)
     {
         vcodec = WORK_DECAVCODECV;
-        title->video_codec_param = CODEC_ID_MPEG2VIDEO;
+        title->video_codec_param = AV_CODEC_ID_MPEG2VIDEO;
     }
 #endif
     hb_list_add( job->list_work, ( w = hb_get_work( vcodec ) ) );
@@ -824,100 +1036,9 @@ static void do_job( hb_job_t * job )
     w->fifo_in  = job->fifo_mpeg2;
     w->fifo_out = job->fifo_raw;
 
-    /* Video renderer */
-    hb_list_add( job->list_work, ( w = hb_get_work( WORK_RENDER ) ) );
-    w->fifo_in  = job->fifo_sync;
-    if( !job->indepth_scan )
-        w->fifo_out = job->fifo_render;
-    else
-        w->fifo_out = NULL;
-
-    if( !job->indepth_scan )
+    for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
     {
-
-        /* Video encoder */
-        switch( job->vcodec )
-        {
-        case HB_VCODEC_FFMPEG_MPEG4:
-            w = hb_get_work( WORK_ENCAVCODEC );
-            w->codec_param = CODEC_ID_MPEG4;
-            break;
-        case HB_VCODEC_FFMPEG_MPEG2:
-            w = hb_get_work( WORK_ENCAVCODEC );
-            w->codec_param = CODEC_ID_MPEG2VIDEO;
-            break;
-        case HB_VCODEC_X264:
-            w = hb_get_work( WORK_ENCX264 );
-            break;
-        case HB_VCODEC_THEORA:
-            w = hb_get_work( WORK_ENCTHEORA );
-            break;
-        }
-        w->fifo_in  = job->fifo_render;
-        w->fifo_out = job->fifo_mpeg4;
-        w->config   = &job->config;
-
-        hb_list_add( job->list_work, w );
-    }
-
-    /*
-     * Look for the scanned subtitle in the existing subtitle list
-     * select_subtitle implies that we did a scan.
-     */
-    if ( !job->indepth_scan && interjob->select_subtitle &&
-         ( job->pass == 0 || job->pass == 2 ) )
-    {
-        /*
-         * Disable forced subtitles if we didn't find any in the scan
-         * so that we display normal subtitles instead.
-         */
-        if( interjob->select_subtitle->config.force && 
-            interjob->select_subtitle->forced_hits == 0 )
-        {
-            interjob->select_subtitle->config.force = 0;
-        }
-        for( i=0; i < hb_list_count(title->list_subtitle); i++ )
-        {
-            subtitle =  hb_list_item( title->list_subtitle, i );
-
-            if( subtitle )
-            {
-                /*
-                * Remove the scanned subtitle from the subtitle list if
-                * it would result in an identical duplicate subtitle track
-                * or an emty track (forced and no forced hits).
-                */
-                if( ( interjob->select_subtitle->id == subtitle->id ) &&
-                    ( ( interjob->select_subtitle->forced_hits == 0 &&
-                        subtitle->config.force ) ||
-                    ( subtitle->config.force == interjob->select_subtitle->config.force ) ) )
-                {
-                    *subtitle = *(interjob->select_subtitle);
-                    free( interjob->select_subtitle );
-                    interjob->select_subtitle = NULL;
-                    break;
-                }
-            }
-        }
-
-        if( interjob->select_subtitle )
-        {
-            /*
-             * Its not in the existing list
-             *
-             * Must be second pass of a two pass with subtitle scan enabled, so
-             * add the subtitle that we found on the first pass for use in this
-             * pass.
-             */
-            hb_list_add( title->list_subtitle, interjob->select_subtitle );
-            interjob->select_subtitle = NULL;
-        }
-    }
-
-
-    for( i=0; i < hb_list_count(title->list_subtitle); i++ )
-    {
-        subtitle =  hb_list_item( title->list_subtitle, i );
+        subtitle = hb_list_item( job->list_subtitle, i );
 
         if( subtitle )
         {
@@ -934,68 +1055,72 @@ static void do_job( hb_job_t * job )
             subtitle->fifo_sync = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
             subtitle->fifo_out  = hb_fifo_init( FIFO_SMALL, FIFO_SMALL_WAKE );
 
-            if( (!job->indepth_scan || job->select_subtitle_config.force) && 
-                subtitle->source == VOBSUB ) {
-                /*
-                 * Don't add threads for subtitles when we are scanning, unless
-                 * looking for forced subtitles.
-                 */
-                w = hb_get_work( WORK_DECVOBSUB );
-                w->fifo_in  = subtitle->fifo_in;
-                w->fifo_out = subtitle->fifo_raw;
-                w->subtitle = subtitle;
-                hb_list_add( job->list_work, w );
-            }
-
-            if( !job->indepth_scan && subtitle->source == CC608SUB )
-            {
-                w = hb_get_work( WORK_DECCC608 );
-                w->fifo_in  = subtitle->fifo_in;
-                w->fifo_out = subtitle->fifo_raw;
-                hb_list_add( job->list_work, w );
-            }
-
-            if( !job->indepth_scan && subtitle->source == SRTSUB )
-            {
-                w = hb_get_work( WORK_DECSRTSUB );
-                w->fifo_in  = subtitle->fifo_in;
-                w->fifo_out = subtitle->fifo_raw;
-                w->subtitle = subtitle;
-                hb_list_add( job->list_work, w );
-            }
-            
-            if( !job->indepth_scan && subtitle->source == UTF8SUB )
-            {
-                w = hb_get_work( WORK_DECUTF8SUB );
-                w->fifo_in  = subtitle->fifo_in;
-                w->fifo_out = subtitle->fifo_raw;
-                hb_list_add( job->list_work, w );
-            }
-            
-            if( !job->indepth_scan && subtitle->source == TX3GSUB )
-            {
-                w = hb_get_work( WORK_DECTX3GSUB );
-                w->fifo_in  = subtitle->fifo_in;
-                w->fifo_out = subtitle->fifo_raw;
-                hb_list_add( job->list_work, w );
-            }
-            
-            if( !job->indepth_scan && subtitle->source == SSASUB )
-            {
-                w = hb_get_work( WORK_DECSSASUB );
-                w->fifo_in  = subtitle->fifo_in;
-                w->fifo_out = subtitle->fifo_raw;
-                w->subtitle = subtitle;
-                hb_list_add( job->list_work, w );
-            }
+            w = hb_get_work( subtitle->codec );
+            w->fifo_in = subtitle->fifo_in;
+            w->fifo_out = subtitle->fifo_raw;
+            w->subtitle = subtitle;
+            hb_list_add( job->list_work, w );
         }
     }
 
+    /* Set up the video filter fifo pipeline */
     if( !job->indepth_scan )
     {
-        for( i = 0; i < hb_list_count( title->list_audio ); i++ )
+        if( job->list_filter )
         {
-            audio = hb_list_item( title->list_audio, i );
+            int filter_count = hb_list_count( job->list_filter );
+            int i;
+            hb_fifo_t * fifo_in = job->fifo_sync;
+
+            for( i = 0; i < filter_count; i++ )
+            {
+                hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+
+                filter->fifo_in = fifo_in;
+                filter->fifo_out = hb_fifo_init( FIFO_MINI, FIFO_MINI_WAKE );
+                fifo_in = filter->fifo_out;
+            }
+            job->fifo_render = fifo_in;
+        }
+        else if ( !job->list_filter )
+        {
+            hb_log("work: Internal Error: no filters");
+            job->fifo_render = NULL;
+        }
+
+        /* Video encoder */
+        switch( job->vcodec )
+        {
+        case HB_VCODEC_FFMPEG_MPEG4:
+            w = hb_get_work( WORK_ENCAVCODEC );
+            w->codec_param = AV_CODEC_ID_MPEG4;
+            break;
+        case HB_VCODEC_FFMPEG_MPEG2:
+            w = hb_get_work( WORK_ENCAVCODEC );
+            w->codec_param = AV_CODEC_ID_MPEG2VIDEO;
+            break;
+        case HB_VCODEC_X264:
+            w = hb_get_work( WORK_ENCX264 );
+            break;
+        case HB_VCODEC_THEORA:
+            w = hb_get_work( WORK_ENCTHEORA );
+            break;
+        }
+        // Handle case where there are no filters.  
+        // This really should never happen.
+        if ( job->fifo_render )
+            w->fifo_in  = job->fifo_render;
+        else
+            w->fifo_in  = job->fifo_sync;
+
+        w->fifo_out = job->fifo_mpeg4;
+        w->config   = &job->config;
+
+        hb_list_add( job->list_work, w );
+
+        for( i = 0; i < hb_list_count( job->list_audio ); i++ )
+        {
+            audio = hb_list_item( job->list_audio, i );
 
             /*
             * Audio Decoder Thread
@@ -1052,7 +1177,6 @@ static void do_job( hb_job_t * job )
     hb_display_job_info( job );
 
     /* Init read & write threads */
-    hb_work_object_t *reader = hb_get_work(WORK_READER);
     if ( reader->init( reader, job ) )
     {
         hb_error( "Failure to initialise thread '%s'", reader->name );
@@ -1063,6 +1187,25 @@ static void do_job( hb_job_t * job )
     reader->thread = hb_thread_init( reader->name, ReadLoop, reader, HB_NORMAL_PRIORITY );
 
     job->done = 0;
+
+    if( job->list_filter && !job->indepth_scan )
+    {
+        int filter_count = hb_list_count( job->list_filter );
+        int i;
+
+        for( i = 0; i < filter_count; i++ )
+        {
+            hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+
+            if( !filter ) continue;
+
+            // Filters were initialized earlier, so we just need
+            // to start the filter's thread
+            filter->done = &job->done;
+            filter->thread = hb_thread_init( filter->name, filter_loop, filter,
+                                             HB_LOW_PRIORITY );
+        }
+    }
 
     /* Launch processing threads */
     for( i = 0; i < hb_list_count( job->list_work ); i++ )
@@ -1175,6 +1318,26 @@ cleanup:
     /* Stop the write thread (thread_close will block until the muxer finishes) */
     job->done = 1;
 
+    // Close render filter pipeline
+    if( job->list_filter )
+    {
+        int filter_count = hb_list_count( job->list_filter );
+        int i;
+
+        for( i = 0; i < filter_count; i++ )
+        {
+            hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+
+            if( !filter ) continue;
+
+            if( filter->thread != NULL )
+            {
+                hb_thread_close( &filter->thread );
+            }
+            filter->close( filter );
+        }
+    }
+
     /* Close work objects */
     while( ( w = hb_list_item( job->list_work, 0 ) ) )
     {
@@ -1201,11 +1364,11 @@ cleanup:
     hb_fifo_close( &job->fifo_mpeg2 );
     hb_fifo_close( &job->fifo_raw );
     hb_fifo_close( &job->fifo_sync );
-    hb_fifo_close( &job->fifo_render );
     hb_fifo_close( &job->fifo_mpeg4 );
 
-    for (i=0; i < hb_list_count(title->list_subtitle); i++) {
-        subtitle =  hb_list_item( title->list_subtitle, i);
+    for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
+    {
+        subtitle = hb_list_item( job->list_subtitle, i );
         if( subtitle )
         {
             hb_fifo_close( &subtitle->fifo_in );
@@ -1214,9 +1377,9 @@ cleanup:
             hb_fifo_close( &subtitle->fifo_out );
         }
     }
-    for( i = 0; i < hb_list_count( title->list_audio ); i++ )
+    for( i = 0; i < hb_list_count( job->list_audio ); i++ )
     {
-        audio = hb_list_item( title->list_audio, i );
+        audio = hb_list_item( job->list_audio, i );
         if( audio->priv.fifo_in != NULL )
             hb_fifo_close( &audio->priv.fifo_in );
         if( audio->priv.fifo_raw != NULL )
@@ -1227,103 +1390,108 @@ cleanup:
             hb_fifo_close( &audio->priv.fifo_out );
     }
 
-    if( job->indepth_scan )
+    if( job->list_filter )
     {
-        /*
-         * Before closing the title print out our subtitle stats if we need to
-         * Find the highest and lowest.
-         */
-        for( i=0; i < hb_list_count( title->list_subtitle ); i++ )
+        for( i = 0; i < hb_list_count( job->list_filter ); i++ )
         {
-            subtitle =  hb_list_item( title->list_subtitle, i );
-
-            hb_log( "Subtitle stream 0x%x '%s': %d hits (%d forced)",
-                    subtitle->id, subtitle->lang, subtitle->hits,
-                    subtitle->forced_hits );
-
-            if( subtitle->hits == 0 )
-                continue;
-
-            if( subtitle->hits > subtitle_highest )
-            {
-                subtitle_highest = subtitle->hits;
-                subtitle_highest_id = subtitle->id;
-            }
-
-            if( subtitle->hits < subtitle_lowest )
-            {
-                subtitle_lowest = subtitle->hits;
-                subtitle_lowest_id = subtitle->id;
-            }
-
-            if( subtitle->forced_hits > 0 )
-            {
-                if( subtitle_forced_id == 0 )
-                {
-                    subtitle_forced_id = subtitle->id;
-                }
-            }
-        }
-
-        
-        if( subtitle_forced_id )
-        {
-            /*
-             * If there are any subtitle streams with forced subtitles
-             * then select it in preference to the lowest.
-             */
-            subtitle_hit = subtitle_forced_id;
-            hb_log("Found a subtitle candidate id 0x%x (contains forced subs)",
-                   subtitle_hit);
-        } else if( subtitle_lowest < subtitle_highest )
-        {
-            /*
-             * OK we have more than one, and the lowest is lower,
-             * but how much lower to qualify for turning it on by
-             * default?
-             *
-             * Let's say 10% as a default.
-             */
-            if( subtitle_lowest < ( subtitle_highest * 0.1 ) )
-            {
-                subtitle_hit = subtitle_lowest_id;
-                hb_log( "Found a subtitle candidate id 0x%x",
-                        subtitle_hit );
-            } else {
-                hb_log( "No candidate subtitle detected during subtitle-scan");
-            }
+            hb_filter_object_t * filter = hb_list_item( job->list_filter, i );
+            hb_fifo_close( &filter->fifo_out );
         }
     }
 
     if( job->indepth_scan )
     {
-        for( i=0; i < hb_list_count( title->list_subtitle ); i++ )
+        /* Before closing the title print out our subtitle stats if we need to
+         * find the highest and lowest. */
+        for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
         {
-            subtitle =  hb_list_item( title->list_subtitle, i );
+            subtitle = hb_list_item( job->list_subtitle, i );
+
+            hb_log( "Subtitle track %d (id 0x%x) '%s': %d hits (%d forced)",
+                    subtitle->track, subtitle->id, subtitle->lang,
+                    subtitle->hits, subtitle->forced_hits );
+
+            if( subtitle->hits == 0 )
+                continue;
+
+            if( subtitle_highest < subtitle->hits )
+            {
+                subtitle_highest = subtitle->hits;
+            }
+
+            if( subtitle_lowest == 0 ||
+                subtitle_lowest > subtitle->hits )
+            {
+                subtitle_lowest = subtitle->hits;
+                subtitle_lowest_id = subtitle->id;
+            }
+
+            // pick the track with fewest forced hits
+            if( subtitle->forced_hits > 0 &&
+                ( subtitle_forced_hits == 0 ||
+                  subtitle_forced_hits > subtitle->forced_hits ) )
+            {
+                subtitle_forced_id = subtitle->id;
+                subtitle_forced_hits = subtitle->forced_hits;
+            }
+        }
+
+        if( subtitle_forced_id && job->select_subtitle_config.force )
+        {
+            /* If there is a subtitle stream with forced subtitles and forced-only
+             * is set, then select it in preference to the lowest. */
+            subtitle_hit = subtitle_forced_id;
+            hb_log( "Found a subtitle candidate with id 0x%x (contains forced subs)",
+                    subtitle_hit );
+        }
+        else if( subtitle_lowest > 0 &&
+                 subtitle_lowest < ( subtitle_highest * 0.1 ) )
+        {
+            /* OK we have more than one, and the lowest is lower,
+             * but how much lower to qualify for turning it on by
+             * default?
+             *
+             * Let's say 10% as a default. */
+            subtitle_hit = subtitle_lowest_id;
+            hb_log( "Found a subtitle candidate with id 0x%x", subtitle_hit );
+        }
+        else
+        {
+            hb_log( "No candidate detected during subtitle scan" );
+        }
+
+        for( i = 0; i < hb_list_count( job->list_subtitle ); i++ )
+        {
+            subtitle = hb_list_item( job->list_subtitle, i );
             if( subtitle->id == subtitle_hit )
             {
                 subtitle->config = job->select_subtitle_config;
-                hb_list_rem( title->list_subtitle, subtitle );
+                // Remove from list since we are taking ownership
+                // of the subtitle.
+                hb_list_rem( job->list_subtitle, subtitle );
                 interjob->select_subtitle = subtitle;
                 break;
             }
         }
     }
 
-    if( job->filters )
-    {
-        for( i = 0; i < hb_list_count( job->filters ); i++ )
-        {
-            hb_filter_object_t * filter = hb_list_item( job->filters, i );
-            hb_filter_close( &filter );
-        }
-        hb_list_close( &job->filters );
-    }
-
     hb_buffer_pool_free();
+    hb_job_close( &job );
+}
 
-    hb_title_close( &job->title );
-    free( job );
+static inline void copy_chapter( hb_buffer_t * dst, hb_buffer_t * src )
+{
+    // Propagate any chapter breaks for the worker if and only if the
+    // output frame has the same time stamp as the input frame (any
+    // worker that delays frames has to propagate the chapter marks itself
+    // and workers that move chapter marks to a different time should set
+    // 'src' to NULL so that this code won't generate spurious duplicates.)
+    if( src && dst && src->s.start == dst->s.start)
+    {
+        // restore log below to debug chapter mark propagation problems
+        //hb_log("work %s: Copying Chapter Break @ %"PRId64, w->name, src->s.start);
+        dst->s.new_chap = src->s.new_chap;
+    }
 }
 
 /**
@@ -1356,17 +1524,7 @@ static void work_loop( void * _w )
         buf_out = NULL;
         w->status = w->work( w, &buf_in, &buf_out );
 
-        // Propagate any chapter breaks for the worker if and only if the
-        // output frame has the same time stamp as the input frame (any
-        // worker that delays frames has to propagate the chapter marks itself
-        // and workers that move chapter marks to a different time should set
-        // 'buf_in' to NULL so that this code won't generate spurious duplicates.)
-        if( buf_in && buf_out && buf_in->new_chap && buf_in->start == buf_out->start)
-        {
-            // restore log below to debug chapter mark propagation problems
-            //hb_log("work %s: Copying Chapter Break @ %"PRId64, w->name, buf_in->start);
-            buf_out->new_chap = buf_in->new_chap;
-        }
+        copy_chapter( buf_out, buf_in );
 
         if( buf_in )
         {
@@ -1403,3 +1561,78 @@ static void work_loop( void * _w )
             hb_buffer_close( &buf_in );
     }
 }
+
+/**
+ * Performs the filter object's specific work function.
+ * Loops calling work function for associated filter object. 
+ * Sleeps when fifo is full.
+ * Monitors work done indicator.
+ * Exits loop when work indiactor is set.
+ * @param _w Handle to work object.
+ */
+static void filter_loop( void * _f )
+{
+    hb_filter_object_t * f = _f;
+    hb_buffer_t      * buf_in, * buf_out;
+
+    while( !*f->done && f->status != HB_FILTER_DONE )
+    {
+        buf_in = hb_fifo_get_wait( f->fifo_in );
+        if ( buf_in == NULL )
+            continue;
+
+        // Filters can drop buffers.  Remember chapter information
+        // so that it can be propagated to the next buffer
+        if ( buf_in->s.new_chap )
+        {
+            f->chapter_time = buf_in->s.start;
+            f->chapter_val = buf_in->s.new_chap;
+        }
+        if ( *f->done )
+        {
+            if( buf_in )
+            {
+                hb_buffer_close( &buf_in );
+            }
+            break;
+        }
+
+        buf_out = NULL;
+        f->status = f->work( f, &buf_in, &buf_out );
+
+        if ( buf_out && f->chapter_val && f->chapter_time <= buf_out->s.start )
+        {
+            buf_out->s.new_chap = f->chapter_val;
+            f->chapter_val = 0;
+        }
+
+        if( buf_in )
+        {
+            hb_buffer_close( &buf_in );
+        }
+        if ( buf_out && f->fifo_out == NULL )
+        {
+            hb_buffer_close( &buf_out );
+        }
+        if( buf_out )
+        {
+            while ( !*f->done )
+            {
+                if ( hb_fifo_full_wait( f->fifo_out ) )
+                {
+                    hb_fifo_push( f->fifo_out, buf_out );
+                    break;
+                }
+            }
+        }
+    }
+    // Consume data in incoming fifo till job complete so that
+    // residual data does not stall the pipeline
+    while( !*f->done )
+    {
+        buf_in = hb_fifo_get_wait( f->fifo_in );
+        if ( buf_in != NULL )
+            hb_buffer_close( &buf_in );
+    }
+}
+

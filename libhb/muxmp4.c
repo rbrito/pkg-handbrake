@@ -1,8 +1,11 @@
-/* $Id: muxmp4.c,v 1.24 2005/11/04 13:09:41 titer Exp $
+/* muxmp4.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2012 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include "mp4v2/mp4v2.h"
 #include "a52dec/a52.h"
@@ -214,29 +217,34 @@ static int MP4Init( hb_mux_object_t * m )
         hb_error("muxmp4.c: Unsupported video encoder!");
     }
 
-    // COLR atom for color and gamma correction.
-    // Per the notes at:
-    //   http://developer.apple.com/quicktime/icefloe/dispatch019.html#colr
-    //   http://forum.doom9.org/showthread.php?t=133982#post1090068
-    // the user can set it from job->color_matrix_code, otherwise by default
-    // we say anything that's likely to be HD content is ITU BT.709 and
-    // DVD, SD TV & other content is ITU BT.601.  We look at the title height
-    // rather than the job height here to get uncropped input dimensions.
-    if( job->color_matrix_code == 3 )
+    /* COLR atom for color and gamma correction. Per the notes at:
+     * http://developer.apple.com/quicktime/icefloe/dispatch019.html#colr
+     * http://forum.doom9.org/showthread.php?t=133982#post1090068
+     * The user can set it from job->color_matrix_code. */
+    if( job->color_matrix_code == 4 )
     {
         // Custom
         MP4AddColr(m->file, mux_data->track, job->color_prim, job->color_transfer, job->color_matrix);        
     }
-    else if( ( job->color_matrix_code == 2 ) || 
-             ( job->color_matrix_code == 0 && ( job->title->width >= 1280 || job->title->height >= 720 ) ) )
+    else if( job->color_matrix_code == 3 )
     {
         // ITU BT.709 HD content
-        MP4AddColr(m->file, mux_data->track, 1, 1, 1);
+        MP4AddColr(m->file, mux_data->track, HB_COLR_PRI_BT709, HB_COLR_TRA_BT709, HB_COLR_MAT_BT709);
+    }
+    else if( job->color_matrix_code == 2 )
+    {
+        // ITU BT.601 DVD or SD TV content (PAL)
+        MP4AddColr(m->file, mux_data->track, HB_COLR_PRI_EBUTECH, HB_COLR_TRA_BT709, HB_COLR_MAT_SMPTE170M);
+    }
+    else if( job->color_matrix_code == 1 )
+    {
+        // ITU BT.601 DVD or SD TV content (NTSC)
+        MP4AddColr(m->file, mux_data->track, HB_COLR_PRI_SMPTEC, HB_COLR_TRA_BT709, HB_COLR_MAT_SMPTE170M);
     }
     else
     {
-        // ITU BT.601 DVD or SD TV content
-        MP4AddColr(m->file, mux_data->track, 6, 1, 6);
+        // detected during scan
+        MP4AddColr(m->file, mux_data->track, title->color_prim, title->color_transfer, title->color_matrix);        
     }
 
     if( job->anamorphic.mode )
@@ -254,9 +262,9 @@ static int MP4Init( hb_mux_object_t * m )
     }
 
     /* add the audio tracks */
-    for( i = 0; i < hb_list_count( title->list_audio ); i++ )
+    for( i = 0; i < hb_list_count( job->list_audio ); i++ )
     {
-        audio = hb_list_item( title->list_audio, i );
+        audio = hb_list_item( job->list_audio, i );
         mux_data = calloc(1, sizeof( hb_mux_data_t ) );
         audio->priv.mux_data = mux_data;
 
@@ -277,8 +285,8 @@ static int MP4Init( hb_mux_object_t * m )
                 if ( audio->config.out.codec & HB_ACODEC_PASS_FLAG )
                 {
                     bsmod = audio->config.in.mode;
-                    acmod = audio->config.flags.ac3 & 0x7;
-                    lfeon = (audio->config.flags.ac3 & A52_LFE) ? 1 : 0;
+                    acmod = audio->config.in.flags & 0x7;
+                    lfeon = ( audio->config.in.flags & A52_LFE ) ? 1 : 0;
                     freq = audio->config.in.samplerate;
                     bitrate = audio->config.in.bitrate;
                 }
@@ -287,7 +295,7 @@ static int MP4Init( hb_mux_object_t * m )
                     bsmod = 0;
                     freq = audio->config.out.samplerate;
                     bitrate = audio->config.out.bitrate * 1000;
-                    switch( audio->config.out.mixdown )
+                    switch (audio->config.out.mixdown)
                     {
                         case HB_AMIXDOWN_MONO:
                             acmod = 1;
@@ -301,13 +309,13 @@ static int MP4Init( hb_mux_object_t * m )
                             lfeon = 0;
                             break;
 
-                        case HB_AMIXDOWN_6CH:
+                        case HB_AMIXDOWN_5POINT1:
                             acmod = 7;
                             lfeon = 1;
                             break;
 
                         default:
-                            hb_log(" MP4Init: bad mixdown" );
+                            hb_log("MP4Init: bad mixdown");
                             acmod = 2;
                             lfeon = 0;
                             break;
@@ -405,19 +413,17 @@ static int MP4Init( hb_mux_object_t * m )
                         audio_type = 0xA9;
                     } break;
                 }
-                if( audio->config.out.codec & HB_ACODEC_PASS_FLAG )
+                if (audio->config.out.codec & HB_ACODEC_PASS_FLAG)
                 {
                     samplerate = audio->config.in.samplerate;
                     samples_per_frame = audio->config.in.samples_per_frame;
-                    channels = HB_INPUT_CH_LAYOUT_GET_DISCRETE_COUNT(
-                                            audio->config.in.channel_layout );
+                    channels = av_get_channel_layout_nb_channels(audio->config.in.channel_layout);
                 }
                 else
                 {
                     samplerate = audio->config.out.samplerate;
                     samples_per_frame = audio->config.out.samples_per_frame;
-                    channels = HB_AMIXDOWN_GET_DISCRETE_CHANNEL_COUNT(
-                                            audio->config.out.mixdown );
+                    channels = hb_mixdown_get_discrete_channel_count(audio->config.out.mixdown);
                 }
                 mux_data->track = MP4AddAudioTrack( m->file, samplerate, 
                                                 samples_per_frame, audio_type );
@@ -458,7 +464,7 @@ static int MP4Init( hb_mux_object_t * m )
         /* Set the language for this track */
         MP4SetTrackLanguage(m->file, mux_data->track, audio->config.lang.iso639_2);
 
-        if( hb_list_count( title->list_audio ) > 1 )
+        if( hb_list_count( job->list_audio ) > 1 )
         {
             /* Set the audio track alternate group */
             MP4SetTrackIntegerProperty(m->file, mux_data->track, "tkhd.alternate_group", 1);
@@ -893,15 +899,14 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
     if( mux_data == job->mux_data )
     {
         /* Video */
-
         if( job->vcodec == HB_VCODEC_X264 ||
             ( job->vcodec & HB_VCODEC_FFMPEG_MASK ) )
         {
-            if ( buf && buf->start < buf->renderOffset )
+            if ( buf && buf->s.start < buf->s.renderOffset )
             {
                 hb_log("MP4Mux: PTS %"PRId64" < DTS %"PRId64,
-                       buf->start, buf->renderOffset );
-                buf->renderOffset = buf->start;
+                       buf->s.start, buf->s.renderOffset );
+                buf->s.renderOffset = buf->s.start;
             }
         }
 
@@ -918,14 +923,14 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
             ( job->vcodec & HB_VCODEC_FFMPEG_MASK ) )
         {
             // x264 supplies us with DTS, so offset is PTS - DTS
-            offset = buf->start - buf->renderOffset;
+            offset = buf->s.start - buf->s.renderOffset;
         }
 
         /* Add the sample before the new frame.
            It is important that this be calculated prior to the duration
            of the new video sample, as we want to sync to right after it.
            (This is because of how durations for text tracks work in QT) */
-        if( job->chapter_markers && buf->new_chap )
+        if( job->chapter_markers && buf->s.new_chap )
         {    
             hb_chapter_t *chapter = NULL;
 
@@ -939,15 +944,15 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
             duration = m->sum_dur - m->chapter_duration + offset;
             if ( duration >= (90000*3)/2 )
             {
-                chapter = hb_list_item( m->job->title->list_chapter,
-                                        buf->new_chap - 2 );
+                chapter = hb_list_item( m->job->list_chapter,
+                                        buf->s.new_chap - 2 );
 
                 MP4AddChapter( m->file,
                                m->chapter_track,
                                duration,
                                (chapter != NULL) ? chapter->title : NULL);
 
-                m->current_chapter = buf->new_chap;
+                m->current_chapter = buf->s.new_chap;
                 m->chapter_duration += duration;
             }
         }
@@ -958,11 +963,11 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
             // x264 supplies us with DTS
             if ( m->delay_buf )
             {
-                duration = m->delay_buf->renderOffset - buf->renderOffset;
+                duration = m->delay_buf->s.renderOffset - buf->s.renderOffset;
             }
             else
             {
-                duration = buf->stop - m->sum_dur;
+                duration = buf->s.stop - m->sum_dur;
                 // Due to how libx264 generates DTS, it's possible for the
                 // above calculation to be negative. 
                 //
@@ -998,7 +1003,7 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
             // We're getting the frames in decode order but the timestamps are
             // for presentation so we have to use durations and effectively
             // compute a DTS.
-            duration = buf->stop - buf->start;
+            duration = buf->s.stop - buf->s.start;
         }
 
         if ( duration <= 0 )
@@ -1009,7 +1014,7 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
                try to fix the error so that the file will still be playable. */
             hb_log("MP4Mux: illegal duration %"PRId64", start %"PRId64","
                    "stop %"PRId64", sum_dur %"PRId64,
-                   duration, buf->start, buf->stop, m->sum_dur );
+                   duration, buf->s.start, buf->s.stop, m->sum_dur );
             /* we don't know when the next frame starts so we can't pick a
                valid duration for this one. we pick something "short"
                (roughly 1/3 of an NTSC frame time) to take time from
@@ -1045,12 +1050,12 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
         uint32_t dflags = 0;
 
         /* encoding layer signals if frame is referenced by other frames */
-        if( buf->flags & HB_FRAME_REF )
+        if( buf->s.flags & HB_FRAME_REF )
             dflags |= MP4_SDT_HAS_DEPENDENTS;
         else
             dflags |= MP4_SDT_HAS_NO_DEPENDENTS; /* disposable */
 
-        switch( buf->frametype )
+        switch( buf->s.frametype )
         {
             case HB_FRAME_IDR:
                 sync = 1;
@@ -1086,50 +1091,50 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
         {
             /* MPEG4 timed text does not allow overlapping samples; upstream
                code should coalesce overlapping subtitle lines. */
-            if( buf->start < mux_data->sum_dur )
+            if( buf->s.start < mux_data->sum_dur )
             {
-                if ( buf->stop - mux_data->sum_dur > 90*500 )
+                if ( buf->s.stop - mux_data->sum_dur > 90*500 )
                 {
                     hb_log("MP4Mux: shortening overlapping subtitle, "
                            "start %"PRId64", stop %"PRId64", sum_dur %"PRId64,
-                           buf->start, buf->stop, m->sum_dur);
-                    buf->start = mux_data->sum_dur;
+                           buf->s.start, buf->s.stop, m->sum_dur);
+                    buf->s.start = mux_data->sum_dur;
                 }
             }
-            if( buf->start < mux_data->sum_dur )
+            if( buf->s.start < mux_data->sum_dur )
             {
                 hb_log("MP4Mux: skipping overlapping subtitle, "
                        "start %"PRId64", stop %"PRId64", sum_dur %"PRId64,
-                       buf->start, buf->stop, m->sum_dur);
+                       buf->s.start, buf->s.stop, m->sum_dur);
             }
             else
             {
                 int64_t duration;
 
-                if( buf->start < 0 )
-                    buf->start = mux_data->sum_dur;
+                if( buf->s.start < 0 )
+                    buf->s.start = mux_data->sum_dur;
 
-                if( buf->stop < 0 )
+                if( buf->s.stop < 0 )
                     duration = 90000L * 10;
                 else
-                    duration = buf->stop - buf->start;
+                    duration = buf->s.stop - buf->s.start;
 
                 /* Write an empty sample */
-                if ( mux_data->sum_dur < buf->start )
+                if ( mux_data->sum_dur < buf->s.start )
                 {
                     uint8_t empty[2] = {0,0};
                     if( !MP4WriteSample( m->file,
                                         mux_data->track,
                                         empty,
                                         2,
-                                        buf->start - mux_data->sum_dur,
+                                        buf->s.start - mux_data->sum_dur,
                                         0,
                                         1 ))
                     {
                         hb_error("Failed to write to output file, disk full?");
                         *job->die = 1;
                     }
-                    mux_data->sum_dur += buf->start - mux_data->sum_dur;
+                    mux_data->sum_dur += buf->s.start - mux_data->sum_dur;
                 }
                 uint8_t styleatom[2048];;
                 uint16_t stylesize = 0;
@@ -1150,7 +1155,7 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
                 buffersize = strlen((char*)buffer);
 
                 hb_deep_log(3, "MuxMP4:Sub:%fs:%"PRId64":%"PRId64":%"PRId64": %s",
-                            (float)buf->start / 90000, buf->start, buf->stop,
+                            (float)buf->s.start / 90000, buf->s.start, buf->s.stop,
                             duration, buffer);
 
                 /* Write the subtitle sample */
@@ -1178,30 +1183,30 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
         {
             int64_t duration;
 
-            if( buf->start < 0 )
-                buf->start = mux_data->sum_dur;
+            if( buf->s.start < 0 )
+                buf->s.start = mux_data->sum_dur;
 
-            if( buf->stop < 0 )
+            if( buf->s.stop < 0 )
                 duration = 90000L * 10;
             else
-                duration = buf->stop - buf->start;
+                duration = buf->s.stop - buf->s.start;
 
             /* Write an empty sample */
-            if ( mux_data->sum_dur < buf->start )
+            if ( mux_data->sum_dur < buf->s.start )
             {
                 uint8_t empty[2] = {0,0};
                 if( !MP4WriteSample( m->file,
                                     mux_data->track,
                                     empty,
                                     2,
-                                    buf->start - mux_data->sum_dur,
+                                    buf->s.start - mux_data->sum_dur,
                                     0,
                                     1 ))
                 {
                     hb_error("Failed to write to output file, disk full?");
                     *job->die = 1;
                 } 
-                mux_data->sum_dur += buf->start - mux_data->sum_dur;
+                mux_data->sum_dur += buf->s.start - mux_data->sum_dur;
             }
             if( !MP4WriteSample( m->file,
                                  mux_data->track,
@@ -1229,7 +1234,7 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
                              buf->size,
                              duration,
                              offset,
-                             ( buf->frametype & HB_FRAME_KEY ) != 0 ))
+                             ( buf->s.frametype & HB_FRAME_KEY ) != 0 ))
         {
             hb_error("Failed to write to output file, disk full?");
             *job->die = 1;
@@ -1243,104 +1248,138 @@ static int MP4Mux( hb_mux_object_t * m, hb_mux_data_t * mux_data,
 static int MP4End( hb_mux_object_t * m )
 {
     hb_job_t   * job   = m->job;
-    hb_title_t * title = job->title;
 
-    // Flush the delayed frame
-    if ( m->delay_buf )
-        MP4Mux( m, job->mux_data, NULL );
-
-    /* Write our final chapter marker */
-    if( m->job->chapter_markers )
+    if (m->file != MP4_INVALID_FILE_HANDLE)
     {
-        hb_chapter_t *chapter = NULL;
-        int64_t duration = m->sum_dur - m->chapter_duration;
-        /* The final chapter can have a very short duration - if it's less
-         * than 1.5 seconds just skip it. */
-        if ( duration >= (90000*3)/2 )
+        // Flush the delayed frame
+        if ( m->delay_buf )
+            MP4Mux( m, job->mux_data, NULL );
+
+        /* Write our final chapter marker */
+        if( m->job->chapter_markers )
         {
-
-            chapter = hb_list_item( m->job->title->list_chapter,
-                                    m->current_chapter - 1 );
-
-            MP4AddChapter( m->file,
-                           m->chapter_track,
-                           duration,
-                           (chapter != NULL) ? chapter->title : NULL);
-        }
-    }
-
-    if ( job->config.h264.init_delay )
-    {
-           // Insert track edit to get A/V back in sync.  The edit amount is
-           // the init_delay.
-           int64_t edit_amt = job->config.h264.init_delay;
-           MP4AddTrackEdit(m->file, 1, MP4_INVALID_EDIT_ID, edit_amt,
-                           MP4GetTrackDuration(m->file, 1), 0);
-            if ( m->job->chapter_markers )
+            hb_chapter_t *chapter = NULL;
+            int64_t duration = m->sum_dur - m->chapter_duration;
+            /* The final chapter can have a very short duration - if it's less
+             * than 1.5 seconds just skip it. */
+            if ( duration >= (90000*3)/2 )
             {
-                // apply same edit to chapter track to keep it in sync with video
-                MP4AddTrackEdit(m->file, m->chapter_track, MP4_INVALID_EDIT_ID,
-                                edit_amt,
-                                MP4GetTrackDuration(m->file, m->chapter_track), 0);
+
+                chapter = hb_list_item( m->job->list_chapter,
+                                        m->current_chapter - 1 );
+
+                MP4AddChapter( m->file,
+                               m->chapter_track,
+                               duration,
+                               (chapter != NULL) ? chapter->title : NULL);
             }
-     }
-
-    /*
-     * Write the MP4 iTunes metadata if we have any metadata
-     */
-    if( title->metadata )
-    {
-        hb_metadata_t *md = title->metadata;
-        const MP4Tags* tags;
-
-        hb_deep_log( 2, "Writing Metadata to output file...");
-
-        /* allocate tags structure */
-        tags = MP4TagsAlloc();
-        /* fetch data from MP4 file (in case it already has some data) */
-        MP4TagsFetch( tags, m->file );
-
-        /* populate */
-        if( strlen( md->name ))
-            MP4TagsSetName( tags, md->name );
-        if( strlen( md->artist ))
-            MP4TagsSetArtist( tags, md->artist );
-        if( strlen( md->composer ))
-            MP4TagsSetComposer( tags, md->composer );
-        if( strlen( md->comment ))
-            MP4TagsSetComments( tags, md->comment );
-        if( strlen( md->release_date ))
-            MP4TagsSetReleaseDate( tags, md->release_date );
-        if( strlen( md->album ))
-            MP4TagsSetAlbum( tags, md->album );
-        if( strlen( md->genre ))
-            MP4TagsSetGenre( tags, md->genre );
-
-        if( md->coverart )
-        {
-            MP4TagArtwork art;
-            art.data = md->coverart;
-            art.size = md->coverart_size;
-            art.type = MP4_ART_UNDEFINED; // delegate typing to libmp4v2
-            MP4TagsAddArtwork( tags, &art );
         }
 
-        /* push data to MP4 file */
-        MP4TagsStore( tags, m->file );
-        /* free memory associated with structure */
-        MP4TagsFree( tags );
-    }
+        if ( job->config.h264.init_delay )
+        {
+               // Insert track edit to get A/V back in sync.  The edit amount is
+               // the init_delay.
+               int64_t edit_amt = job->config.h264.init_delay;
+               MP4AddTrackEdit(m->file, 1, MP4_INVALID_EDIT_ID, edit_amt,
+                               MP4GetTrackDuration(m->file, 1), 0);
+                if ( m->job->chapter_markers )
+                {
+                    // apply same edit to chapter track to keep it in sync with video
+                    MP4AddTrackEdit(m->file, m->chapter_track, MP4_INVALID_EDIT_ID,
+                                    edit_amt,
+                                    MP4GetTrackDuration(m->file, m->chapter_track), 0);
+                }
+         }
 
-    MP4Close( m->file );
+        /*
+         * Write the MP4 iTunes metadata if we have any metadata
+         */
+        if( job->metadata )
+        {
+            hb_metadata_t *md = job->metadata;
+            const MP4Tags* tags;
 
-    if ( job->mp4_optimize )
-    {
-        hb_log( "muxmp4: optimizing file" );
-        char filename[1024]; memset( filename, 0, 1024 );
-        snprintf( filename, 1024, "%s.tmp", job->file );
-        MP4Optimize( job->file, filename, MP4_DETAILS_ERROR );
-        remove( job->file );
-        rename( filename, job->file );
+            hb_deep_log( 2, "Writing Metadata to output file...");
+
+            /* allocate tags structure */
+            tags = MP4TagsAlloc();
+            /* fetch data from MP4 file (in case it already has some data) */
+            MP4TagsFetch( tags, m->file );
+
+            /* populate */
+            if( md->name )
+                MP4TagsSetName( tags, md->name );
+            if( md->artist )
+                MP4TagsSetArtist( tags, md->artist );
+            if( md->composer )
+                MP4TagsSetComposer( tags, md->composer );
+            if( md->comment )
+                MP4TagsSetComments( tags, md->comment );
+            if( md->release_date )
+                MP4TagsSetReleaseDate( tags, md->release_date );
+            if( md->album )
+                MP4TagsSetAlbum( tags, md->album );
+            if( md->album_artist )
+                MP4TagsSetAlbumArtist( tags, md->album_artist );
+            if( md->genre )
+                MP4TagsSetGenre( tags, md->genre );
+            if( md->description )
+                MP4TagsSetDescription( tags, md->description );
+            if( md->long_description )
+                MP4TagsSetLongDescription( tags, md->long_description );
+
+            if( md->list_coverart )
+            {
+                hb_coverart_t * coverart;
+                int ii;
+
+                for ( ii = 0; ii < hb_list_count( md->list_coverart ); ii++ )
+                {
+                    coverart = hb_list_item( md->list_coverart, ii );
+                    MP4TagArtwork art;
+                    int type;
+                    switch ( coverart->type )
+                    {
+                        case HB_ART_BMP:
+                            type = MP4_ART_BMP;
+                            break;
+                        case HB_ART_GIF:
+                            type = MP4_ART_GIF;
+                            break;
+                        case HB_ART_JPEG:
+                            type = MP4_ART_JPEG;
+                            break;
+                        case HB_ART_PNG:
+                            type = MP4_ART_PNG;
+                            break;
+                        default:
+                            type = MP4_ART_UNDEFINED;
+                            break;
+                    }
+                    art.data = coverart->data;
+                    art.size = coverart->size;
+                    art.type = type;
+                    MP4TagsAddArtwork( tags, &art );
+                }
+            }
+
+            /* push data to MP4 file */
+            MP4TagsStore( tags, m->file );
+            /* free memory associated with structure */
+            MP4TagsFree( tags );
+        }
+
+        MP4Close( m->file );
+
+        if ( job->mp4_optimize )
+        {
+            hb_log( "muxmp4: optimizing file" );
+            char filename[1024]; memset( filename, 0, 1024 );
+            snprintf( filename, 1024, "%s.tmp", job->file );
+            MP4Optimize( job->file, filename, MP4_DETAILS_ERROR );
+            remove( job->file );
+            rename( filename, job->file );
+        }
     }
 
     return 0;
