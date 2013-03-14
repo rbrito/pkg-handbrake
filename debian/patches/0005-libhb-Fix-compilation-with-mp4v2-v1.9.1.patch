@@ -16,8 +16,8 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 
 --- a/libhb/decmetadata.c
 +++ b/libhb/decmetadata.c
-@@ -13,7 +13,7 @@
-     MP4FileHandle input_file;
+@@ -17,7 +17,7 @@
+     int result = 0;
      hb_deep_log( 2, "Got an MP4 input, read the metadata");
  
 -    input_file = MP4Read( title->path, 0 );
@@ -25,18 +25,18 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  
      if( input_file != MP4_INVALID_FILE_HANDLE )
      { 
-@@ -92,7 +92,7 @@
+@@ -168,7 +168,7 @@
              }
          }
  
 -        MP4Close( input_file );
 +        MP4Close(input_file, 0);
      }
+     return result;
  }
- 
 --- a/libhb/muxmp4.c
 +++ b/libhb/muxmp4.c
-@@ -93,13 +93,13 @@
+@@ -96,13 +96,13 @@
      if (job->largeFileSize)
      /* Use 64-bit MP4 file */
      {
@@ -52,20 +52,20 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
      }
  
      if (m->file == MP4_INVALID_FILE_HANDLE)
-@@ -1331,14 +1331,14 @@
-         MP4TagsFree( tags );
-     }
+@@ -1373,14 +1373,14 @@
+             MP4TagsFree( tags );
+         }
  
--    MP4Close( m->file );
-+    MP4Close( m->file, 0 );
+-        MP4Close( m->file );
++        MP4Close( m->file, 0 );
  
-     if ( job->mp4_optimize )
-     {
-         hb_log( "muxmp4: optimizing file" );
-         char filename[1024]; memset( filename, 0, 1024 );
-         snprintf( filename, 1024, "%s.tmp", job->file );
--        MP4Optimize( job->file, filename, MP4_DETAILS_ERROR );
-+        MP4Optimize( job->file, filename );
-         remove( job->file );
-         rename( filename, job->file );
-     }
+         if ( job->mp4_optimize )
+         {
+             hb_log( "muxmp4: optimizing file" );
+             char filename[1024]; memset( filename, 0, 1024 );
+             snprintf( filename, 1024, "%s.tmp", job->file );
+-            MP4Optimize( job->file, filename, MP4_DETAILS_ERROR );
++            MP4Optimize( job->file, filename );
+             remove( job->file );
+             rename( filename, job->file );
+         }

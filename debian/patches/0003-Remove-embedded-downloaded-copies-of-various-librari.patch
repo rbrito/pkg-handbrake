@@ -19,49 +19,28 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  test/module.defs       |   10 +++-------
  3 files changed, 10 insertions(+), 30 deletions(-)
 
---- a/gtk/src/Makefile.am
-+++ b/gtk/src/Makefile.am
-@@ -10,7 +10,7 @@
- HB_LIBS= \
- 	-lhb -la52 -lmkv -lavformat -lavcodec -lavutil -ldca -ldvdnav -ldvdread \
- 	-lfaac -lmp3lame -lmpeg2 -lvorbis -lvorbisenc -logg -lsamplerate \
--	-lx264 -lmp4v2 -lswscale -ltheora -lz \
-+	-lx264 -lmp4v2 -lswscale -ltheoraenc -ltheoradec -lz -lxml2 \
- 	-lbz2 -lpthread -lbluray -lass -lfontconfig -lfreetype
- endif
- 
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
-@@ -8,8 +8,6 @@
- 
- ###############################################################################
+@@ -19,8 +19,6 @@
+     AUTOTOOL_MODULES =
+ endif
  
 -MODULES += contrib/a52dec
 -
  ifneq (,$(filter $(BUILD.system),cygwin mingw))
  ifneq ($(HAS.bz2),1)
      MODULES += contrib/bzip2
-@@ -20,34 +18,12 @@
-     MODULES += contrib/fribidi
+@@ -43,24 +41,12 @@
+     MODULES += contrib/fdk-aac
  endif
  
--
+-MODULES += contrib/lame
 -MODULES += contrib/faac
 -MODULES += contrib/ffmpeg
--MODULES += contrib/fontconfig
--MODULES += contrib/freetype
--MODULES += contrib/lame
--MODULES += contrib/libass
--MODULES += contrib/libdca
 -MODULES += contrib/libdvdread
 -MODULES += contrib/libdvdnav
 -MODULES += contrib/libbluray
 -MODULES += contrib/libmkv
--MODULES += contrib/libogg
--MODULES += contrib/libsamplerate
--MODULES += contrib/libtheora
--MODULES += contrib/libvorbis
--MODULES += contrib/libxml2
 -MODULES += contrib/mp4v2
 -MODULES += contrib/mpeg2dec
 -
@@ -76,7 +55,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  ifneq (,$(filter $(BUILD.system),cygwin mingw))
  ifneq ($(HAS.iconv),1)
      MODULES += contrib/libiconv
-@@ -88,6 +64,11 @@
+@@ -101,6 +87,11 @@
      MODULES += gtk
  endif
  
@@ -90,28 +69,18 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  endif
 --- a/test/module.defs
 +++ b/test/module.defs
-@@ -9,10 +9,8 @@
+@@ -9,13 +9,11 @@
  
  TEST.exe = $(BUILD/)$(call TARGET.exe,$(HB.name)CLI)
  
--TEST.libs = $(LIBHB.a) $(foreach n, \
--        a52 ass avcodec avformat avutil dca dvdnav dvdread faac fontconfig freetype mkv mpeg2 mp3lame mp4v2 \
--        ogg samplerate swscale theora vorbis vorbisenc x264 xml2 bluray, \
--        $(CONTRIB.build/)lib/lib$(n).a )
-+TEST.libs = $(LIBHB.a)
-+TEST.libs += -lass -lfaac -lmp3lame -lsamplerate -lvorbisenc -ltheoraenc -ltheoradec -lvorbis -lx264 -lmkv -lz -lbz2 -lpthread -ldl -lmp4v2 -lxml2 -ldca -la52 -lbluray -lavcodec -lavformat -lavutil -lswscale -lmpeg2 -ldvdnav -ldvdread
+-TEST.GCC.L = $(CONTRIB.build/)lib
+-
+ TEST.libs = $(LIBHB.a)
  
- TEST.install.exe = $(DESTDIR)$(PREFIX/)bin/$(notdir $(TEST.exe))
- 
-@@ -32,11 +30,6 @@
- else
- 	TEST.GCC.l += z
- endif
--ifeq (1,$(FRIBIDI.enabled))
--    TEST.libs += $(CONTRIB.build/)lib/libfribidi.a
--else
--	TEST.GCC.l += fribidi
--endif
- 
- ###############################################################################
+ TEST.GCC.l = \
+         a52 ass avcodec avformat avutil avresample dvdnav dvdread faac \
+-        fontconfig freetype fribidi mkv mpeg2 mp3lame mp4v2 ogg \
++        fontconfig freetype mkv mpeg2 mp3lame mp4v2 ogg \
+         samplerate swscale theoraenc theoradec vorbis vorbisenc x264 \
+         bluray xml2 bz2 z
  

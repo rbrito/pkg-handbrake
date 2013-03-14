@@ -27,7 +27,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 
 --- a/make/include/main.defs
 +++ b/make/include/main.defs
-@@ -69,6 +69,11 @@ ifeq (1-kfreebsd,$(FEATURE.gtk)-$(BUILD.
+@@ -92,6 +92,11 @@
      MODULES += gtk
  endif
  
@@ -41,7 +41,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  endif
 --- a/libhb/module.defs
 +++ b/libhb/module.defs
-@@ -52,6 +52,8 @@ else ifeq ($(BUILD.system),mingw)
+@@ -55,6 +55,8 @@
  	LIBHB.GCC.args.extra.dylib++ += -Wl,--enable-auto-import -static
  else ifeq ($(BUILD.system),solaris)
      LIBHB.GCC.D += SYS_SunOS _LARGEFILE_SOURCE _FILE_OFFSET_BITS=64
@@ -52,7 +52,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  endif
 --- a/libhb/ports.h
 +++ b/libhb/ports.h
-@@ -51,7 +51,7 @@ typedef struct hb_thread_s hb_thread_t;
+@@ -54,7 +54,7 @@
  #elif defined( SYS_DARWIN )
  #  define HB_LOW_PRIORITY    0
  #  define HB_NORMAL_PRIORITY 31
