@@ -1,19 +1,24 @@
-Author: Rogério Theodoro de Brito <rbrito@ime.usp.br>
+Author: Reinhard Tartler <siretart@tauware.de>
 Description: Use unpatched a52
- We don't have liba52 patched to support the A52_USE_DPLII macro,
- so we ignore it for the moment.
+
+In upstream liba52, the state field is private.
 
 Forwarded: no
-Last-Update: 2012-06-15
-Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
 --- a/libhb/deca52.c
 +++ b/libhb/deca52.c
-@@ -109,7 +109,7 @@
-             break;
- 
-         case HB_AMIXDOWN_DOLBYPLII:
--            pv->flags_out = ( A52_DOLBY | A52_USE_DPLII );
-+            pv->flags_out = A52_DOLBY;
-             break;
- 
-         case HB_AMIXDOWN_DOLBY:
+@@ -387,12 +387,15 @@ static hb_buffer_t* Decode(hb_work_objec
+                                                  pv->channel_layout,
+                                                  pv->nchannels);
+         }
++#if 0
++        // FIXME: debian uses an unpatched liba52
+         if (pv->use_mix_levels)
+         {
+             hb_audio_resample_set_mix_levels(pv->resample,
+                                              (double)pv->state->slev,
+                                              (double)pv->state->clev);
+         }
++#endif
+         if (hb_audio_resample_update(pv->resample))
+         {
+             hb_log("deca52: hb_audio_resample_update() failed");
