@@ -1,18 +1,31 @@
 handbrake (0.9.8+dfsg2+git0b44ec-1) experimental; urgency=low
 
   [ Paul Gevers ]
+  * New upstream releases with fixes for:
+    - crash while scanning dvd features (upstream svn r4605, closes: #691067)
+    - Fixes compilation against libav9 (closes: #701039)
   * Patches applied upstream or obsolete:
     - 0001-libhb-Fix-erroneous-memcpy-used-with-overlapping-mem.patch
     - 0002-Fix-include-with-the-system-s-libav.patch
     - 0007-Fix-for-compilation-with-Debian-s-libbluray.patch
     - 0013-format-security.patch
     - Refreshed other patches
+  * debian/control: Make some build-dependencies more explicit
   * Add libavresample-dev to build dep and version the one on libavutil-dev
+  
+  [ Fabian Greffrath ]
+  * Fix FTBFS on hurd-i386, thanks Pino Toscano (Closes: #693012).
+  * Add a debian/TODO file to attract potential contributors. ;)
+  * Rename handbrake-gtk to handbrake.
+  * Remove misleading reference to non-existant Info page for handbrake-cli,
+    thanks Helge Kreutzmann (Closes: #696471).
 
   [ Reinhard Tartler ]
   * add/update patches to allow compilation with unpatched system libraries:
     - 0014-Use-unpatched-a52.patch to unbreak
     - 0017-fixup-libmkv.patch
+  * use bzip2 compression
+  * upload to experimental
 
  -- Reinhard Tartler <siretart@tauware.de>  Sat, 16 Mar 2013 17:07:54 +0100
 
