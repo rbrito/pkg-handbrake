@@ -1,0 +1,19 @@
+Author: Reinhard Tartler <siretart@tauware.de>
+Description: Allow compilation with unpatched libmkv
+
+This define was stolen from upstream's A01-hbmv-pgs.patch
+
+--- a/libhb/muxmkv.c
++++ b/libhb/muxmkv.c
+@@ -10,6 +10,11 @@
+ /* libmkv header */
+ #include "libmkv.h"
+ 
++#ifndef MK_SUBTITLE_PGS
++// stolen from upstream's A01-hbmv-pgs.patch
++#define MK_SUBTITLE_PGS    "S_HDMV/PGS"
++#endif
++
+ #include <ogg/ogg.h>
+ 
+ #include "hb.h"
