@@ -1,4 +1,4 @@
-handbrake (0.9.8+dfsg2+git0b44ec-1) UNRELEASED; urgency=low
+handbrake (0.9.8+dfsg2+git0b44ec-1) experimental; urgency=low
 
   [ Paul Gevers ]
   * Patches applied upstream or obsolete:
@@ -14,7 +14,7 @@ handbrake (0.9.8+dfsg2+git0b44ec-1) UNRELEASED; urgency=low
     - 0014-Use-unpatched-a52.patch to unbreak
     - 0017-fixup-libmkv.patch
 
- -- Reinhard Tartler <siretart@tauware.de>  Sat, 16 Mar 2013 09:59:44 +0100
+ -- Reinhard Tartler <siretart@tauware.de>  Sat, 16 Mar 2013 17:07:54 +0100
 
 handbrake (0.9.8+dfsg1-2) experimental; urgency=low
 
