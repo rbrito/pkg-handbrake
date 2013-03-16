@@ -1,7 +1,6 @@
-handbrake (0.9.8+dfsg2+git0b44ec-0.1) UNRELEASED; urgency=low
+handbrake (0.9.8+dfsg2+git0b44ec-1) UNRELEASED; urgency=low
 
-  * Non-maintainer upload.
-  * New snapshot to fix FTBFS on Ubuntu
+  [ Paul Gevers ]
   * Patches applied upstream or obsolete:
     - 0001-libhb-Fix-erroneous-memcpy-used-with-overlapping-mem.patch
     - 0002-Fix-include-with-the-system-s-libav.patch
@@ -10,7 +9,12 @@ handbrake (0.9.8+dfsg2+git0b44ec-0.1) UNRELEASED; urgency=low
     - Refreshed other patches
   * Add libavresample-dev to build dep and version the one on libavutil-dev
 
- -- Paul Gevers <elbrus@debian.org>  Tue, 05 Mar 2013 20:52:17 +0100
+  [ Reinhard Tartler ]
+  * add/update patches to allow compilation with unpatched system libraries:
+    - 0014-Use-unpatched-a52.patch to unbreak
+    - 0017-fixup-libmkv.patch
+
+ -- Reinhard Tartler <siretart@tauware.de>  Sat, 16 Mar 2013 09:59:44 +0100
 
 handbrake (0.9.8+dfsg1-2) experimental; urgency=low
 
