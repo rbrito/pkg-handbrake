@@ -1,4 +1,6 @@
-handbrake (0.9.8+dfsg2+git0b44ec-1) experimental; urgency=low
+handbrake (0.9.8+dfsg2+git0b44ec-2) experimental; urgency=low
+  
+  The changelog entry for -1 was incomplete and has been merged into -2.
 
   [ Paul Gevers ]
   * New upstream releases with fixes for:
