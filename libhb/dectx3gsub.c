@@ -1,6 +1,6 @@
 /* dectx3gsub.c
 
-   Copyright (c) 2003-2012 HandBrake Team
+   Copyright (c) 2003-2013 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -214,10 +214,10 @@ static int dectx3gWork( hb_work_object_t * w, hb_buffer_t ** buf_in,
     if ( out != NULL ) {
         // We shouldn't be storing the extra NULL character,
         // but the MP4 muxer expects this, unfortunately.
-        if ( out->size > 0 && out->data[out->size - 1] != '\0' ) {
-            // NOTE: out->size remains unchanged
-            hb_buffer_realloc( out, out->size + 1 );
-            out->data[out->size] = '\0';
+        if (out->size > 0 && out->data[out->size - 1] != '\0')
+        {
+            hb_buffer_realloc(out, ++out->size);
+            out->data[out->size - 1] = '\0';
         }
         
         // If the input packet was non-empty, do not pass through

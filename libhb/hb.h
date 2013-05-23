@@ -1,6 +1,6 @@
 /* hb.h
 
-   Copyright (c) 2003-2012 HandBrake Team
+   Copyright (c) 2003-2013 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -94,6 +94,9 @@ void          hb_start( hb_handle_t * );
 void          hb_pause( hb_handle_t * );
 void          hb_resume( hb_handle_t * );
 void          hb_stop( hb_handle_t * );
+
+void          hb_system_sleep_allow(hb_handle_t*);
+void          hb_system_sleep_prevent(hb_handle_t*);
 
 /* Persistent data between jobs. */
 typedef struct hb_interjob_s

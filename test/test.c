@@ -1,8 +1,11 @@
-/* $Id: test.c,v 1.82 2005/11/19 08:25:54 titer Exp $
+/* test.c
 
-   This file is part of the HandBrake source code.
+   Copyright (c) 2003-2013 HandBrake Team
+   This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
-   It may be used under the terms of the GNU General Public License. */
+   It may be used under the terms of the GNU General Public License v2.
+   For full terms see the file COPYING file or visit http://www.gnu.org/licenses/gpl-2.0.html
+ */
 
 #include <signal.h>
 #include <getopt.h>
@@ -31,12 +34,6 @@
 #endif
 
 /* Options */
-#if defined( __APPLE_CC__ )
-#define EXTRA_VLC_DYLD_PATH "/Applications/VLC.app/Contents/MacOS/lib"
-#define DEFAULT_DYLD_PATH "/usr/local/lib:/usr/lib"
-
-static int    no_vlc_dylib = 0;
-#endif
 static int    debug       = HB_DEBUG_ALL;
 static int    update      = 0;
 static int    dvdnav      = 1;
@@ -81,7 +78,6 @@ static char ** acompressions  = NULL;
 static char * acodec_fallback = NULL;
 static char * acodecs     = NULL;
 static char ** anames      = NULL;
-static int    default_acodec = 0;
 static int    audio_explicit = 0;
 static char ** subtracks   = NULL;
 static char ** subforce    = NULL;
@@ -257,7 +253,9 @@ int main( int argc, char ** argv )
         titleindex = 0;
     }
 
-    hb_scan( h, input, titleindex, preview_count, store_previews, min_title_duration * 90000LL );
+    hb_system_sleep_prevent(h);
+    hb_scan(h, input, titleindex, preview_count, store_previews,
+            min_title_duration * 90000LL);
 
     /* Wait... */
     while( !die )
@@ -272,11 +270,14 @@ int main( int argc, char ** argv )
                     die = 1;
                     break;
                 case 'p':
-                    fprintf( stdout, "\nEncoding Paused by user command, 'r' to resume\n" );
-                    hb_pause( h );
+                    fprintf(stdout,
+                            "\nEncoding Paused by user command, 'r' to resume\n");
+                    hb_pause(h);
+                    hb_system_sleep_allow(h);
                     break;
                 case 'r':
-                    hb_resume( h );
+                    hb_system_sleep_prevent(h);
+                    hb_resume(h);
                     break;
                 case 'h':
                     ShowCommands();
@@ -320,11 +321,14 @@ int main( int argc, char ** argv )
                         die = 1;
                         break;
                     case 'p':
-                        fprintf( stdout, "\nEncoding Paused by user command, 'r' to resume\n" );
-                        hb_pause( h );
+                        fprintf(stdout,
+                                "\nEncoding Paused by user command, 'r' to resume\n");
+                        hb_pause(h);
+                        hb_system_sleep_allow(h);
                         break;
                     case 'r':
-                        hb_resume( h );
+                        hb_system_sleep_prevent(h);
+                        hb_resume(h);
                         break;
                     case 'h':
                         ShowCommands();
@@ -749,9 +753,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 720;
                     maxHeight = 576;
@@ -819,9 +823,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 320;
                     maxHeight = 240;
@@ -885,9 +889,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 960;
                     maxHeight = 640;
@@ -955,9 +959,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 1280;
                     maxHeight = 720;
@@ -1025,9 +1029,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 960;
                     maxHeight = 720;
@@ -1099,9 +1103,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 1280;
                     maxHeight = 720;
@@ -1169,9 +1173,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 1920;
                     maxHeight = 1080;
@@ -1240,9 +1244,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 720;
                     maxHeight = 576;
@@ -1308,9 +1312,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     maxWidth = 1280;
                     maxHeight = 720;
@@ -1374,9 +1378,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     if (x264_preset == NULL)
                     {
@@ -1440,9 +1444,9 @@ static int HandleEvents( hb_handle_t * h )
                         allowed_audio_copy |= HB_ACODEC_MP3_PASS;
                         allowed_audio_copy &= HB_ACODEC_PASS_MASK;
                     }
-                    if( !acodec_fallback )
+                    if( acodec_fallback == NULL )
                     {
-                        acodec_fallback = HB_ACODEC_AC3;
+                        acodec_fallback = "ffac3";
                     }
                     if (x264_preset == NULL)
                     {
@@ -1768,6 +1772,27 @@ static int HandleEvents( hb_handle_t * h )
             hb_add_filter( job, filter, filter_str );
             free( filter_str );
 
+            // hb_job_init() will set a default muxer for us
+            // only override it if a specific muxer has been set
+            // note: the muxer must be set after presets, but before encoders
+            if (mux)
+            {
+                job->mux = mux;
+            }
+            // then, muxer options
+            if (largeFileSize)
+            {
+                job->largeFileSize = 1;
+            }
+            if (mp4_optimize)
+            {
+                job->mp4_optimize = 1;
+            }
+            if (ipod_atom)
+            {
+                job->ipod_atom = 1;
+            }
+
             if( vquality >= 0.0 )
             {
                 job->vquality = vquality;
@@ -1831,7 +1856,9 @@ static int HandleEvents( hb_handle_t * h )
                         int i = atoi( token ) - 1;
                         if( hb_list_item( title->list_audio, i ) == NULL ) 
                         {
-                            fprintf( stderr, "Warning: could not find audio track %d, skipped\n", i + 1 );
+                            fprintf(stderr,
+                                    "Warning: Could not find audio track '%s', skipped\n",
+                                    token);
                             continue;
                         }
                         audio = calloc( 1, sizeof( *audio ) );
@@ -1938,7 +1965,7 @@ static int HandleEvents( hb_handle_t * h )
                     if ((acodec = get_acodec_for_string(token)) == -1)
                     {
                         fprintf(stderr, "Invalid codec %s, using default for container.\n", token);
-                        acodec = default_acodec;
+                        acodec = hb_get_default_audio_encoder(job->mux);
                     }
                     if( i < num_audio_tracks )
                     {
@@ -1976,7 +2003,7 @@ static int HandleEvents( hb_handle_t * h )
                  * then use that codec instead.
                  */
                 if (i != 1)
-                    acodec = default_acodec;
+                    acodec = hb_get_default_audio_encoder(job->mux);
                 for ( ; i < num_audio_tracks; i++)
                 {
                     audio = hb_list_audio_config_item(job->list_audio, i);
@@ -2491,7 +2518,9 @@ static int HandleEvents( hb_handle_t * h )
                         subtitle = hb_list_item(title->list_subtitle, track);
                         if( subtitle == NULL ) 
                         {
-                            fprintf( stderr, "Warning: Could not find subtitle track %d, skipped\n", track+1 );
+                            fprintf(stderr,
+                                    "Warning: Could not find subtitle track '%s', skipped\n",
+                                    token);
                             continue;
                         }
                         sub_config = subtitle->config;
@@ -2651,24 +2680,6 @@ static int HandleEvents( hb_handle_t * h )
                         }
                     }
                 }
-            }
-
-            if( job->mux )
-            {
-                job->mux = mux;
-            }
-
-            if ( largeFileSize )
-            {
-                job->largeFileSize = 1;
-            }
-            if ( mp4_optimize )
-            {
-                job->mp4_optimize = 1;
-            }
-            if ( ipod_atom )
-            {
-                job->ipod_atom = 1;
             }
 
             hb_job_set_file( job, output );
@@ -2893,7 +2904,6 @@ static void ShowHelp()
     "                            double quotation marks\n"
     "    -z, --preset-list       See a list of available built-in presets\n"
     "        --no-dvdnav         Do not use dvdnav for reading DVDs\n"
-    "                            (experimental, enabled by default for testing)\n"
     "\n"
 
     "### Source Options-----------------------------------------------------------\n\n"
@@ -2907,8 +2917,8 @@ static void ShowHelp()
     "    -c, --chapters <string> Select chapters (e.g. \"1-3\" for chapters\n"
     "                            1 to 3, or \"3\" for chapter 3 only,\n"
     "                            default: all chapters)\n"
-    "        --angle <number>    Select the DVD angle\n"
-    "        --previews <#:B>    Select how many preview images are generated (max 30),\n"
+    "        --angle <number>    Select the video angle (DVD or Blu-ray only)\n"
+    "        --previews <#:B>    Select how many preview images are generated,\n"
     "                            and whether or not they're stored to disk (0 or 1).\n"
     "                            (default: 10:0)\n"
     "    --start-at-preview <#>  Start encoding at a given preview.\n"
@@ -2922,10 +2932,10 @@ static void ShowHelp()
     "    -o, --output <string>   Set output file name\n"
     "    -f, --format <string>   Set output format (mp4/mkv, default:\n"
     "                            autodetected from file name)\n"
-    "    -m, --markers           Add chapter markers (mp4 and mkv output formats only)\n"
-    "    -4, --large-file        Use 64-bit mp4 files that can hold more than\n"
-    "                            4 GB. Note: Breaks iPod, PS3 compatibility.\n"""
-    "    -O, --optimize          Optimize mp4 files for HTTP streaming\n"
+    "    -m, --markers           Add chapter markers\n"
+    "    -4, --large-file        Create 64-bit mp4 files that can hold more than 4 GB\n"
+    "                            of data. Note: breaks pre-iOS iPod compatibility.\n"
+    "    -O, --optimize          Optimize mp4 files for HTTP streaming (\"fast start\")\n"
     "    -I, --ipod-atom         Mark mp4 files so 5.5G iPods will accept them\n"
     "\n"
 
@@ -3043,10 +3053,8 @@ static void ShowHelp()
     "    -q, --quality <number>  Set video quality\n"
     "    -b, --vb <kb/s>         Set video bitrate (default: 1000)\n"
     "    -2, --two-pass          Use two-pass mode\n"
-    "    -T, --turbo             When using 2-pass use the turbo options\n"
-    "                            on the first pass to improve speed\n"
-    "                            (only works with x264, affects PSNR by about 0.05dB,\n"
-    "                            and increases first pass speed two to four times)\n"
+    "    -T, --turbo             When using 2-pass use \"turbo\" options on the\n"
+    "                            1st pass to improve speed (only works with x264)\n"
     "    -r, --rate              Set video framerate (" );
     for( i = 0; i < hb_video_rates_count; i++ )
     {
@@ -3198,14 +3206,14 @@ static void ShowHelp()
     "\n"
 
     "### Picture Settings---------------------------------------------------------\n\n"
-    "    -w, --width <number>    Set picture width\n"
+    "    -w, --width  <number>   Set picture width\n"
     "    -l, --height <number>   Set picture height\n"
-    "        --crop <T:B:L:R>    Set cropping values (default: autocrop)\n"
-    "        --loose-crop        Always crop to a multiple of the modulus\n"
-    "          <#>               Specifies the maximum number of extra pixels\n"
+    "        --crop  <T:B:L:R>   Set cropping values (default: autocrop)\n"
+    "        --loose-crop  <#>   Always crop to a multiple of the modulus\n"
+    "                            Specifies the maximum number of extra pixels\n"
     "                            which may be cropped (default: 15)\n"
-    "    -Y, --maxHeight <#>     Set maximum height\n"
-    "    -X, --maxWidth <#>      Set maximum width\n"
+    "    -Y, --maxHeight   <#>   Set maximum height\n"
+    "    -X, --maxWidth    <#>   Set maximum width\n"
     "    --strict-anamorphic     Store pixel aspect ratio in video stream\n"
     "    --loose-anamorphic      Store pixel aspect ratio with specified width\n"
     "    --custom-anamorphic     Store pixel aspect ratio in video stream and\n"
@@ -3230,22 +3238,24 @@ static void ShowHelp()
 
     "### Filters---------------------------------------------------------\n\n"
 
-     "    -d, --deinterlace       Deinterlace video with yadif/mcdeint filter\n"
-     "          <YM:FD:MM:QP>     (default 0:-1:-1:1)\n"
+     "    -d, --deinterlace       Deinterlace video with Libav, yadif or mcdeint\n"
+     "          <fast/slow/slower/bob> or omitted (default settings)\n"
      "           or\n"
-     "          <fast/slow/slower>\n"
+     "          <YM:FD:MM:QP>     (default 0:-1:-1:1)\n"
      "    -5, --decomb            Selectively deinterlaces when it detects combing\n"
+     "          <fast/bob> or omitted (default settings)\n"
+     "           or\n"
      "          <MO:ME:MT:ST:BT:BX:BY:MG:VA:LA:DI:ER:NO:MD:PP:FD>\n"
      "          (default: 7:2:6:9:80:16:16:10:20:20:4:2:50:24:1:-1)\n"
      "    -9, --detelecine        Detelecine (ivtc) video with pullup filter\n"
      "                            Note: this filter drops duplicate frames to\n"
      "                            restore the pre-telecine framerate, unless you\n"
      "                            specify a constant framerate (--rate 29.97)\n"
-     "          <L:R:T:B:SB:MP:FD>   (default 1:1:4:4:0:0:-1)\n"
+     "          <L:R:T:B:SB:MP:FD> (default 1:1:4:4:0:0:-1)\n"
      "    -8, --denoise           Denoise video with hqdn3d filter\n"
-     "          <SL:SC:TL:TC>     (default 4:3:6:4.5)\n"
+     "          <weak/medium/strong> or omitted (default settings)\n"
      "           or\n"
-     "          <weak/medium/strong>\n"
+     "          <SL:SC:TL:TC>     (default 4:3:6:4.5)\n"
      "    -7, --deblock           Deblock video with pp7 filter\n"
      "          <QP:M>            (default 5:2)\n"
      "        --rotate            Flips images axes\n"
@@ -3297,14 +3307,14 @@ static void ShowHelp()
     "                            subtitle track is used instead.\n"
     "        --srt-file <string> SubRip SRT filename(s), separated by commas.\n"
     "        --srt-codeset       Character codeset(s) that the SRT file(s) are\n"
-    "          <string>          encoded in, separted by commas.\n"
+    "          <string>          encoded in, separated by commas.\n"
     "                            Use 'iconv -l' for a list of valid\n"
-    "                            codesets. If not specified latin1 is assumed\n"
-    "        --srt-offset        Offset in milli-seconds to apply to the SRT file(s)\n"
-    "          <string>          separted by commas. If not specified zero is assumed.\n"
+    "                            codesets. If not specified, 'latin1' is assumed\n"
+    "        --srt-offset        Offset (in milliseconds) to apply to the SRT file(s),\n"
+    "          <string>          separated by commas. If not specified, zero is assumed.\n"
     "                            Offsets may be negative.\n"
     "        --srt-lang <string> Language as an iso639-2 code fra, eng, spa et cetera)\n"
-    "                            for the SRT file(s) separated by commas. If not specified\n"
+    "                            for the SRT file(s), separated by commas. If not specified,\n"
     "                            then 'und' is used.\n"
     "        --srt-default       Flag the selected srt as the default subtitle\n"
     "          <number>          to be displayed upon playback.  Setting no default\n"
@@ -3548,9 +3558,6 @@ static int ParseOptions( int argc, char ** argv )
             { "vfr",         no_argument,       &cfr,    0 },
             { "cfr",         no_argument,       &cfr,    1 },
             { "pfr",         no_argument,       &cfr,    2 },
-#if defined( __APPLE_CC__ )
-            { "no-vlc-dylib-path", no_argument, &no_vlc_dylib,    1 },
-#endif
             { "audio-copy-mask", required_argument, NULL, ALLOWED_AUDIO_COPY },
             { "audio-fallback",  required_argument, NULL, AUDIO_FALLBACK },
             { 0, 0, 0, 0 }
@@ -4106,72 +4113,6 @@ static int ParseOptions( int argc, char ** argv )
 
 static int CheckOptions( int argc, char ** argv )
 {
-#if defined( __APPLE_CC__ )
-    // If OSX, add VLC dylib path and exec to make it stick.
-    char *dylib_path;
-
-    if ( !no_vlc_dylib )
-    {
-        dylib_path = getenv("DYLD_FALLBACK_LIBRARY_PATH");
-        if ( dylib_path == NULL ||
-             strstr( dylib_path, "/Applications/VLC.app/Contents/MacOS/lib" ) == NULL )
-        {
-            char *path = NULL;
-            char *home;
-            int result = -1;
-
-            home = getenv("HOME");
-
-            if ( dylib_path == NULL )
-            {
-                // Set the system default of $HOME/lib:/usr/local/lib:/usr/lib
-                // And add our extra path
-                if ( home != NULL )
-                {
-                    path = hb_strdup_printf("%s/lib:%s:%s:%s%s", home, 
-                                      DEFAULT_DYLD_PATH, 
-                                      EXTRA_VLC_DYLD_PATH, 
-                                      home, EXTRA_VLC_DYLD_PATH);
-                }
-                else
-                {
-                    path = hb_strdup_printf("%s:%s", DEFAULT_DYLD_PATH, EXTRA_VLC_DYLD_PATH);
-                }
-                if ( path != NULL )
-                    result = setenv("DYLD_FALLBACK_LIBRARY_PATH", path, 1);
-            }
-            else
-            {
-                // add our extra path
-                if ( home != NULL )
-                {
-                    path = hb_strdup_printf("%s:%s:%s%s", dylib_path, EXTRA_VLC_DYLD_PATH,
-                                                        home, EXTRA_VLC_DYLD_PATH);
-                }
-                else
-                {
-                    path = hb_strdup_printf("%s:%s", dylib_path, EXTRA_VLC_DYLD_PATH);
-                }
-                if ( path != NULL )
-                    result = setenv("DYLD_FALLBACK_LIBRARY_PATH", path, 1);
-            }
-            if ( result == 0 )
-            {
-                const char ** new_argv;
-                int i;
-
-                new_argv = (const char**)malloc( (argc + 2) * sizeof(char*) );
-                new_argv[0] = argv[0];
-                new_argv[1] = "--no-vlc-dylib-path";
-                for (i = 1; i < argc; i++)
-                    new_argv[i+1] = argv[i];
-                new_argv[i+1] = NULL;
-                execv(new_argv[0], (char* const*)new_argv);
-            }
-        }
-    }
-#endif
-
     if( update )
     {
         return 0;
@@ -4230,7 +4171,6 @@ static int CheckOptions( int argc, char ** argv )
                      "choices are mp4, m4v and mkv\n.", format );
             return 1;
         }
-        default_acodec = hb_get_default_audio_encoder(mux);
     }
 
     return 0;
