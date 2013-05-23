@@ -11,8 +11,8 @@ Signed-off-by: Rogério Brito <rbrito@ime.usp.br>
 +#if 0
  /* muxmp4.c
  
-    Copyright (c) 2003-2012 HandBrake Team
-@@ -1399,3 +1400,4 @@
+    Copyright (c) 2003-2013 HandBrake Team
+@@ -1413,3 +1414,4 @@
      return m;
  }
  

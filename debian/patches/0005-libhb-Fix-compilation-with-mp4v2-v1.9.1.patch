@@ -36,7 +36,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
  }
 --- a/libhb/muxmp4.c
 +++ b/libhb/muxmp4.c
-@@ -96,13 +96,13 @@
+@@ -100,13 +100,13 @@
      if (job->largeFileSize)
      /* Use 64-bit MP4 file */
      {
@@ -52,7 +52,7 @@ Signed-off-by: Rogério Theodoro de Brito <rbrito@ime.usp.br>
      }
  
      if (m->file == MP4_INVALID_FILE_HANDLE)
-@@ -1373,14 +1373,14 @@
+@@ -1387,14 +1387,14 @@
              MP4TagsFree( tags );
          }
  

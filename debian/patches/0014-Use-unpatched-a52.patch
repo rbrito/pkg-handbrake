@@ -6,7 +6,7 @@ In upstream liba52, the state field is private.
 Forwarded: no
 --- a/libhb/deca52.c
 +++ b/libhb/deca52.c
-@@ -387,12 +387,15 @@ static hb_buffer_t* Decode(hb_work_objec
+@@ -387,12 +387,15 @@
                                                   pv->channel_layout,
                                                   pv->nchannels);
          }

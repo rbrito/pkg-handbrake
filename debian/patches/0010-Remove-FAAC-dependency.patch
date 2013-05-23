@@ -127,7 +127,7 @@ to enter Debian.
              *high = ((nchannels + lfe_count) *
 --- a/libhb/common.h
 +++ b/libhb/common.h
-@@ -948,7 +948,6 @@
+@@ -945,7 +945,6 @@
  extern hb_work_object_t hb_decavcodeca;
  extern hb_work_object_t hb_decavcodecv;
  extern hb_work_object_t hb_declpcm;
@@ -141,7 +141,7 @@ to enter Debian.
 +#if 0
  /* encfaac.c
  
-    Copyright (c) 2003-2012 HandBrake Team
+    Copyright (c) 2003-2013 HandBrake Team
 @@ -287,3 +288,4 @@
      return HB_WORK_OK;
  }
@@ -149,7 +149,7 @@ to enter Debian.
 +#endif /* 0 */
 --- a/libhb/hb.c
 +++ b/libhb/hb.c
-@@ -480,7 +480,6 @@
+@@ -487,7 +487,6 @@
  	hb_register( &hb_decavcodeca );
  	hb_register( &hb_decavcodecv );
  	hb_register( &hb_declpcm );
@@ -157,7 +157,7 @@ to enter Debian.
  	hb_register( &hb_enclame );
  	hb_register( &hb_encvorbis );
  	hb_register( &hb_muxer );
-@@ -581,7 +580,6 @@
+@@ -588,7 +587,6 @@
  	hb_register( &hb_decavcodeca );
  	hb_register( &hb_decavcodecv );
  	hb_register( &hb_declpcm );
@@ -167,7 +167,7 @@ to enter Debian.
  	hb_register( &hb_muxer );
 --- a/libhb/internal.h
 +++ b/libhb/internal.h
-@@ -411,7 +411,6 @@
+@@ -409,7 +409,6 @@
      WORK_DECAVCODEC,
      WORK_DECAVCODECV,
      WORK_DECLPCM,
@@ -204,7 +204,7 @@ to enter Debian.
              case HB_ACODEC_CA_HAAC:
 --- a/libhb/work.c
 +++ b/libhb/work.c
-@@ -143,7 +143,6 @@
+@@ -135,7 +135,6 @@
      switch (codec)
      {
          case HB_ACODEC_AC3:     return hb_get_work(WORK_ENCAVCODEC_AUDIO);
