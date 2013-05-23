@@ -1,0 +1,6 @@
+__deps__ := BZIP
+$(eval $(call import.MODULE.defs,FREETYPE,freetype,$(__deps__)))
+$(eval $(call import.CONTRIB.defs,FREETYPE))
+
+FREETYPE.FETCH.url = http://download.handbrake.fr/handbrake/contrib/freetype-2.4.7.tar.bz2
+

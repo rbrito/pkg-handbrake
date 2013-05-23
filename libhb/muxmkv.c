@@ -1,6 +1,6 @@
 /* muxmkv.c
 
-   Copyright (c) 2003-2012 HandBrake Team
+   Copyright (c) 2003-2013 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -652,6 +652,7 @@ static int MKVEnd(hb_mux_object_t *m)
         switch (audio->config.out.codec & HB_ACODEC_MASK)
         {
             case HB_ACODEC_FFFLAC:
+            case HB_ACODEC_FFFLAC24:
                 if( audio->priv.config.extradata.bytes )
                 {
                     uint8_t *header;

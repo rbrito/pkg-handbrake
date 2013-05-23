@@ -410,7 +410,7 @@ get_dvd_device_name(GDrive *gd)
 #endif
 
 static GHashTable *volname_hash = NULL;
-#if GTK_CHECK_VERSION(2, 32, 0)
+#if GLIB_CHECK_VERSION(2, 32, 0)
 static GMutex     volname_mutex_static;
 #endif
 static GMutex     *volname_mutex;
@@ -488,7 +488,7 @@ get_dvd_volume_name(gpointer gd)
 void
 ghb_volname_cache_init(void)
 {
-#if GTK_CHECK_VERSION(2, 32, 0)
+#if GLIB_CHECK_VERSION(2, 32, 0)
     g_mutex_init(&volname_mutex_static);
     volname_mutex = &volname_mutex_static;
 #else
@@ -1563,6 +1563,11 @@ set_title_settings(GValue *settings, gint titleindex)
     hb_title_t * title = ghb_get_title_info(titleindex);
     if (title != NULL)
     {
+        gint num_chapters = hb_list_count(title->list_chapter);
+
+        ghb_settings_set_int(settings, "PtoPType", 0);
+        ghb_settings_set_int(settings, "start_point", 1);
+        ghb_settings_set_int(settings, "end_point", num_chapters);
         ghb_settings_set_int(settings, "source_width", title->width);
         ghb_settings_set_int(settings, "source_height", title->height);
         ghb_settings_set_string(settings, "source", title->path);

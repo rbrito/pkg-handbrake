@@ -1,8 +1,0 @@
-  = TODO =
-
-  * High priority:
-    + Port MP4 format muxing from libmp4v2 to libavformat.
-  * Medium priority:
-    + Support another alternative AAC encoder, e.g. vo-aacenc.
-
- -- Fabian Greffrath <fabian+debian@greffrath.com>  Mon, 12 Nov 2012 10:13:39 +0100

@@ -1,6 +1,6 @@
 /* ports.h
 
-   Copyright (c) 2003-2012 HandBrake Team
+   Copyright (c) 2003-2013 HandBrake Team
    This file is part of the HandBrake source code
    Homepage: <http://handbrake.fr/>.
    It may be used under the terms of the GNU General Public License v2.
@@ -105,10 +105,10 @@ void       hb_net_close( hb_net_t ** );
 /************************************************************************
 * OS Sleep Allow / Prevent
 ***********************************************************************/
-void     * hb_system_sleep_opaque_init();
-void       hb_system_sleep_opaque_close( void ** opaque );
-void       hb_system_sleep_allow( void * opaque );
-void       hb_system_sleep_prevent( void * opaque );
+void* hb_system_sleep_opaque_init();
+void  hb_system_sleep_opaque_close(void **opaque);
+void  hb_system_sleep_private_enable(void *opaque);
+void  hb_system_sleep_private_disable(void *opaque);
 
 #endif /* __LIBHB__ */
 

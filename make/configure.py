@@ -699,7 +699,7 @@ class RepoProbe( ShellProbe ):
         self.root      = 'svn://nowhere.com/project'
         self.branch    = 'unknown'
         self.uuid      = '00000000-0000-0000-0000-000000000000';
-        self.rev       = 0
+        self.rev       = 5474
         self.date      = '0000-00-00 00:00:00 -0000'
         self.official  = 0
         self.type      = 'unofficial'
@@ -766,7 +766,7 @@ class Project( Action ):
 
         self.vmajor = 0
         self.vminor = 9
-        self.vpoint = 6
+        self.vpoint = 9
 
     def _action( self ):
         ## add architecture to URL only for Mac
