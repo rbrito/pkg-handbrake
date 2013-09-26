@@ -1,6 +1,6 @@
-handbrake (0.9.9+dfsg-1~1.gbpf623f4) UNRELEASED; urgency=low
+handbrake (0.9.9+dfsg-1~2.gbpa4c3e9) UNRELEASED; urgency=low
 
-  ** SNAPSHOT build @f623f43a2cc24eb42a58effcd9f093a9e740efa7 **
+  ** SNAPSHOT build @a4c3e9848f6d67c89e3775f1f40d2704a425c54e **
 
   * Remove gitignore to avoid conflicts with merges from upstream.
   * Imported Upstream version 0.9.9
@@ -13,6 +13,8 @@ handbrake (0.9.9+dfsg-1~1.gbpf623f4) UNRELEASED; urgency=low
   * debian/control:
     + Change (build-)deps to gstreamer 1.x.
     + Add recommends on gstreamer1.0-{pulseaudio,alsa}.
+    + Add authorship to patch 'use older libmkv'.
+    + Remove many patches unreferenced in the series file.
 
  -- Rogério Brito <rbrito@ime.usp.br>  Thu, 26 Sep 2013 10:08:14 -0300
 
