@@ -47,7 +47,6 @@ Build-Depends:
  libx264-dev,
  libxml2-dev,
  python,
- wget,
  yasm
 
 Package: handbrake
