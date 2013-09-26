@@ -1,3 +1,9 @@
+From: Rogério Brito <rbrito@ime.usp.br>
+Date: Tue Jul 31 19:07:14 2012 -0300
+Subject: debian/patches: Use unpatched libmkv for the moment.
+
+This should be dropped after we have a libmkv that has the patches from
+`contrib/libmkv` applied.
 --- a/libhb/muxmkv.c
 +++ b/libhb/muxmkv.c
 @@ -293,8 +293,7 @@
