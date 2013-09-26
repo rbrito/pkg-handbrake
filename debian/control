@@ -29,8 +29,8 @@ Build-Depends:
  libdvdread-dev (>= 4.2.0+20120521),
  libfontconfig1-dev,
  libfreetype6-dev,
- libgstreamer-plugins-base0.10-dev,
- libgstreamer0.10-dev,
+ libgstreamer-plugins-base1.0-dev,
+ libgstreamer1.0-dev,
  libgtk2.0-dev,
  libgudev-1.0-dev [linux-any],
  libmkv-dev (>= 0.6.5.1),
@@ -57,8 +57,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends}
 Recommends:
- gstreamer0.10-ffmpeg,
- gstreamer0.10-x
+ gstreamer1.0-libav,
+ gstreamer1.0-x
 Conflicts:
  handbrake-gtk
 Replaces:
