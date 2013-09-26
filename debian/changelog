@@ -1,3 +1,21 @@
+handbrake (0.9.9+dfsg-1~1.gbpf623f4) UNRELEASED; urgency=low
+
+  ** SNAPSHOT build @f623f43a2cc24eb42a58effcd9f093a9e740efa7 **
+
+  * Remove gitignore to avoid conflicts with merges from upstream.
+  * Imported Upstream version 0.9.9
+  * Imported Upstream version 0.9.9+dfsg
+  * debian/patches: Refresh all patches.
+  * debian/control:
+    + Fix order of build-depends.
+    + Remove build-dep on wget.
+  * debian/patches: Add patch to prepare compilation with gstreamer 1.x.
+  * debian/control:
+    + Change (build-)deps to gstreamer 1.x.
+    + Add recommends on gstreamer1.0-{pulseaudio,alsa}.
+
+ -- Rogério Brito <rbrito@ime.usp.br>  Thu, 26 Sep 2013 10:08:14 -0300
+
 handbrake (0.9.8+dfsg2+git0b44ec-2) experimental; urgency=low
   
   The changelog entry for -1 was incomplete and has been merged into -2.
