@@ -58,6 +58,7 @@ Depends:
  ${shlibs:Depends}
 Recommends:
  gstreamer1.0-libav,
+ gstreamer1.0-pulseaudio | gstreamer1.0-alsa,
  gstreamer1.0-x
 Conflicts:
  handbrake-gtk
