@@ -8,3 +8,4 @@
 #0015-use-metadata-reading-from-libav.patch
 0016-use-older-libmkv.patch
 0017-fixup-libmkv.patch
+0018-Fix-compilation-with-gstreamer-1.patch
