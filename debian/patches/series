@@ -1,7 +1,6 @@
 0003-Remove-embedded-downloaded-copies-of-various-librari.patch
 0004-Enable-compilation-on-Debian-arches-other-than-Linux.patch
 0005-libhb-Fix-compilation-with-mp4v2-v1.9.1.patch
-#0009-Remove-forcing-PGS-subtitles-to-be-included.patch
 0010-Remove-FAAC-dependency.patch
 0011-First-try-at-removing-some-of-mp4v2.patch
 0014-Use-unpatched-a52.patch
